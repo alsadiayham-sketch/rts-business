@@ -138,14 +138,39 @@ function logActivity(type, description, details) {
 // ============ INIT ============
 function initApp() {
     setupNetworkListeners();
-    subscribeProducts();
+    setupEventListeners();
+    // Load first batch of products fast, then subscribe to rest
+    loadProductsBatch();
     subscribeBills();
     subscribeDamage();
-    setupEventListeners();
 }
 
 // ============ FIREBASE SUBSCRIPTIONS ============
-function subscribeProducts() {
+var productsLoaded = false;
+
+function loadProductsBatch() {
+    // Load first 20 products immediately for fast display
+    db.collection('products').limit(20).get().then(function (snapshot) {
+        products = [];
+        snapshot.forEach(function (doc) {
+            var p = doc.data();
+            p.id = doc.id;
+            products.push(p);
+        });
+        renderProducts();
+        renderInventory();
+        updateReports();
+        updateSyncStatus(true);
+        // Then subscribe to ALL products in background for real-time updates
+        subscribeAllProducts();
+    }).catch(function () {
+        updateSyncStatus(false);
+        // Fallback: subscribe directly
+        subscribeAllProducts();
+    });
+}
+
+function subscribeAllProducts() {
     db.collection('products').onSnapshot(function (snapshot) {
         products = [];
         snapshot.forEach(function (doc) {
@@ -157,6 +182,7 @@ function subscribeProducts() {
         renderInventory();
         updateReports();
         updateSyncStatus(true);
+        productsLoaded = true;
     }, function () {
         updateSyncStatus(false);
     });
@@ -631,6 +657,34 @@ function openAddStockForm() {
     document.getElementById('stockColor').innerHTML = '<option value="">اختر اللون</option>';
     document.getElementById('stockSize').innerHTML = '<option value="">اختر المقاس</option>';
     document.getElementById('stockQty').value = 1;
+    document.getElementById('stockBarcode').value = '';
+    document.getElementById('stockBarcode').focus();
+}
+
+function handleStockBarcode(e) {
+    if (e.key !== 'Enter') return;
+    var barcode = document.getElementById('stockBarcode').value.trim();
+    if (!barcode) return;
+
+    var match = products.find(function (p) { return p.id === barcode || p.id === String(barcode); });
+    if (!match) {
+        alert('لم يتم العثور على منتج برقم: ' + barcode);
+        document.getElementById('stockBarcode').value = '';
+        return;
+    }
+
+    // Auto-select the product in the dropdown
+    document.getElementById('stockProduct').value = match.id;
+    populateStockColors();
+
+    // If product has only one color, auto-select it
+    var colors = match.colors || [];
+    if (colors.length === 1) {
+        document.getElementById('stockColor').value = colors[0].name;
+        populateStockSizes();
+    }
+
+    document.getElementById('stockBarcode').value = '';
 }
 
 function populateStockColors() {
@@ -1012,6 +1066,7 @@ function setupEventListeners() {
     document.getElementById('cancelStockBtn').addEventListener('click', function () {
         document.getElementById('addStockForm').style.display = 'none';
     });
+    document.getElementById('stockBarcode').addEventListener('keydown', handleStockBarcode);
     document.getElementById('stockProduct').addEventListener('change', populateStockColors);
     document.getElementById('stockColor').addEventListener('change', populateStockSizes);
     document.getElementById('saveStockBtn').addEventListener('click', saveAddStock);

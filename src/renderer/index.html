@@ -169,6 +169,10 @@
                 <div class="damage-form" id="addStockForm" style="display:none;">
                     <h3 style="margin-bottom:12px;color:var(--primary);">إضافة كمية للمخزون</h3>
                     <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label>مسح الباركود (رقم المنتج)</label>
+                            <input type="text" id="stockBarcode" placeholder="امسح الباركود أو أدخل رقم المنتج..." autofocus>
+                        </div>
                         <div class="form-group">
                             <label>المنتج</label>
                             <select id="stockProduct"></select>
@@ -368,18 +372,7 @@
         </div>
     </div>
 
-    <script>
-    // Defer heavy module loading to next tick so the loading screen renders first
-    setTimeout(function() {
-        var s1 = document.createElement('script');
-        s1.src = 'firebase-config.js';
-        s1.onload = function() {
-            var s2 = document.createElement('script');
-            s2.src = 'app.js';
-            document.body.appendChild(s2);
-        };
-        document.body.appendChild(s1);
-    }, 0);
-    </script>
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
