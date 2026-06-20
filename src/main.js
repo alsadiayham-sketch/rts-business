@@ -15,23 +15,17 @@ function createWindow() {
     minHeight: 700,
     title: 'Aqqad POS',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
-    show: false, // Don't show until ready (faster perceived load)
+    show: true,
     backgroundColor: '#1a1a2e',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      devTools: false // Security: disable devtools in production
+      devTools: false
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.setMenuBarVisibility(false);
-
-  // Show window once DOM is ready (faster perceived startup)
-  mainWindow.once('ready-to-show', function () {
-    mainWindow.show();
-    mainWindow.focus();
-  });
 }
 
 app.whenReady().then(createWindow);

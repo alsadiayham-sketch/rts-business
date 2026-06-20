@@ -20,18 +20,16 @@
   "build": {
     "appId": "com.aqqad.pos",
     "productName": "Aqqad POS",
+    "icon": "src/assets/icon.png",
     "directories": {
       "output": "dist"
     },
     "win": {
-      "target": "nsis",
-      "icon": "src/assets/icon.ico"
+      "target": "portable",
+      "icon": "src/assets/icon.png"
     },
-    "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false,
-      "installerIcon": "src/assets/icon.ico",
-      "uninstallerIcon": "src/assets/icon.ico"
+    "portable": {
+      "artifactName": "Aqqad-POS.exe"
     }
   }
 }

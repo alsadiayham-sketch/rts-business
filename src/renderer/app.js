@@ -137,6 +137,7 @@ function logActivity(type, description, details) {
 
 // ============ INIT ============
 function initApp() {
+    setupNetworkListeners();
     subscribeProducts();
     subscribeBills();
     subscribeDamage();
@@ -190,13 +191,23 @@ function subscribeDamage() {
 function updateSyncStatus(online) {
     var dot = document.querySelector('.sync-dot');
     var label = document.querySelector('.sync-status span:last-child');
+    var banner = document.getElementById('offlineBanner');
     if (online) {
         dot.classList.add('online');
         label.textContent = 'متصل';
+        if (banner) banner.style.display = 'none';
     } else {
         dot.classList.remove('online');
         label.textContent = 'غير متصل';
+        if (banner) banner.style.display = 'flex';
     }
+}
+
+// Network detection
+function setupNetworkListeners() {
+    window.addEventListener('online', function () { updateSyncStatus(true); });
+    window.addEventListener('offline', function () { updateSyncStatus(false); });
+    if (!navigator.onLine) updateSyncStatus(false);
 }
 
 // ============ RENDER PRODUCTS ============
@@ -608,6 +619,90 @@ function exportInventory() {
     });
 }
 
+// ============ ADD STOCK ============
+function openAddStockForm() {
+    document.getElementById('addStockForm').style.display = 'block';
+    var select = document.getElementById('stockProduct');
+    var html = '<option value="">اختر المنتج</option>';
+    for (var i = 0; i < products.length; i++) {
+        html += '<option value="' + products[i].id + '">' + products[i].name + ' (' + products[i].id + ')</option>';
+    }
+    select.innerHTML = html;
+    document.getElementById('stockColor').innerHTML = '<option value="">اختر اللون</option>';
+    document.getElementById('stockSize').innerHTML = '<option value="">اختر المقاس</option>';
+    document.getElementById('stockQty').value = 1;
+}
+
+function populateStockColors() {
+    var productId = document.getElementById('stockProduct').value;
+    var product = products.find(function (p) { return p.id === productId; });
+    var select = document.getElementById('stockColor');
+    if (!product) { select.innerHTML = '<option value="">اختر اللون</option>'; return; }
+    var colors = product.colors || [];
+    var html = '<option value="">اختر اللون</option>';
+    for (var i = 0; i < colors.length; i++) {
+        html += '<option value="' + colors[i].name + '">' + colors[i].name + '</option>';
+    }
+    select.innerHTML = html;
+    document.getElementById('stockSize').innerHTML = '<option value="">اختر المقاس</option>';
+}
+
+function populateStockSizes() {
+    var productId = document.getElementById('stockProduct').value;
+    var color = document.getElementById('stockColor').value;
+    var product = products.find(function (p) { return p.id === productId; });
+    var select = document.getElementById('stockSize');
+    if (!product || !color) { select.innerHTML = '<option value="">اختر المقاس</option>'; return; }
+    var variants = product.variants || [];
+    var html = '<option value="">اختر المقاس</option>';
+    for (var i = 0; i < variants.length; i++) {
+        if (variants[i].color === color) {
+            html += '<option value="' + variants[i].size + '">' + variants[i].size + ' (حالي: ' + (variants[i].stock || 0) + ')</option>';
+        }
+    }
+    select.innerHTML = html;
+}
+
+function saveAddStock() {
+    var productId = document.getElementById('stockProduct').value;
+    var color = document.getElementById('stockColor').value;
+    var size = document.getElementById('stockSize').value;
+    var qty = parseInt(document.getElementById('stockQty').value) || 0;
+
+    if (!productId || !color || !size || qty <= 0) {
+        alert('يرجى ملء جميع الحقول');
+        return;
+    }
+
+    var product = products.find(function (p) { return p.id === productId; });
+    if (!product) return;
+
+    var variants = JSON.parse(JSON.stringify(product.variants || []));
+    for (var i = 0; i < variants.length; i++) {
+        if (variants[i].color === color && variants[i].size === size) {
+            variants[i].stock = (variants[i].stock || 0) + qty;
+        }
+    }
+
+    var ref = rawDb.collection('projects').doc(PROJECT_ID).collection('products').doc(productId);
+    var savBtn = document.getElementById('saveStockBtn');
+    savBtn.textContent = 'جاري الحفظ...';
+    savBtn.disabled = true;
+
+    ref.update({ variants: variants }).then(function () {
+        logActivity('stock_add', 'إضافة ' + qty + ' قطعة من ' + product.name + ' (' + color + '/' + size + ')', {
+            productId: productId, color: color, size: size, qty: qty
+        });
+        document.getElementById('addStockForm').style.display = 'none';
+        savBtn.textContent = 'إضافة';
+        savBtn.disabled = false;
+    }).catch(function (err) {
+        alert('خطأ: ' + err.message);
+        savBtn.textContent = 'إضافة';
+        savBtn.disabled = false;
+    });
+}
+
 // ============ DAMAGE ============
 function renderDamageHistory() {
     var body = document.getElementById('damageBody');
@@ -911,6 +1006,15 @@ function setupEventListeners() {
         document.getElementById('inventorySearch').addEventListener('input', renderInventory);
     }
     document.getElementById('exportInventoryBtn').addEventListener('click', exportInventory);
+
+    // Add Stock
+    document.getElementById('addStockBtn').addEventListener('click', openAddStockForm);
+    document.getElementById('cancelStockBtn').addEventListener('click', function () {
+        document.getElementById('addStockForm').style.display = 'none';
+    });
+    document.getElementById('stockProduct').addEventListener('change', populateStockColors);
+    document.getElementById('stockColor').addEventListener('change', populateStockSizes);
+    document.getElementById('saveStockBtn').addEventListener('click', saveAddStock);
 
     document.getElementById('newDamageBtn').addEventListener('click', openDamageForm);
     document.getElementById('cancelDamageBtn').addEventListener('click', function () {
