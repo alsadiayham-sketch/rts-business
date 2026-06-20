@@ -25,6 +25,20 @@
         </div>
     </div>
 
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen" style="display:none;">
+        <div class="login-box">
+            <img src="../assets/icon.png" class="login-logo" alt="Aqqad POS">
+            <h2>عقاد كيدز - نقطة البيع</h2>
+            <div class="login-form">
+                <input type="text" id="loginUsername" placeholder="اسم المستخدم" autocomplete="off">
+                <input type="password" id="loginPassword" placeholder="كلمة المرور">
+                <button class="btn-primary login-btn" id="loginBtn">دخول</button>
+                <p class="login-error" id="loginError"></p>
+            </div>
+        </div>
+    </div>
+
     <!-- Main App -->
     <div id="appContainer" class="app-container" style="display:none;">
         <!-- Sidebar -->
@@ -56,6 +70,10 @@
                 </button>
             </nav>
             <div class="sidebar-footer">
+                <div class="user-info">
+                    <span id="currentUserName">-</span>
+                    <button class="btn-logout" id="logoutBtn">خروج</button>
+                </div>
                 <div class="sync-status" id="syncStatus">
                     <span class="sync-dot online"></span>
                     <span>متصل</span>
@@ -230,6 +248,7 @@
                             <th>عدد المنتجات</th>
                             <th>الإجمالي</th>
                             <th>طريقة الدفع</th>
+                            <th>الكاشير</th>
                             <th>إجراءات</th>
                         </tr>
                     </thead>
