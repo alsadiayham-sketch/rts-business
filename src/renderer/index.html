@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aqqad POS</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- License Expired Overlay -->
+    <div id="licenseOverlay" class="license-overlay" style="display:none;">
+        <div class="license-box">
+            <div class="license-icon">⚠️</div>
+            <h2>انتهت صلاحية الترخيص</h2>
+            <p>يرجى التواصل مع الإدارة لتجديد الاشتراك</p>
+            <p class="license-date">تاريخ الانتهاء: <span id="licenseExpDate"></span></p>
+        </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="loader-box">
+            <div class="spinner"></div>
+            <p>جاري تحميل النظام...</p>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="appContainer" class="app-container" style="display:none;">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <h1>عقاد كيدز</h1>
+                <span class="brand-sub">نقطة البيع</span>
+            </div>
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-page="sales">
+                    <span class="nav-icon">🛒</span>
+                    <span class="nav-label">المبيعات</span>
+                </button>
+                <button class="nav-btn" data-page="inventory">
+                    <span class="nav-icon">📦</span>
+                    <span class="nav-label">المخزون</span>
+                </button>
+                <button class="nav-btn" data-page="damage">
+                    <span class="nav-icon">🗑️</span>
+                    <span class="nav-label">الإتلاف</span>
+                </button>
+                <button class="nav-btn" data-page="bills">
+                    <span class="nav-icon">🧾</span>
+                    <span class="nav-label">الفواتير</span>
+                </button>
+                <button class="nav-btn" data-page="reports">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">التقارير</span>
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="sync-status" id="syncStatus">
+                    <span class="sync-dot online"></span>
+                    <span>متصل</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- SALES PAGE -->
+            <section class="page active" id="page-sales">
+                <div class="sales-layout">
+                    <!-- Products Panel -->
+                    <div class="products-panel">
+                        <div class="panel-header">
+                            <h2>المنتجات</h2>
+                            <div class="search-box">
+                                <input type="text" id="productSearch" placeholder="بحث بالاسم أو مسح الباركود..." autofocus>
+                            </div>
+                            <div class="filter-row">
+                                <select id="categoryFilter">
+                                    <option value="">كل الأصناف</option>
+                                    <option value="ملابس">ملابس</option>
+                                    <option value="أحذية">أحذية</option>
+                                    <option value="إكسسوارات">إكسسوارات</option>
+                                    <option value="كريمات وعطور">كريمات وعطور</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="products-grid" id="productsGrid">
+                            <!-- Products loaded dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Cart Panel -->
+                    <div class="cart-panel">
+                        <div class="cart-header">
+                            <h2>الفاتورة</h2>
+                            <button class="btn-clear" id="clearCartBtn">مسح الكل</button>
+                        </div>
+                        <div class="cart-items" id="cartItems">
+                            <div class="cart-empty">
+                                <span>🛒</span>
+                                <p>السلة فارغة</p>
+                            </div>
+                        </div>
+                        <div class="cart-summary">
+                            <div class="summary-row">
+                                <span>المجموع الفرعي</span>
+                                <span id="subtotal">₪0</span>
+                            </div>
+                            <div class="summary-row">
+                                <span>الخصم</span>
+                                <div class="discount-input">
+                                    <input type="number" id="discountInput" value="0" min="0">
+                                    <select id="discountType">
+                                        <option value="percent">%</option>
+                                        <option value="fixed">₪</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="summary-row total">
+                                <span>الإجمالي</span>
+                                <span id="totalAmount">₪0</span>
+                            </div>
+                        </div>
+                        <div class="cart-actions">
+                            <div class="payment-methods">
+                                <button class="pay-btn cash active" data-method="cash">نقدي</button>
+                                <button class="pay-btn card" data-method="card">بطاقة</button>
+                            </div>
+                            <button class="btn-checkout" id="checkoutBtn" disabled>إتمام البيع</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- INVENTORY PAGE -->
+            <section class="page" id="page-inventory">
+                <div class="page-header">
+                    <h2>إدارة المخزون</h2>
+                    <div class="header-actions">
+                        <input type="text" id="inventorySearch" placeholder="بحث في المخزون...">
+                        <button class="btn-primary" id="exportInventoryBtn">تصدير CSV</button>
+                    </div>
+                </div>
+                <div class="inventory-table-wrap">
+                    <table class="data-table" id="inventoryTable">
+                        <thead>
+                            <tr>
+                                <th>الرقم</th>
+                                <th>المنتج</th>
+                                <th>اللون</th>
+                                <th>المقاس</th>
+                                <th>الكمية</th>
+                                <th>السعر</th>
+                                <th>الحالة</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- DAMAGE PAGE -->
+            <section class="page" id="page-damage">
+                <div class="page-header">
+                    <h2>الإتلاف</h2>
+                    <button class="btn-primary" id="newDamageBtn">+ تسجيل إتلاف جديد</button>
+                </div>
+                <div class="damage-form" id="damageForm" style="display:none;">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>المنتج</label>
+                            <select id="damageProduct"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>اللون</label>
+                            <select id="damageColor"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>المقاس</label>
+                            <select id="damageSize"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>الكمية</label>
+                            <input type="number" id="damageQty" min="1" value="1">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>السبب</label>
+                            <textarea id="damageReason" placeholder="سبب الإتلاف..."></textarea>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn-primary" id="saveDamageBtn">حفظ</button>
+                        <button class="btn-secondary" id="cancelDamageBtn">إلغاء</button>
+                    </div>
+                </div>
+                <div class="damage-history">
+                    <h3>سجل الإتلاف</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>المنتج</th>
+                                <th>اللون</th>
+                                <th>المقاس</th>
+                                <th>الكمية</th>
+                                <th>السبب</th>
+                            </tr>
+                        </thead>
+                        <tbody id="damageBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- BILLS PAGE -->
+            <section class="page" id="page-bills">
+                <div class="page-header">
+                    <h2>الفواتير</h2>
+                    <div class="header-actions">
+                        <input type="date" id="billsDateFrom">
+                        <input type="date" id="billsDateTo">
+                        <button class="btn-primary" id="filterBillsBtn">بحث</button>
+                    </div>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>رقم الفاتورة</th>
+                            <th>التاريخ</th>
+                            <th>عدد المنتجات</th>
+                            <th>الإجمالي</th>
+                            <th>طريقة الدفع</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="billsBody"></tbody>
+                </table>
+            </section>
+
+            <!-- REPORTS PAGE -->
+            <section class="page" id="page-reports">
+                <div class="page-header">
+                    <h2>التقارير</h2>
+                </div>
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>مبيعات اليوم</h3>
+                        <div class="report-value" id="todaySales">₪0</div>
+                        <div class="report-sub" id="todayCount">0 فاتورة</div>
+                    </div>
+                    <div class="report-card">
+                        <h3>مبيعات الشهر</h3>
+                        <div class="report-value" id="monthSales">₪0</div>
+                        <div class="report-sub" id="monthCount">0 فاتورة</div>
+                    </div>
+                    <div class="report-card">
+                        <h3>إجمالي المنتجات</h3>
+                        <div class="report-value" id="totalProducts">0</div>
+                        <div class="report-sub" id="totalStock">0 قطعة في المخزون</div>
+                    </div>
+                    <div class="report-card">
+                        <h3>إتلاف الشهر</h3>
+                        <div class="report-value" id="monthDamage">0</div>
+                        <div class="report-sub" id="monthDamageValue">₪0 قيمة</div>
+                    </div>
+                </div>
+                <div class="reports-detail">
+                    <h3>أكثر المنتجات مبيعاً</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>المنتج</th>
+                                <th>الكمية المباعة</th>
+                                <th>الإيرادات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topProductsBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Variant Selection Modal -->
+    <div class="modal-overlay" id="variantModal" style="display:none;">
+        <div class="modal-content variant-modal">
+            <div class="modal-header">
+                <h3 id="variantModalTitle">اختر اللون والمقاس</h3>
+                <button class="modal-close" id="closeVariantModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="variant-colors" id="variantColors"></div>
+                <div class="variant-sizes" id="variantSizes"></div>
+                <div class="variant-qty">
+                    <label>الكمية:</label>
+                    <div class="qty-control">
+                        <button class="qty-btn" id="varQtyMinus">-</button>
+                        <input type="number" id="varQtyInput" value="1" min="1">
+                        <button class="qty-btn" id="varQtyPlus">+</button>
+                    </div>
+                    <span class="stock-info" id="varStockInfo"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="addToCartFromModal">إضافة للفاتورة</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Receipt Modal -->
+    <div class="modal-overlay" id="receiptModal" style="display:none;">
+        <div class="modal-content receipt-modal">
+            <div class="receipt" id="receiptContent"></div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="printReceiptBtn">طباعة</button>
+                <button class="btn-secondary" id="closeReceiptBtn">إغلاق</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
