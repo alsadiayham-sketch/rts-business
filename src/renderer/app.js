@@ -194,12 +194,12 @@ function subscribeAllProducts() {
 }
 
 function subscribeBills() {
-    db.collection('orders').where('source', '==', 'pos').orderBy('createdAt', 'desc').limit(200).onSnapshot(function (snapshot) {
+    db.collection('orders').orderBy('createdAt', 'desc').limit(200).onSnapshot(function (snapshot) {
         bills = [];
         snapshot.forEach(function (doc) {
             var b = doc.data();
             b.id = doc.id;
-            bills.push(b);
+            if (b.source === 'pos') bills.push(b);
         });
         renderBills();
         updateReports();
