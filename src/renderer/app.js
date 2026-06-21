@@ -121,6 +121,11 @@ function logout() {
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('loginPassword').value = '';
+    document.getElementById('loginUsername').value = '';
+    var loginBtn = document.getElementById('loginBtn');
+    loginBtn.textContent = 'دخول';
+    loginBtn.disabled = false;
+    document.getElementById('loginError').textContent = '';
 }
 
 // ============ ACTIVITY LOGS ============
@@ -189,7 +194,7 @@ function subscribeAllProducts() {
 }
 
 function subscribeBills() {
-    db.collection('pos_bills').orderBy('createdAt', 'desc').limit(200).onSnapshot(function (snapshot) {
+    db.collection('orders').where('source', '==', 'pos').orderBy('createdAt', 'desc').limit(200).onSnapshot(function (snapshot) {
         bills = [];
         snapshot.forEach(function (doc) {
             var b = doc.data();
@@ -489,15 +494,20 @@ function checkout() {
 
     var billData = {
         billNumber: billNumber,
+        orderNumber: billNumber,
         items: items,
         subtotal: subtotal,
         discount: discount,
         discountType: discountType,
         discountValue: discountVal,
         total: total,
+        totalBase: total,
         paymentMethod: selectedPayment,
         cashier: currentUser ? (currentUser.displayName || currentUser.username) : 'unknown',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        source: 'pos',
+        status: 'completed',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdAtIso: new Date().toISOString()
     };
 
     var checkoutBtn = document.getElementById('checkoutBtn');
@@ -506,7 +516,7 @@ function checkout() {
 
     // Atomic batch: save bill + deduct stock together
     var batch = rawDb.batch();
-    var billRef = rawDb.collection('projects').doc(PROJECT_ID).collection('pos_bills').doc(billNumber);
+    var billRef = rawDb.collection('projects').doc(PROJECT_ID).collection('orders').doc(billNumber);
     batch.set(billRef, billData);
 
     // Deduct stock
