@@ -194,12 +194,17 @@ function subscribeAllProducts() {
 }
 
 function subscribeBills() {
-    db.collection('orders').orderBy('createdAt', 'desc').limit(200).onSnapshot(function (snapshot) {
+    db.collection('orders').limit(500).onSnapshot(function (snapshot) {
         bills = [];
         snapshot.forEach(function (doc) {
             var b = doc.data();
             b.id = doc.id;
             if (b.source === 'pos') bills.push(b);
+        });
+        bills.sort(function (a, b) {
+            var da = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0;
+            var db2 = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().getTime() : 0;
+            return db2 - da;
         });
         renderBills();
         updateReports();
