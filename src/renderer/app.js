@@ -2,7 +2,8 @@ var fbConfig = require('./firebase-config');
 var db = fbConfig.db;
 var rawDb = fbConfig.rawDb;
 var firebase = fbConfig.firebase;
-var PROJECT_ID = fbConfig.PROJECT_ID;
+var setProjectId = fbConfig.setProjectId;
+var getProjectId = fbConfig.getProjectId;
 var electron = require('electron');
 var ipcRenderer = electron.ipcRenderer;
 var fs = require('fs');
@@ -24,6 +25,11 @@ var varModalSize = null;
 
 // ============ SECURITY: LICENSE CHECK ============
 function checkLicense() {
+    var storeId = getProjectId();
+    if (!storeId) {
+        showLogin();
+        return Promise.resolve();
+    }
     return db.collection('settings').doc('pos').get({ source: 'server' }).then(function (doc) {
         if (!doc.exists) {
             showLicenseExpired(new Date());
@@ -60,15 +66,20 @@ function showLicenseExpired(date) {
 function showLogin() {
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
+    // Auto-fill store name from last session
+    var savedStore = '';
+    try { savedStore = localStorage.getItem('ada_pos_store') || ''; } catch (e) {}
+    document.getElementById('loginStoreName').value = savedStore;
 }
 
 function attemptLogin() {
+    var storeName = document.getElementById('loginStoreName').value.trim().toLowerCase();
     var username = document.getElementById('loginUsername').value.trim();
     var password = document.getElementById('loginPassword').value;
     var errorEl = document.getElementById('loginError');
 
-    if (!username || !password) {
-        errorEl.textContent = 'يرجى إدخال اسم المستخدم وكلمة المرور';
+    if (!storeName || !username || !password) {
+        errorEl.textContent = 'يرجى إدخال اسم المتجر واسم المستخدم وكلمة المرور';
         return;
     }
 
@@ -77,7 +88,36 @@ function attemptLogin() {
     loginBtn.textContent = 'جاري الدخول...';
     loginBtn.disabled = true;
 
-    db.collection('settings').doc('pos_users').get().then(function (doc) {
+    // Set project ID dynamically
+    setProjectId(storeName);
+
+    // First verify store exists and license is valid
+    db.collection('settings').doc('pos').get({ source: 'server' }).then(function (doc) {
+        if (!doc.exists) {
+            errorEl.textContent = 'المتجر غير موجود أو لم يتم إعداد نقطة البيع';
+            loginBtn.textContent = 'دخول';
+            loginBtn.disabled = false;
+            return;
+        }
+        var data = doc.data();
+        if (data.warrantyEnd) {
+            var endDate = data.warrantyEnd.toDate ? data.warrantyEnd.toDate() : new Date(data.warrantyEnd);
+            if (endDate < new Date()) {
+                showLicenseExpired(endDate);
+                loginBtn.textContent = 'دخول';
+                loginBtn.disabled = false;
+                return;
+            }
+        }
+        licenseValid = true;
+        db.collection('settings').doc('pos').update({
+            lastChecked: firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(function () {});
+
+        // Now authenticate user
+        return db.collection('settings').doc('pos_users').get();
+    }).then(function (doc) {
+        if (!doc) return; // license expired path
         if (!doc.exists) {
             errorEl.textContent = 'لم يتم إعداد المستخدمين بعد';
             loginBtn.textContent = 'دخول';
@@ -100,10 +140,13 @@ function attemptLogin() {
             return;
         }
         currentUser = found;
+        // Save store name for next time
+        try { localStorage.setItem('ada_pos_store', storeName); } catch (e) {}
         logActivity('login', found.displayName + ' قام بتسجيل الدخول');
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appContainer').style.display = 'flex';
         document.getElementById('currentUserName').textContent = found.displayName || found.username;
+        document.getElementById('sidebarStoreName').textContent = storeName;
         initApp();
     }).catch(function (err) {
         errorEl.textContent = 'خطأ في الاتصال: ' + err.message;
@@ -122,6 +165,10 @@ function logout() {
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('loginPassword').value = '';
     document.getElementById('loginUsername').value = '';
+    // Keep store name filled from localStorage
+    var savedStore = '';
+    try { savedStore = localStorage.getItem('ada_pos_store') || ''; } catch (e) {}
+    document.getElementById('loginStoreName').value = savedStore;
     var loginBtn = document.getElementById('loginBtn');
     loginBtn.textContent = 'دخول';
     loginBtn.disabled = false;
@@ -523,7 +570,7 @@ function checkout() {
 
     // Atomic batch: save bill + deduct stock together
     var batch = rawDb.batch();
-    var billRef = rawDb.collection('projects').doc(PROJECT_ID).collection('orders').doc(billNumber);
+    var billRef = rawDb.collection('projects').doc(getProjectId()).collection('orders').doc(billNumber);
     batch.set(billRef, billData);
 
     // Deduct stock
@@ -534,7 +581,7 @@ function checkout() {
             var prod = products.find(function (p) { return p.id === cartItem.productId; });
             if (prod) {
                 productUpdates[cartItem.productId] = {
-                    ref: rawDb.collection('projects').doc(PROJECT_ID).collection('products').doc(cartItem.productId),
+                    ref: rawDb.collection('projects').doc(getProjectId()).collection('products').doc(cartItem.productId),
                     variants: JSON.parse(JSON.stringify(prod.variants || []))
                 };
             }
@@ -755,7 +802,7 @@ function saveAddStock() {
         }
     }
 
-    var ref = rawDb.collection('projects').doc(PROJECT_ID).collection('products').doc(productId);
+    var ref = rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId);
     var savBtn = document.getElementById('saveStockBtn');
     savBtn.textContent = 'جاري الحفظ...';
     savBtn.disabled = true;
@@ -858,7 +905,7 @@ function saveDamage() {
         }
     }
 
-    var ref = rawDb.collection('projects').doc(PROJECT_ID).collection('products').doc(productId);
+    var ref = rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId);
     var damageData = {
         productId: productId,
         productName: product.name,
@@ -876,7 +923,7 @@ function saveDamage() {
 
     var batch = rawDb.batch();
     batch.update(ref, { variants: variants });
-    var dmgRef = rawDb.collection('projects').doc(PROJECT_ID).collection('pos_damage').doc();
+    var dmgRef = rawDb.collection('projects').doc(getProjectId()).collection('pos_damage').doc();
     batch.set(dmgRef, damageData);
 
     batch.commit().then(function () {

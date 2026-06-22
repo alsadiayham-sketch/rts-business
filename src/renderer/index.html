@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aqqad POS</title>
+    <title>ADA POS</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -28,9 +28,10 @@
     <!-- Login Screen -->
     <div id="loginScreen" class="login-screen" style="display:none;">
         <div class="login-box">
-            <img src="../assets/icon.png" class="login-logo" alt="Aqqad POS">
-            <h2>عقاد كيدز - نقطة البيع</h2>
+            <img src="../assets/icon.png" class="login-logo" alt="ADA POS">
+            <h2>ADA POS</h2>
             <div class="login-form">
+                <input type="text" id="loginStoreName" placeholder="اسم المتجر (Store ID)" autocomplete="off">
                 <input type="text" id="loginUsername" placeholder="اسم المستخدم" autocomplete="off">
                 <input type="password" id="loginPassword" placeholder="كلمة المرور">
                 <button class="btn-primary login-btn" id="loginBtn">دخول</button>
@@ -48,8 +49,8 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <h1>عقاد كيدز</h1>
-                <span class="brand-sub">نقطة البيع</span>
+                <h1>ADA POS</h1>
+                <span class="brand-sub" id="sidebarStoreName">نقطة البيع</span>
             </div>
             <nav class="sidebar-nav">
                 <button class="nav-btn active" data-page="sales">

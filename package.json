@@ -1,14 +1,14 @@
 {
-  "name": "alaqqad-pos",
-  "version": "1.0.0",
-  "description": "Aqqad Kids Point of Sale System",
+  "name": "ada-pos",
+  "version": "2.0.0",
+  "description": "ADA Point of Sale System",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
     "pack": "electron-builder --dir"
   },
-  "author": "Aqqad",
+  "author": "ADA",
   "license": "PROPRIETARY",
   "devDependencies": {
     "electron": "^28.0.0",
@@ -18,8 +18,8 @@
     "firebase": "^9.23.0"
   },
   "build": {
-    "appId": "com.aqqad.pos",
-    "productName": "Aqqad POS",
+    "appId": "com.ada.pos",
+    "productName": "ADA POS",
     "icon": "src/assets/icon.png",
     "directories": {
       "output": "dist"
@@ -29,7 +29,7 @@
       "icon": "src/assets/icon.png"
     },
     "portable": {
-      "artifactName": "Aqqad-POS.exe"
+      "artifactName": "ADA-POS.exe"
     }
   }
 }

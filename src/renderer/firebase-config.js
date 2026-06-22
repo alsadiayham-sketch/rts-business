@@ -1,4 +1,4 @@
-// Firebase config for Aqqad POS
+// Firebase config for ADA POS
 var firebaseConfig = {
     apiKey: "AIzaSyAp3mDn6c5D3GKIV7BZ2aKIsm7MxYP0vG0",
     authDomain: "dimaboutique-b4f16.firebaseapp.com",
@@ -16,7 +16,7 @@ if (!firebase.apps.length) {
 }
 
 var rawDb = firebase.firestore();
-var PROJECT_ID = 'aqqad';
+var PROJECT_ID = null;
 
 var db = {
     collection: function (name) {
@@ -24,4 +24,8 @@ var db = {
     }
 };
 
-module.exports = { db: db, rawDb: rawDb, firebase: firebase, PROJECT_ID: PROJECT_ID };
+function setProjectId(id) {
+    PROJECT_ID = id;
+}
+
+module.exports = { db: db, rawDb: rawDb, firebase: firebase, PROJECT_ID: PROJECT_ID, setProjectId: setProjectId, getProjectId: function () { return PROJECT_ID; } };
