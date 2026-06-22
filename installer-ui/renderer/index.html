@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADA POS Installer</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #1a1a2e;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(124, 58, 237, 0.16), transparent 26%),
+        radial-gradient(circle at 80% 18%, rgba(6, 182, 212, 0.17), transparent 24%),
+        radial-gradient(circle at 70% 80%, rgba(124, 58, 237, 0.12), transparent 28%),
+        linear-gradient(180deg, #fdfdff 0%, #f5f7fd 45%, #eef2ff 100%);
+      user-select: none;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .background-mesh {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 999px;
+      filter: blur(10px);
+      opacity: 0.75;
+      animation: floatOrb 14s ease-in-out infinite;
+    }
+
+    .orb-one {
+      width: 210px;
+      height: 210px;
+      top: -42px;
+      left: -34px;
+      background: rgba(124, 58, 237, 0.14);
+    }
+
+    .orb-two {
+      width: 260px;
+      height: 260px;
+      right: -88px;
+      top: 18px;
+      background: rgba(6, 182, 212, 0.16);
+      animation-delay: -4s;
+    }
+
+    .orb-three {
+      width: 220px;
+      height: 220px;
+      bottom: -95px;
+      left: 38%;
+      background: rgba(99, 102, 241, 0.13);
+      animation-delay: -7s;
+    }
+
+    .particle {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.85);
+      box-shadow: 0 0 12px rgba(124, 58, 237, 0.24);
+      animation: drift 18s linear infinite;
+    }
+
+    .particle:nth-child(4) {
+      top: 80px;
+      left: 70px;
+      animation-duration: 13s;
+    }
+
+    .particle:nth-child(5) {
+      top: 130px;
+      left: 480px;
+      width: 7px;
+      height: 7px;
+      animation-duration: 15s;
+      animation-delay: -5s;
+    }
+
+    .particle:nth-child(6) {
+      top: 320px;
+      left: 105px;
+      width: 8px;
+      height: 8px;
+      animation-duration: 17s;
+      animation-delay: -9s;
+    }
+
+    .particle:nth-child(7) {
+      top: 350px;
+      left: 520px;
+      width: 12px;
+      height: 12px;
+      animation-duration: 20s;
+      animation-delay: -3s;
+    }
+
+    .particle:nth-child(8) {
+      top: 240px;
+      left: 290px;
+      width: 6px;
+      height: 6px;
+      animation-duration: 11s;
+      animation-delay: -2s;
+    }
+
+    .shell {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+    }
+
+    .window {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 28px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(14px);
+      box-shadow:
+        0 24px 70px rgba(15, 23, 42, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+      overflow: hidden;
+    }
+
+    .window:before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(135deg, rgba(124, 58, 237, 0.03), transparent 40%),
+        linear-gradient(315deg, rgba(6, 182, 212, 0.04), transparent 44%);
+      pointer-events: none;
+    }
+
+    .titlebar {
+      position: relative;
+      z-index: 2;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px 0 18px;
+      -webkit-app-region: drag;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(248, 250, 252, 0.55));
+      border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+    }
+
+    .title-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 8px 20px rgba(124, 58, 237, 0.14);
+      background: #ffffff;
+    }
+
+    .title-icon img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .title-copy {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+    }
+
+    .title-app {
+      font-size: 13px;
+      font-weight: 700;
+      color: #111827;
+      letter-spacing: 0.02em;
+    }
+
+    .title-sub {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .window-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .close-btn {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 12px;
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .close-btn:hover {
+      transform: translateY(-1px);
+      background: rgba(239, 68, 68, 0.16);
+      box-shadow: 0 8px 20px rgba(239, 68, 68, 0.18);
+    }
+
+    .content {
+      position: relative;
+      z-index: 2;
+      height: calc(100% - 52px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 22px 28px 24px;
+    }
+
+    .content::-webkit-scrollbar {
+      width: 6px;
+    }
+    .content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .content::-webkit-scrollbar-thumb {
+      background: rgba(124, 58, 237, 0.18);
+      border-radius: 999px;
+    }
+
+    .step {
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 100%;
+      opacity: 0;
+      transform: translateX(34px) scale(0.985);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+
+    .step.active {
+      display: flex;
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .logo-badge {
+      width: 72px;
+      height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 24px;
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(6, 182, 212, 0.14));
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.9),
+        0 12px 30px rgba(124, 58, 237, 0.12);
+    }
+
+    .logo-badge img {
+      width: 56px;
+      height: 56px;
+      border-radius: 24px;
+      object-fit: cover;
+    }
+
+    .wordmark {
+      display: inline-block;
+      margin: 0;
+      font-size: 40px;
+      letter-spacing: -0.04em;
+      font-weight: 800;
+      line-height: 0.95;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      font-size: 18px;
+      color: #475569;
+      font-weight: 600;
+    }
+
+    .version-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(124, 58, 237, 0.09);
+      color: #6d28d9;
+      font-size: 13px;
+      font-weight: 700;
+      width: fit-content;
+      width: -moz-fit-content;
+      border: 1px solid rgba(124, 58, 237, 0.08);
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      border-radius: 22px;
+      padding: 20px 22px;
+      box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07);
+    }
+
+    .feature-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 14px;
+    }
+
+    .feature-list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 15px;
+      color: #334155;
+    }
+
+    .feature-check {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 10px 18px rgba(6, 182, 212, 0.18);
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .btn {
+      height: 48px;
+      padding: 0 22px;
+      border-radius: 16px;
+      border: 1px solid transparent;
+      font-size: 15px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      color: #ffffff;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      box-shadow: 0 14px 28px rgba(99, 102, 241, 0.28);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 18px 34px rgba(99, 102, 241, 0.32);
+    }
+
+    .btn-secondary {
+      color: #1f2937;
+      background: rgba(255, 255, 255, 0.92);
+      border-color: rgba(203, 213, 225, 0.9);
+      box-shadow: 0 10px 18px rgba(148, 163, 184, 0.1);
+    }
+
+    .btn-large {
+      min-width: 184px;
+      height: 52px;
+      font-size: 16px;
+    }
+
+    .link-button {
+      display: inline-block;
+      color: #6d28d9;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .link-button:hover {
+      text-decoration: underline;
+    }
+
+    .section-heading {
+      margin: 0 0 8px;
+      font-size: 28px;
+      font-weight: 800;
+      color: #111827;
+      letter-spacing: -0.03em;
+    }
+
+    .section-copy {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.6;
+      color: #64748b;
+    }
+
+    .option-stack {
+      display: grid;
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 9px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+
+    .path-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .path-input {
+      flex: 1;
+      height: 46px;
+      padding: 0 16px;
+      border-radius: 15px;
+      border: 1px solid rgba(203, 213, 225, 0.95);
+      background: rgba(248, 250, 252, 0.85);
+      color: #0f172a;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .path-input:focus {
+      border-color: rgba(124, 58, 237, 0.42);
+      box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.12);
+    }
+
+    .check-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(248, 250, 252, 0.7);
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .checkbox-row:hover {
+      transform: translateY(-1px);
+      border-color: rgba(148, 163, 184, 0.9);
+    }
+
+    .checkbox-row input {
+      width: 18px;
+      height: 18px;
+      accent-color: #7c3aed;
+      cursor: pointer;
+    }
+
+    .checkbox-row label {
+      flex: 1;
+      font-size: 14px;
+      color: #334155;
+      cursor: pointer;
+    }
+
+    .installing-layout {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .install-glow {
+      width: 72px;
+      height: 72px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(6, 182, 212, 0.16));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 18px 38px rgba(99, 102, 241, 0.16);
+    }
+
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 3px solid rgba(124, 58, 237, 0.18);
+      border-top-color: #7c3aed;
+      border-right-color: #06b6d4;
+      animation: spin 1s linear infinite;
+    }
+
+    .progress-shell {
+      margin-top: 6px;
+    }
+
+    .progress-track {
+      position: relative;
+      height: 16px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(226, 232, 240, 0.85);
+      box-shadow: inset 0 1px 2px rgba(148, 163, 184, 0.16);
+    }
+
+    .progress-fill {
+      position: relative;
+      height: 100%;
+      width: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      box-shadow: 0 12px 26px rgba(99, 102, 241, 0.25);
+      overflow: hidden;
+      transition: width 0.35s ease;
+    }
+
+    .progress-fill:after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 120px;
+      right: -140px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+      animation: shine 1.8s linear infinite;
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .status-file {
+      margin-top: 8px;
+      min-height: 24px;
+      font-size: 13px;
+      color: #64748b;
+      word-break: break-all;
+    }
+
+    .complete-layout {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .checkmark-shell {
+      width: 114px;
+      height: 114px;
+      border-radius: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(6, 182, 212, 0.14));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 18px 40px rgba(99, 102, 241, 0.16);
+    }
+
+    .checkmark-circle {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #7c3aed, #06b6d4);
+      box-shadow: 0 16px 30px rgba(6, 182, 212, 0.22);
+      animation: popIn 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+
+    .checkmark-circle:before {
+      content: "";
+      position: absolute;
+      left: 20px;
+      top: 36px;
+      width: 11px;
+      height: 22px;
+      border-right: 4px solid #ffffff;
+      border-bottom: 4px solid #ffffff;
+      transform: rotate(45deg) scale(0);
+      transform-origin: center;
+      animation: drawCheck 0.45s ease forwards;
+      animation-delay: 0.35s;
+    }
+
+    .complete-title {
+      margin: 2px 0 0;
+      font-size: 28px;
+      font-weight: 800;
+      color: #0f172a;
+      letter-spacing: -0.03em;
+    }
+
+    .complete-copy {
+      margin: 0;
+      max-width: 400px;
+      font-size: 15px;
+      color: #64748b;
+      line-height: 1.65;
+    }
+
+    .error-banner {
+      display: none;
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(248, 113, 113, 0.2);
+      background: rgba(254, 242, 242, 0.95);
+      color: #b91c1c;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .error-banner.visible {
+      display: block;
+    }
+
+    @keyframes floatOrb {
+      0%,
+      100% {
+        transform: translate3d(0, 0, 0) scale(1);
+      }
+      50% {
+        transform: translate3d(18px, 12px, 0) scale(1.05);
+      }
+    }
+
+    @keyframes drift {
+      0% {
+        transform: translate3d(0, 0, 0) scale(1);
+        opacity: 0.18;
+      }
+      30% {
+        opacity: 0.52;
+      }
+      70% {
+        opacity: 0.34;
+      }
+      100% {
+        transform: translate3d(20px, -38px, 0) scale(1.22);
+        opacity: 0.06;
+      }
+    }
+
+    @keyframes spin {
+      from {
+        transform: rotate(0deg);
+      }
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes shine {
+      from {
+        transform: translateX(0);
+      }
+      to {
+        transform: translateX(260px);
+      }
+    }
+
+    @keyframes popIn {
+      from {
+        opacity: 0;
+        transform: scale(0.72);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @keyframes drawCheck {
+      from {
+        transform: rotate(45deg) scale(0);
+        opacity: 0;
+      }
+      to {
+        transform: rotate(45deg) scale(1);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="background-mesh">
+    <div class="orb orb-one"></div>
+    <div class="orb orb-two"></div>
+    <div class="orb orb-three"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+    <div class="particle"></div>
+  </div>
+
+  <div class="shell">
+    <div class="window">
+      <div class="titlebar">
+        <div class="title-left">
+          <div class="title-icon">
+            <img src="icon.png" alt="ADA POS">
+          </div>
+          <div class="title-copy">
+            <span class="title-app">ADA POS Installer</span>
+            <span class="title-sub">Premium setup experience</span>
+          </div>
+        </div>
+        <div class="window-controls">
+          <button class="close-btn" id="closeButton" type="button" aria-label="Close">&times;</button>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="step active" id="stepWelcome">
+          <div class="hero">
+            <div class="logo-badge">
+              <img src="icon.png" alt="ADA POS icon">
+            </div>
+
+            <div>
+              <h1 class="wordmark">ADA POS</h1>
+              <p class="subtitle">Point of Sale System</p>
+            </div>
+
+            <div class="version-pill">Version 2.1.0</div>
+
+            <div class="card">
+              <ul class="feature-list">
+                <li><span class="feature-check">&#10003;</span><span>Fast checkout flow built for modern retail teams</span></li>
+                <li><span class="feature-check">&#10003;</span><span>Inventory, receipts, and reporting in one streamlined desktop app</span></li>
+                <li><span class="feature-check">&#10003;</span><span>Offline-friendly experience with premium ADA branding</span></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="actions">
+            <div class="button-row">
+              <button class="btn btn-primary btn-large" id="quickInstallButton" type="button">Install</button>
+            </div>
+            <a class="link-button" id="customInstallLink">Custom Install</a>
+          </div>
+        </div>
+
+        <div class="step" id="stepOptions">
+          <div class="hero">
+            <div>
+              <h2 class="section-heading">Customize your installation</h2>
+              <p class="section-copy">Choose where ADA POS should be installed and which shortcuts you want us to create for the fastest launch experience.</p>
+            </div>
+
+            <div class="card option-stack">
+              <div>
+                <label class="field-label" for="installPath">Install location</label>
+                <div class="path-row">
+                  <input class="path-input" id="installPath" type="text" autocomplete="off">
+                  <button class="btn btn-secondary" id="browseButton" type="button">Browse</button>
+                </div>
+              </div>
+
+              <div class="check-grid">
+                <div class="checkbox-row">
+                  <input id="desktopShortcut" type="checkbox" checked>
+                  <label for="desktopShortcut">Create desktop shortcut</label>
+                </div>
+                <div class="checkbox-row">
+                  <input id="startMenuShortcut" type="checkbox" checked>
+                  <label for="startMenuShortcut">Create Start Menu shortcut</label>
+                </div>
+                <div class="checkbox-row">
+                  <input id="launchAfterInstall" type="checkbox" checked>
+                  <label for="launchAfterInstall">Launch ADA POS after installation</label>
+                </div>
+                <div class="checkbox-row">
+                  <input id="addToPath" type="checkbox">
+                  <label for="addToPath">Add to PATH</label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <div class="button-row">
+              <button class="btn btn-primary btn-large" id="customInstallButton" type="button">Install</button>
+              <button class="btn btn-secondary" id="backButton" type="button">Back</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="step" id="stepInstalling">
+          <div class="installing-layout">
+            <div class="install-glow">
+              <div class="spinner"></div>
+            </div>
+
+            <div>
+              <h2 class="section-heading" id="installStatusHeading">Installing...</h2>
+              <p class="section-copy" id="installStatusText">Preparing ADA POS for installation.</p>
+            </div>
+
+            <div class="card progress-shell">
+              <div class="progress-track">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+              <div class="progress-meta">
+                <span id="progressLabel">Starting installation</span>
+                <span id="progressPercent">0%</span>
+              </div>
+              <div class="status-file" id="currentFile">Waiting for installer engine...</div>
+              <div class="error-banner" id="errorBanner"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step" id="stepComplete">
+          <div class="complete-layout">
+            <div class="checkmark-shell">
+              <div class="checkmark-circle"></div>
+            </div>
+            <h2 class="complete-title">ADA POS has been installed successfully!</h2>
+            <p class="complete-copy">Everything is ready to go. Launch ADA POS now or close the installer and start whenever you are ready.</p>
+            <div class="button-row">
+              <button class="btn btn-primary btn-large" id="launchButton" type="button">Launch ADA POS</button>
+              <button class="btn btn-secondary" id="finishButton" type="button">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var ipcRenderer = require('electron').ipcRenderer;
+
+    var state = {
+      installPath: '',
+      launchAfterInstall: true,
+      installCompleted: false
+    };
+
+    var stepOrder = ['stepWelcome', 'stepOptions', 'stepInstalling', 'stepComplete'];
+    var currentStep = 'stepWelcome';
+
+    function byId(id) {
+      return document.getElementById(id);
+    }
+
+    function setStep(id) {
+      var i;
+      currentStep = id;
+      for (i = 0; i < stepOrder.length; i += 1) {
+        var step = byId(stepOrder[i]);
+        if (stepOrder[i] === id) {
+          step.className = 'step active';
+        } else {
+          step.className = 'step';
+        }
+      }
+    }
+
+    function setProgress(percent, label, fileText) {
+      var safePercent = percent;
+      if (safePercent < 0) {
+        safePercent = 0;
+      }
+      if (safePercent > 100) {
+        safePercent = 100;
+      }
+
+      byId('progressFill').style.width = safePercent + '%';
+      byId('progressPercent').innerHTML = safePercent + '%';
+      if (label) {
+        byId('progressLabel').innerHTML = label;
+      }
+      if (fileText) {
+        byId('currentFile').innerHTML = fileText;
+      }
+    }
+
+    function setStatus(title, copy) {
+      byId('installStatusHeading').innerHTML = title;
+      byId('installStatusText').innerHTML = copy;
+    }
+
+    function showError(message) {
+      var banner = byId('errorBanner');
+      banner.className = 'error-banner visible';
+      banner.innerHTML = message;
+    }
+
+    function clearError() {
+      var banner = byId('errorBanner');
+      banner.className = 'error-banner';
+      banner.innerHTML = '';
+    }
+
+    function gatherOptions() {
+      return {
+        path: byId('installPath').value,
+        desktopShortcut: byId('desktopShortcut').checked,
+        startMenuShortcut: byId('startMenuShortcut').checked,
+        launchAfterInstall: byId('launchAfterInstall').checked,
+        addToPath: byId('addToPath').checked
+      };
+    }
+
+    function beginInstall() {
+      var options = gatherOptions();
+
+      if (!options.path) {
+        showError('Please choose an installation folder before continuing.');
+        return;
+      }
+
+      state.installPath = options.path;
+      state.launchAfterInstall = options.launchAfterInstall;
+      state.installCompleted = false;
+      clearError();
+      setStep('stepInstalling');
+      setStatus('Installing...', 'Copying ADA POS and preparing the desktop experience.');
+      setProgress(0, 'Starting installation', 'Preparing installer engine...');
+
+      ipcRenderer.invoke('install', options).then(function (result) {
+        if (!result || !result.success) {
+          setStatus('Installation failed', 'We ran into an issue while setting up ADA POS.');
+          showError(result && result.error ? result.error : 'Unknown installer error.');
+          return;
+        }
+
+        state.installCompleted = true;
+        setProgress(100, 'Installation complete', 'ADA POS is ready.');
+        setTimeout(function () {
+          setStep('stepComplete');
+          if (state.launchAfterInstall) {
+            ipcRenderer.invoke('launch-app', state.installPath);
+          }
+        }, 650);
+      }).catch(function (error) {
+        setStatus('Installation failed', 'We ran into an issue while setting up ADA POS.');
+        showError(error && error.message ? error.message : String(error));
+      });
+    }
+
+    function loadDefaults() {
+      ipcRenderer.invoke('get-default-path').then(function (defaultPath) {
+        byId('installPath').value = defaultPath;
+        state.installPath = defaultPath;
+      });
+    }
+
+    function wireEvents() {
+      byId('closeButton').onclick = function () {
+        ipcRenderer.invoke('close');
+      };
+
+      byId('quickInstallButton').onclick = function () {
+        beginInstall();
+      };
+
+      byId('customInstallLink').onclick = function () {
+        clearError();
+        setStep('stepOptions');
+      };
+
+      byId('backButton').onclick = function () {
+        clearError();
+        setStep('stepWelcome');
+      };
+
+      byId('customInstallButton').onclick = function () {
+        beginInstall();
+      };
+
+      byId('browseButton').onclick = function () {
+        ipcRenderer.invoke('browse-folder').then(function (selectedPath) {
+          if (selectedPath) {
+            byId('installPath').value = selectedPath;
+          }
+        });
+      };
+
+      byId('launchButton').onclick = function () {
+        ipcRenderer.invoke('launch-app', state.installPath);
+      };
+
+      byId('finishButton').onclick = function () {
+        ipcRenderer.invoke('close');
+      };
+
+      ipcRenderer.on('install-stage', function (event, payload) {
+        var text = payload && payload.text ? payload.text : 'Installing ADA POS...';
+        var lowerText = text.toLowerCase();
+
+        if (lowerText.indexOf('shortcut') !== -1) {
+          setStatus('Creating shortcuts...', 'Finishing the desktop and Start Menu experience.');
+        } else if (lowerText.indexOf('final') !== -1) {
+          setStatus('Finalizing...', 'Wrapping up installation and getting ADA POS ready.');
+        } else if (lowerText.indexOf('register') !== -1) {
+          setStatus('Finalizing...', 'Registering ADA POS with Windows.');
+        } else {
+          setStatus('Installing...', 'Copying ADA POS and preparing the desktop experience.');
+        }
+
+        byId('progressLabel').innerHTML = text;
+      });
+
+      ipcRenderer.on('install-progress', function (event, payload) {
+        var percent = payload && typeof payload.percent === 'number' ? payload.percent : 0;
+        var fileText = payload && payload.file ? payload.file : 'Preparing files...';
+        setProgress(percent, byId('progressLabel').innerHTML, fileText);
+      });
+    }
+
+    wireEvents();
+    loadDefaults();
+  </script>
+</body>
+</html>

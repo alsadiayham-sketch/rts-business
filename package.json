@@ -1,6 +1,6 @@
 {
   "name": "ada-pos",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "description": "ADA Point of Sale System",
   "main": "src/main.js",
   "scripts": {
