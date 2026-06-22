@@ -32,7 +32,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "ADA POS",
       "installerIcon": "src/assets/icon.ico",
@@ -41,7 +41,10 @@
       "installerSidebar": "src/assets/installer-sidebar.bmp",
       "uninstallerSidebar": "src/assets/uninstaller-sidebar.bmp",
       "artifactName": "ADA-POS-Setup.exe",
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": true,
+      "displayLanguageSelector": false
     }
   }
 }

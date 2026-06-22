@@ -1,5 +1,5 @@
 !macro customHeader
-  !system "echo 'Custom ADA POS Installer'"
+  !system "echo 'ADA POS Installer'"
 !macroend
 
 !macro preInit
@@ -7,11 +7,12 @@
 !macroend
 
 !macro customInit
-  ; Custom branding colors
+  ; Set installer colors
+  SetSilent normal
 !macroend
 
 !macro customInstallMode
-  ; Force per-user install by default but allow change
+  ; Default per-user
 !macroend
 
 !macro customWelcomePage
@@ -24,4 +25,9 @@
   !define MUI_FINISHPAGE_TEXT "تم تثبيت ADA POS بنجاح على جهازك.$\r$\n$\r$\nيمكنك تشغيل البرنامج الآن من سطح المكتب أو من قائمة ابدأ."
   !define MUI_FINISHPAGE_RUN "$INSTDIR\ADA POS.exe"
   !define MUI_FINISHPAGE_RUN_TEXT "تشغيل ADA POS الآن"
+!macroend
+
+!macro customUnInstall
+  ; Open review page after uninstall
+  ExecShell "open" "https://web-designer-555.pages.dev/review/?from=uninstall"
 !macroend
