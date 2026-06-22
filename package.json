@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
+    "build-portable": "electron-builder --win --config.win.target=portable",
     "pack": "electron-builder --dir"
   },
   "author": "ADA",
@@ -25,11 +26,22 @@
       "output": "dist"
     },
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "icon": "src/assets/icon.png"
     },
-    "portable": {
-      "artifactName": "ADA-POS.exe"
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ADA POS",
+      "installerIcon": "src/assets/icon.ico",
+      "uninstallerIcon": "src/assets/icon.ico",
+      "installerHeaderIcon": "src/assets/icon.ico",
+      "installerSidebar": "src/assets/installer-sidebar.bmp",
+      "uninstallerSidebar": "src/assets/uninstaller-sidebar.bmp",
+      "artifactName": "ADA-POS-Setup.exe",
+      "include": "build/installer.nsh"
     }
   }
 }
