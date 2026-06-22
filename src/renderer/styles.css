@@ -92,6 +92,110 @@ body {
     color: var(--text-dim);
 }
 
+/* Update Overlay */
+.update-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99998;
+    backdrop-filter: blur(4px);
+}
+
+.update-box {
+    background: var(--bg-card);
+    padding: 40px 48px;
+    border-radius: 16px;
+    text-align: center;
+    border: 2px solid var(--primary);
+    max-width: 460px;
+    width: 90%;
+    box-shadow: 0 20px 60px rgba(200,168,92,0.15);
+}
+
+.update-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+    animation: spin 2s linear infinite;
+}
+@keyframes spin { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+
+.update-box h2 {
+    color: var(--primary);
+    margin-bottom: 8px;
+    font-size: 1.4rem;
+}
+
+.update-version-label {
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    font-size: 0.95rem;
+}
+
+.update-notes {
+    background: var(--bg-light);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+    text-align: right;
+}
+
+.update-notes h4 {
+    color: var(--primary);
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.update-notes p {
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 0.9rem;
+}
+
+.update-force-msg {
+    color: var(--danger);
+    font-weight: 700;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.update-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.update-actions .btn-primary {
+    padding: 12px 28px;
+    font-size: 1rem;
+}
+
+.update-actions .btn-secondary {
+    padding: 12px 28px;
+    font-size: 1rem;
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.update-actions .btn-secondary:hover {
+    border-color: var(--primary);
+    color: var(--text);
+}
+
+/* Version Info */
+.version-info {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    margin-top: 8px;
+    opacity: 0.7;
+}
+
 /* Login Screen */
 .login-screen {
     position: fixed;

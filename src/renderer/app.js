@@ -9,6 +9,9 @@ var ipcRenderer = electron.ipcRenderer;
 var fs = require('fs');
 var path = require('path');
 
+// App version from package.json
+var APP_VERSION = '2.0.0';
+
 // ============ STATE ============
 var products = [];
 var cart = [];
@@ -147,7 +150,9 @@ function attemptLogin() {
         document.getElementById('appContainer').style.display = 'flex';
         document.getElementById('currentUserName').textContent = found.displayName || found.username;
         document.getElementById('sidebarStoreName').textContent = storeName;
+        document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
         initApp();
+        checkForUpdates();
     }).catch(function (err) {
         errorEl.textContent = 'خطأ في الاتصال: ' + err.message;
         loginBtn.textContent = 'دخول';
@@ -173,6 +178,70 @@ function logout() {
     loginBtn.textContent = 'دخول';
     loginBtn.disabled = false;
     document.getElementById('loginError').textContent = '';
+}
+
+// ============ AUTO-UPDATE SYSTEM ============
+function compareVersions(v1, v2) {
+    var parts1 = v1.split('.').map(Number);
+    var parts2 = v2.split('.').map(Number);
+    for (var i = 0; i < 3; i++) {
+        var a = parts1[i] || 0;
+        var b = parts2[i] || 0;
+        if (a > b) return 1;
+        if (a < b) return -1;
+    }
+    return 0;
+}
+
+function checkForUpdates() {
+    rawDb.collection('projects').doc('_global').collection('settings').doc('pos_updates').get().then(function (doc) {
+        if (!doc.exists) return;
+        var data = doc.data();
+        var remoteVersion = data.currentVersion || '0.0.0';
+        var minVersion = data.minVersion || '0.0.0';
+        var forceUpdate = data.forceUpdate === true;
+        var downloadUrl = data.downloadUrl || '';
+        var releaseNotes = data.releaseNotes || '';
+
+        // Check if update available
+        if (compareVersions(remoteVersion, APP_VERSION) > 0) {
+            // Check if force update required
+            if (forceUpdate && compareVersions(APP_VERSION, minVersion) < 0) {
+                showForceUpdate(remoteVersion, releaseNotes, downloadUrl);
+            } else {
+                showUpdateAvailable(remoteVersion, releaseNotes, downloadUrl);
+            }
+        }
+    }).catch(function () {});
+}
+
+function showUpdateAvailable(version, notes, url) {
+    var overlay = document.getElementById('updateOverlay');
+    document.getElementById('updateVersion').textContent = version;
+    document.getElementById('updateNotes').textContent = notes;
+    document.getElementById('updateDownloadBtn').onclick = function () {
+        electron.shell.openExternal(url);
+    };
+    document.getElementById('updateDismissBtn').style.display = 'inline-block';
+    document.getElementById('updateDismissBtn').onclick = function () {
+        overlay.style.display = 'none';
+    };
+    document.getElementById('updateForceMsg').style.display = 'none';
+    overlay.style.display = 'flex';
+}
+
+function showForceUpdate(version, notes, url) {
+    var overlay = document.getElementById('updateOverlay');
+    document.getElementById('updateVersion').textContent = version;
+    document.getElementById('updateNotes').textContent = notes;
+    document.getElementById('updateDownloadBtn').onclick = function () {
+        electron.shell.openExternal(url);
+    };
+    document.getElementById('updateDismissBtn').style.display = 'none';
+    document.getElementById('updateForceMsg').style.display = 'block';
+    overlay.style.display = 'flex';
+    // Block the app
+    document.getElementById('appContainer').style.display = 'none';
 }
 
 // ============ ACTIVITY LOGS ============

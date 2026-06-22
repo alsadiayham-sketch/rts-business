@@ -17,6 +17,24 @@
         </div>
     </div>
 
+    <!-- Update Overlay -->
+    <div id="updateOverlay" class="update-overlay" style="display:none;">
+        <div class="update-box">
+            <div class="update-icon">🔄</div>
+            <h2>تحديث جديد متاح!</h2>
+            <p class="update-version-label">الإصدار <span id="updateVersion"></span></p>
+            <div class="update-notes">
+                <h4>ما الجديد:</h4>
+                <p id="updateNotes"></p>
+            </div>
+            <p id="updateForceMsg" class="update-force-msg" style="display:none;">⚠️ هذا التحديث إلزامي — يجب التحديث للمتابعة</p>
+            <div class="update-actions">
+                <button class="btn-primary" id="updateDownloadBtn">⬇ تحميل التحديث</button>
+                <button class="btn-secondary" id="updateDismissBtn">لاحقاً</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Screen -->
     <div id="loadingScreen" class="loading-screen">
         <div class="loader-box">
@@ -83,6 +101,7 @@
                     <span class="sync-dot online"></span>
                     <span>متصل</span>
                 </div>
+                <div class="version-info" id="appVersion">v2.0.0</div>
             </div>
         </aside>
 
