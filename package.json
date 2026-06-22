@@ -40,6 +40,7 @@
       "installerHeaderIcon": "src/assets/icon.ico",
       "installerSidebar": "src/assets/installer-sidebar.bmp",
       "uninstallerSidebar": "src/assets/uninstaller-sidebar.bmp",
+      "installerHeader": "src/assets/installer-header.bmp",
       "artifactName": "ADA-POS-Setup.exe",
       "include": "build/installer.nsh",
       "runAfterFinish": true,
