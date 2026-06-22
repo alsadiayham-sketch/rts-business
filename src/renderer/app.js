@@ -194,12 +194,12 @@ function subscribeAllProducts() {
 }
 
 function subscribeBills() {
-    db.collection('orders').limit(500).onSnapshot(function (snapshot) {
+    db.collection('orders').onSnapshot(function (snapshot) {
         bills = [];
         snapshot.forEach(function (doc) {
             var b = doc.data();
             b.id = doc.id;
-            if (b.source === 'pos') bills.push(b);
+            bills.push(b);
         });
         bills.sort(function (a, b) {
             var da = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate().getTime() : 0;
@@ -208,6 +208,8 @@ function subscribeBills() {
         });
         renderBills();
         updateReports();
+    }, function (err) {
+        console.error('Bills subscription error:', err);
     });
 }
 
@@ -916,24 +918,26 @@ function renderBills() {
     var html = '';
     for (var i = 0; i < filtered.length; i++) {
         var b = filtered[i];
-        var date = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().toLocaleString('ar-EG') : '';
+        var date = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate().toLocaleString('ar-EG') : (b.createdAtIso ? new Date(b.createdAtIso).toLocaleString('ar-EG') : '');
         var itemCount = (b.items || []).length;
+        var sourceLabel = b.source === 'pos' ? 'المتجر' : 'الموقع';
         html += '<tr>';
-        html += '<td>' + (b.billNumber || '') + '</td>';
+        html += '<td>' + (b.billNumber || b.orderNumber || '') + '</td>';
         html += '<td>' + date + '</td>';
+        html += '<td>' + sourceLabel + '</td>';
         html += '<td>' + itemCount + '</td>';
-        html += '<td>\u20AA' + (b.total || 0).toFixed(2) + '</td>';
-        html += '<td>' + (b.paymentMethod === 'cash' ? 'نقدي' : 'بطاقة') + '</td>';
-        html += '<td>' + (b.cashier || '-') + '</td>';
-        html += '<td><button class="btn-secondary" onclick="viewBill(\'' + b.billNumber + '\')">عرض</button></td>';
+        html += '<td>\u20AA' + (b.total || b.totalBase || 0).toFixed(2) + '</td>';
+        html += '<td>' + (b.paymentMethod === 'cash' ? 'نقدي' : b.paymentMethod === 'card' ? 'بطاقة' : (b.paymentLabel || b.paymentMethod || '-')) + '</td>';
+        html += '<td>' + (b.cashier || b.customerName || '-') + '</td>';
+        html += '<td><button class="btn-secondary" onclick="viewBill(\'' + (b.billNumber || b.orderNumber || b.id) + '\')">عرض</button></td>';
         html += '</tr>';
     }
 
-    body.innerHTML = html || '<tr><td colspan="7" style="text-align:center;padding:20px;">لا توجد فواتير</td></tr>';
+    body.innerHTML = html || '<tr><td colspan="8" style="text-align:center;padding:20px;">لا توجد فواتير</td></tr>';
 }
 
 function viewBill(billNumber) {
-    var bill = bills.find(function (b) { return b.billNumber === billNumber; });
+    var bill = bills.find(function (b) { return (b.billNumber || b.orderNumber || b.id) === billNumber; });
     if (bill) showReceipt(bill);
 }
 
