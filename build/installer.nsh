@@ -1,5 +1,5 @@
 ; ============================================================
-; ADA POS - Themed Installer
+; ADA POS - Themed Installer (Violet + Cyan)
 ; ============================================================
 
 !macro customHeader
@@ -21,16 +21,16 @@
 ; --- Welcome Page ---
 !macro customWelcomePage
   !define MUI_WELCOMEFINISHPAGE_BITMAP_NOSTRETCH
-  !define MUI_WELCOMEPAGE_TITLE "Welcome to ADA POS Setup"
+  !define MUI_WELCOMEPAGE_TITLE "Welcome to ADA POS"
   !define MUI_WELCOMEPAGE_TITLE_3LINES
-  !define MUI_WELCOMEPAGE_TEXT "This wizard will install ADA POS on your computer.$\r$\n$\r$\nADA POS is a complete Point of Sale system with:$\r$\n$\r$\n    *  Sales & Inventory Management$\r$\n    *  Invoices & Financial Reports$\r$\n    *  Real-time Cloud Sync$\r$\n    *  Multi-Store Support$\r$\n    *  Barcode Scanner Integration$\r$\n    *  Automatic Updates$\r$\n$\r$\nClick Next to continue."
+  !define MUI_WELCOMEPAGE_TEXT "This will install ADA POS — your complete Point of Sale system.$\r$\n$\r$\n$\u25CF  Sales & Inventory Management$\r$\n$\u25CF  Cloud Sync & Multi-Store$\r$\n$\u25CF  Barcode Scanner & Receipts$\r$\n$\u25CF  Financial Reports$\r$\n$\u25CF  Automatic Updates$\r$\n$\r$\nClick Next to continue."
 !macroend
 
 ; --- Finish Page ---
 !macro customFinishPage
-  !define MUI_FINISHPAGE_TITLE "Installation Complete!"
+  !define MUI_FINISHPAGE_TITLE "ADA POS Installed Successfully"
   !define MUI_FINISHPAGE_TITLE_3LINES
-  !define MUI_FINISHPAGE_TEXT "ADA POS has been successfully installed.$\r$\n$\r$\nYou can launch the application from:$\r$\n$\r$\n    *  Desktop shortcut$\r$\n    *  Start menu$\r$\n$\r$\nThank you for choosing ADA POS.$\r$\nFor support, visit web-designer-555.pages.dev"
+  !define MUI_FINISHPAGE_TEXT "ADA POS is ready to use.$\r$\n$\r$\nYou can launch it from the desktop shortcut or the Start menu.$\r$\n$\r$\nThank you for choosing ADA POS.$\r$\nVisit web-designer-555.pages.dev for support."
   !define MUI_FINISHPAGE_RUN "$INSTDIR\ADA POS.exe"
   !define MUI_FINISHPAGE_RUN_TEXT "Launch ADA POS now"
   !define MUI_FINISHPAGE_NOREBOOTSUPPORT
