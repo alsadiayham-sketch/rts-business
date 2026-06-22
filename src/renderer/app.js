@@ -203,6 +203,12 @@ function checkForUpdates() {
         var downloadUrl = data.downloadUrl || '';
         var releaseNotes = data.releaseNotes || '';
 
+        // Security: only allow HTTPS URLs from trusted domains
+        if (downloadUrl && !isAllowedUpdateUrl(downloadUrl)) {
+            console.warn('Blocked untrusted update URL');
+            return;
+        }
+
         // Check if update available
         if (compareVersions(remoteVersion, APP_VERSION) > 0) {
             // Check if force update required
@@ -213,6 +219,19 @@ function checkForUpdates() {
             }
         }
     }).catch(function () {});
+}
+
+// Security: validate update URLs against trusted domains
+function isAllowedUpdateUrl(url) {
+    var trustedDomains = [
+        'https://github.com/alsadiayham-sketch/',
+        'https://drive.google.com/',
+        'https://web-designer-555.pages.dev/'
+    ];
+    for (var i = 0; i < trustedDomains.length; i++) {
+        if (url.indexOf(trustedDomains[i]) === 0) return true;
+    }
+    return false;
 }
 
 function showUpdateAvailable(version, notes, url) {

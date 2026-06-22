@@ -1,10 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const path = require('path');
 
-// Performance: disable hardware acceleration if not needed for 2D app
-app.commandLine.appendSwitch('disable-gpu-compositing');
-app.commandLine.appendSwitch('disable-software-rasterizer');
-
 let mainWindow = null;
 
 function createWindow() {
@@ -13,19 +9,29 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Aqqad POS',
+    title: 'ADA POS',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     show: true,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#f8f9fc',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      devTools: false
+      devTools: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      navigateOnDragDrop: false
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.setMenuBarVisibility(false);
+
+  // Prevent opening DevTools via keyboard
+  mainWindow.webContents.on('before-input-event', function (event, input) {
+    if (input.key === 'F12' || (input.control && input.shift && (input.key === 'I' || input.key === 'i'))) {
+      event.preventDefault();
+    }
+  });
 }
 
 app.whenReady().then(createWindow);
