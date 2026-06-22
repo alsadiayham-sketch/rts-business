@@ -10,7 +10,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.0';
+var APP_VERSION = '2.1.0';
 
 // ============ STATE ============
 var products = [];
