@@ -126,6 +126,10 @@
                                     <option value="كريمات وعطور">كريمات وعطور</option>
                                 </select>
                             </div>
+                            <div class="code-add-row">
+                                <input type="text" id="codeAddInput" placeholder="أدخل رقم المنتج (الكود) لإضافته للفاتورة...">
+                                <button class="btn-secondary" id="codeAddBtn">+ إضافة</button>
+                            </div>
                         </div>
                         <div class="products-grid" id="productsGrid">
                             <!-- Products loaded dynamically -->
@@ -221,9 +225,8 @@
                             <tr>
                                 <th>الرقم</th>
                                 <th>المنتج</th>
-                                <th>اللون</th>
-                                <th>المقاس</th>
-                                <th>الكمية</th>
+                                <th>الخيارات</th>
+                                <th>إجمالي الكمية</th>
                                 <th>السعر</th>
                                 <th>الحالة</th>
                             </tr>
@@ -316,8 +319,15 @@
             <section class="page" id="page-reports">
                 <div class="page-header">
                     <h2>التقارير</h2>
+                    <button class="btn-primary" id="closeDayBtn" style="display:none;">🔒 إغلاق اليوم</button>
                 </div>
                 <div class="reports-grid">
+                    <div class="report-card report-shift">
+                        <h3>إجمالي الوردية (منذ آخر إغلاق)</h3>
+                        <div class="report-value" id="shiftTotal">₪0</div>
+                        <div class="report-sub" id="shiftCount">0 فاتورة</div>
+                        <div class="report-sub" id="shiftCash">نقدي ₪0 • بطاقة ₪0</div>
+                    </div>
                     <div class="report-card">
                         <h3>مبيعات اليوم</h3>
                         <div class="report-value" id="todaySales">₪0</div>
@@ -389,6 +399,21 @@
             <div class="modal-footer">
                 <button class="btn-primary" id="printReceiptBtn">طباعة</button>
                 <button class="btn-secondary" id="closeReceiptBtn">إغلاق</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Close Day Modal -->
+    <div class="modal-overlay" id="closeDayModal" style="display:none;">
+        <div class="modal-content closeday-modal">
+            <div class="modal-header">
+                <h3>🔒 إغلاق يوم العمل</h3>
+                <button class="modal-close" id="closeDayX">&times;</button>
+            </div>
+            <div class="modal-body" id="closeDaySummary"></div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="confirmCloseDayBtn">تأكيد الإغلاق وتصفير الإجمالي</button>
+                <button class="btn-secondary" id="cancelCloseDayBtn">إلغاء</button>
             </div>
         </div>
     </div>

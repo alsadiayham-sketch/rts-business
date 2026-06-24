@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '1.1.0';
+var APP_VERSION = '1.2.0';
 
 // ============ STATE ============
 var products = [];
@@ -28,6 +28,7 @@ var licenseValid = false;
 var varModalProduct = null;
 var varModalColor = null;
 var varModalSize = null;
+var currentReceiptBill = null;
 
 // ============ SECURITY: LICENSE CHECK ============
 function checkLicense() {
@@ -304,10 +305,81 @@ function logActivity(type, description, details) {
 function initApp() {
     setupNetworkListeners();
     setupEventListeners();
+    applyRoleVisibility();
     // Load first batch of products fast, then subscribe to rest
     loadProductsBatch();
     subscribeBills();
     subscribeDamage();
+}
+
+// ============ ROLE-BASED VISIBILITY ============
+function isAdmin() {
+    return !!(currentUser && currentUser.role === 'admin');
+}
+function applyRoleVisibility() {
+    var btn = document.getElementById('closeDayBtn');
+    if (btn) btn.style.display = isAdmin() ? 'inline-flex' : 'none';
+}
+
+// ============ WORK DAY / SHIFT (per terminal) ============
+function dayStartKey() { return 'ada_pos_day_start_' + (getProjectId() || ''); }
+function getDayStart() {
+    var v = null;
+    try { v = localStorage.getItem(dayStartKey()); } catch (e) {}
+    if (v) return parseInt(v, 10);
+    var d = new Date(); d.setHours(0, 0, 0, 0);
+    var ms = d.getTime();
+    try { localStorage.setItem(dayStartKey(), String(ms)); } catch (e) {}
+    return ms;
+}
+function setDayStart(ms) { try { localStorage.setItem(dayStartKey(), String(ms)); } catch (e) {} }
+
+function billTimeMs(b) {
+    if (b.createdAt && b.createdAt.toDate) return b.createdAt.toDate().getTime();
+    if (b.createdAtIso) return new Date(b.createdAtIso).getTime();
+    return 0;
+}
+
+// POS (register) sales since the last day-close on this terminal.
+function computeShiftSummary() {
+    var start = getDayStart();
+    var cash = 0, card = 0, count = 0;
+    for (var i = 0; i < bills.length; i++) {
+        var b = bills[i];
+        if (b.source !== 'pos') continue;
+        if (billTimeMs(b) < start) continue;
+        var t = b.total || 0;
+        if (b.paymentMethod === 'card') card += t; else cash += t;
+        count++;
+    }
+    return { cash: cash, card: card, total: cash + card, count: count, since: start };
+}
+
+function openCloseDayModal() {
+    if (!isAdmin()) { alert('هذه الميزة متاحة للمدير فقط'); return; }
+    var s = computeShiftSummary();
+    var sinceStr = new Date(s.since).toLocaleString('ar-EG');
+    var html = '';
+    html += '<p class="cd-since">منذ آخر إغلاق: ' + sinceStr + '</p>';
+    html += '<div class="cd-row"><span>مبيعات نقدي 💵</span><span>\u20AA' + s.cash.toFixed(2) + '</span></div>';
+    html += '<div class="cd-row"><span>مبيعات بطاقة 💳</span><span>\u20AA' + s.card.toFixed(2) + '</span></div>';
+    html += '<div class="cd-row cd-total"><span>الإجمالي</span><span>\u20AA' + s.total.toFixed(2) + '</span></div>';
+    html += '<div class="cd-row"><span>عدد الفواتير</span><span>' + s.count + '</span></div>';
+    html += '<p class="cd-note">⚠️ قارن المبلغ النقدي (\u20AA' + s.cash.toFixed(2) + ') مع ما في الصندوق قبل التأكيد.</p>';
+    document.getElementById('closeDaySummary').innerHTML = html;
+    document.getElementById('closeDayModal').style.display = 'flex';
+}
+
+function confirmCloseDay() {
+    if (!isAdmin()) return;
+    var s = computeShiftSummary();
+    setDayStart(Date.now());
+    logActivity('day_close', 'إغلاق اليوم — نقدي: \u20AA' + s.cash.toFixed(2) + ' | بطاقة: \u20AA' + s.card.toFixed(2) + ' | الإجمالي: \u20AA' + s.total.toFixed(2), {
+        cash: s.cash, card: s.card, total: s.total, count: s.count
+    });
+    document.getElementById('closeDayModal').style.display = 'none';
+    updateReports();
+    alert('تم إغلاق اليوم وتصفير الإجمالي ✅');
 }
 
 // ============ FIREBASE SUBSCRIPTIONS ============
@@ -421,21 +493,35 @@ function renderProducts() {
         return matchSearch && matchCat;
     });
 
-    var html = '';
+    // Group products into sections by category/type for easier manual browsing.
+    var groups = {}, order = [];
     for (var i = 0; i < filtered.length; i++) {
-        var p = filtered[i];
-        var totalStock = getTotalStock(p);
-        var outClass = totalStock <= 0 ? ' out-of-stock' : '';
-        var img = p.image || '';
-        html += '<div class="product-card' + outClass + '" data-id="' + p.id + '">';
-        if (img) html += '<img src="' + img + '" onerror="this.style.display=\'none\'" loading="lazy">';
-        html += '<div class="p-name">' + (p.name || '') + '</div>';
-        html += '<div class="p-price">\u20AA' + getMinPrice(p) + '</div>';
-        html += '<div class="p-stock">' + totalStock + ' قطعة</div>';
-        html += '</div>';
+        var t = filtered[i].type || 'أخرى';
+        if (!groups[t]) { groups[t] = []; order.push(t); }
+        groups[t].push(filtered[i]);
     }
 
-    grid.innerHTML = html || '<div style="text-align:center;color:var(--text-dim);padding:40px;">لا توجد منتجات</div>';
+    var html = '';
+    for (var g = 0; g < order.length; g++) {
+        var sec = order[g];
+        var list = groups[sec];
+        html += '<div class="section-header">' + sec + ' <span class="section-count">' + list.length + '</span></div>';
+        for (var k = 0; k < list.length; k++) {
+            var p = list[k];
+            var totalStock = getTotalStock(p);
+            var outClass = totalStock <= 0 ? ' out-of-stock' : '';
+            var img = p.image || '';
+            html += '<div class="product-card' + outClass + '" data-id="' + p.id + '">';
+            if (img) html += '<img src="' + img + '" onerror="this.style.display=\'none\'" loading="lazy">';
+            html += '<div class="p-name">' + (p.name || '') + '</div>';
+            html += '<div class="p-code">#' + p.id + '</div>';
+            html += '<div class="p-price">\u20AA' + getMinPrice(p) + '</div>';
+            html += '<div class="p-stock">' + totalStock + ' قطعة</div>';
+            html += '</div>';
+        }
+    }
+
+    grid.innerHTML = html || '<div style="text-align:center;color:var(--text-dim);padding:40px;grid-column:1/-1;">لا توجد منتجات</div>';
 }
 
 function getTotalStock(product) {
@@ -533,17 +619,14 @@ function findVariant(product, color, size) {
     return null;
 }
 
-function addToCartFromModal() {
-    if (!varModalProduct || !varModalColor || !varModalSize) return;
-    var variant = findVariant(varModalProduct, varModalColor, varModalSize);
-    if (!variant || (variant.stock || 0) <= 0) return;
-
-    var qty = parseInt(document.getElementById('varQtyInput').value) || 1;
+function addVariantToCart(product, color, size, qty) {
+    var variant = findVariant(product, color, size);
+    if (!variant || (variant.stock || 0) <= 0) return false;
+    qty = parseInt(qty) || 1;
     if (qty > variant.stock) qty = variant.stock;
 
-    var cartKey = varModalProduct.id + '_' + varModalColor + '_' + varModalSize;
+    var cartKey = product.id + '_' + color + '_' + size;
     var existing = cart.find(function (item) { return item.key === cartKey; });
-
     if (existing) {
         var newQty = existing.qty + qty;
         if (newQty > variant.stock) newQty = variant.stock;
@@ -551,18 +634,41 @@ function addToCartFromModal() {
     } else {
         cart.push({
             key: cartKey,
-            productId: varModalProduct.id,
-            name: varModalProduct.name,
-            color: varModalColor,
-            size: varModalSize,
+            productId: product.id,
+            name: product.name,
+            color: color,
+            size: size,
             price: variant.price || 0,
             qty: qty,
             maxStock: variant.stock
         });
     }
-
-    document.getElementById('variantModal').style.display = 'none';
     renderCart();
+    return true;
+}
+
+function addToCartFromModal() {
+    if (!varModalProduct || !varModalColor || !varModalSize) return;
+    var qty = parseInt(document.getElementById('varQtyInput').value) || 1;
+    if (addVariantToCart(varModalProduct, varModalColor, varModalSize, qty)) {
+        document.getElementById('variantModal').style.display = 'none';
+    }
+}
+
+// Add a product to the bill by its code/id (for when the barcode can't be scanned).
+// Auto-adds when exactly one variant is in stock; otherwise opens the variant picker.
+function addByCode(code) {
+    code = (code || '').trim();
+    if (!code) return;
+    var p = products.find(function (x) { return String(x.id) === code; });
+    if (!p) { alert('لم يتم العثور على منتج بهذا الرقم'); return; }
+    if (getTotalStock(p) <= 0) { alert('المنتج غير متوفر في المخزون'); return; }
+    var inStock = (p.variants || []).filter(function (v) { return (v.stock || 0) > 0; });
+    if (inStock.length === 1) {
+        addVariantToCart(p, inStock[0].color, inStock[0].size, 1);
+    } else {
+        openVariantModal(p.id);
+    }
 }
 
 // ============ CART ============
@@ -686,6 +792,7 @@ function checkout() {
             billNumber: billNumber, total: total, items: items.length, payment: selectedPayment
         });
         showReceipt(billData);
+        printReceipt(billData);
         cart = [];
         renderCart();
         document.getElementById('discountInput').value = 0;
@@ -744,33 +851,82 @@ function checkout() {
 }
 
 // ============ RECEIPT ============
-function showReceipt(bill) {
-    var html = '<h2>عقاد كيدز</h2>';
-    html += '<p style="text-align:center;margin-bottom:8px;">فاتورة رقم: ' + bill.billNumber + '</p>';
-    html += '<p style="text-align:center;margin-bottom:8px;">' + new Date().toLocaleString('ar-EG') + '</p>';
-    html += '<p style="text-align:center;margin-bottom:8px;">الكاشير: ' + (bill.cashier || '') + '</p>';
-    html += '<div class="receipt-line"></div>';
+var RECEIPT_PRINT_CSS =
+    '* { margin:0; padding:0; box-sizing:border-box; }' +
+    'body { font-family:"Courier New",monospace; color:#000; background:#fff; }' +
+    '.receipt { width:80mm; padding:4mm 3mm; color:#000; font-weight:bold; }' +
+    '.r-title { text-align:center; font-size:20px; font-weight:bold; margin-bottom:4px; }' +
+    '.r-meta { text-align:center; font-size:12px; font-weight:bold; margin-bottom:2px; }' +
+    '.r-items { width:100%; border-collapse:collapse; margin:8px 0; }' +
+    '.r-items th { background:#000; color:#fff; font-weight:bold; padding:5px 4px; border:1px solid #000; font-size:12px; }' +
+    '.r-items td { padding:5px 4px; border:1px solid #000; font-weight:bold; font-size:12px; text-align:center; }' +
+    '.r-items td.r-name { text-align:right; }' +
+    '.r-totals { width:100%; border-collapse:collapse; margin-top:6px; }' +
+    '.r-totals td { padding:3px 4px; font-weight:bold; font-size:13px; }' +
+    '.r-totals td:last-child { text-align:left; }' +
+    '.r-totals tr.r-grand td { border-top:2px solid #000; border-bottom:2px solid #000; font-size:16px; padding:6px 4px; }' +
+    '.r-thanks { text-align:center; font-weight:bold; margin-top:10px; font-size:13px; }';
 
-    for (var i = 0; i < bill.items.length; i++) {
-        var item = bill.items[i];
-        html += '<div class="receipt-row">';
-        html += '<span>' + item.name + ' (' + item.color + '/' + item.size + ') x' + item.qty + '</span>';
-        html += '<span>\u20AA' + item.total.toFixed(2) + '</span>';
-        html += '</div>';
+function buildReceiptInnerHTML(bill) {
+    var dateStr = (bill.createdAt && bill.createdAt.toDate)
+        ? bill.createdAt.toDate().toLocaleString('ar-EG')
+        : (bill.createdAtIso ? new Date(bill.createdAtIso).toLocaleString('ar-EG') : new Date().toLocaleString('ar-EG'));
+    var html = '';
+    html += '<div class="r-title">عقاد كيدز</div>';
+    html += '<div class="r-meta">فاتورة رقم: ' + (bill.billNumber || bill.orderNumber || '') + '</div>';
+    html += '<div class="r-meta">' + dateStr + '</div>';
+    html += '<div class="r-meta">الكاشير: ' + (bill.cashier || '') + '</div>';
+
+    html += '<table class="r-items"><thead><tr><th>الصنف</th><th>كمية</th><th>السعر</th></tr></thead><tbody>';
+    var items = bill.items || [];
+    for (var i = 0; i < items.length; i++) {
+        var it = items[i];
+        var variant = (it.color || it.size) ? ' (' + (it.color || '') + '/' + (it.size || '') + ')' : '';
+        var lineTotal = (it.total != null ? it.total : (it.price || 0) * (it.qty || 0));
+        html += '<tr>';
+        html += '<td class="r-name">' + (it.name || '') + variant + '</td>';
+        html += '<td>' + (it.qty || 0) + '</td>';
+        html += '<td>\u20AA' + Number(lineTotal).toFixed(2) + '</td>';
+        html += '</tr>';
     }
+    html += '</tbody></table>';
 
-    html += '<div class="receipt-line"></div>';
-    html += '<div class="receipt-row"><span>المجموع</span><span>\u20AA' + bill.subtotal.toFixed(2) + '</span></div>';
+    html += '<table class="r-totals">';
+    html += '<tr><td>المجموع</td><td>\u20AA' + (bill.subtotal || 0).toFixed(2) + '</td></tr>';
     if (bill.discount > 0) {
-        html += '<div class="receipt-row"><span>الخصم</span><span>-\u20AA' + bill.discount.toFixed(2) + '</span></div>';
+        html += '<tr><td>الخصم</td><td>-\u20AA' + bill.discount.toFixed(2) + '</td></tr>';
     }
-    html += '<div class="receipt-row receipt-total"><span>الإجمالي</span><span>\u20AA' + bill.total.toFixed(2) + '</span></div>';
-    html += '<div class="receipt-line"></div>';
-    html += '<div class="receipt-row"><span>الدفع</span><span>' + (bill.paymentMethod === 'cash' ? 'نقدي' : 'بطاقة') + '</span></div>';
-    html += '<p style="text-align:center;margin-top:12px;">شكرا لتسوقكم</p>';
+    html += '<tr class="r-grand"><td>الإجمالي</td><td>\u20AA' + (bill.total || 0).toFixed(2) + '</td></tr>';
+    html += '<tr><td>الدفع</td><td>' + (bill.paymentMethod === 'cash' ? 'نقدي' : 'بطاقة') + '</td></tr>';
+    html += '</table>';
+    html += '<div class="r-thanks">شكراً لتسوقكم</div>';
+    return html;
+}
 
-    document.getElementById('receiptContent').innerHTML = html;
+function showReceipt(bill) {
+    currentReceiptBill = bill;
+    document.getElementById('receiptContent').innerHTML = buildReceiptInnerHTML(bill);
     document.getElementById('receiptModal').style.display = 'flex';
+}
+
+function buildPrintableReceipt(bill) {
+    return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
+        RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' +
+        buildReceiptInnerHTML(bill) + '</div></body></html>';
+}
+
+// Silent print to the default (thermal) printer; falls back to the browser dialog.
+function printReceipt(bill) {
+    try {
+        var html = buildPrintableReceipt(bill);
+        if (ipcRenderer && ipcRenderer.invoke) {
+            ipcRenderer.invoke('print-html', html).catch(function () { window.print(); });
+        } else {
+            window.print();
+        }
+    } catch (e) {
+        try { window.print(); } catch (e2) {}
+    }
 }
 
 // ============ INVENTORY ============
@@ -783,33 +939,70 @@ function renderInventory() {
         var p = products[i];
         if (p.status === 'disabled') continue;
         var variants = p.variants || [];
+
+        // Match search against product name/id or any of its variants.
+        var matches = !searchVal || (p.name + ' ' + p.id).toLowerCase().indexOf(searchVal) >= 0;
+        if (!matches) {
+            for (var j = 0; j < variants.length; j++) {
+                if ((p.name + ' ' + variants[j].color + ' ' + variants[j].size).toLowerCase().indexOf(searchVal) >= 0) { matches = true; break; }
+            }
+        }
+        if (!matches) continue;
+
+        var totalStock = getTotalStock(p);
+        var minP = Infinity, maxP = 0;
+        for (var j = 0; j < variants.length; j++) {
+            var pr = variants[j].price || 0;
+            if (pr > 0 && pr < minP) minP = pr;
+            if (pr > maxP) maxP = pr;
+        }
+        var priceLabel = (minP === Infinity) ? '\u20AA0' : (minP === maxP ? '\u20AA' + minP : '\u20AA' + minP + ' - \u20AA' + maxP);
+
+        var statusBadge;
+        if (totalStock <= 0) statusBadge = '<span class="badge badge-danger">نفذ</span>';
+        else if (totalStock <= 5) statusBadge = '<span class="badge badge-warning">منخفض</span>';
+        else statusBadge = '<span class="badge badge-success">متوفر</span>';
+
+        var rowId = 'inv_' + p.id;
+        html += '<tr class="inv-master" onclick="toggleInvRow(\'' + rowId + '\')">';
+        html += '<td><span class="inv-caret" id="caret_' + rowId + '">\u25B8</span> ' + p.id + '</td>';
+        html += '<td>' + (p.name || '') + '</td>';
+        html += '<td>' + variants.length + ' خيار</td>';
+        html += '<td>' + totalStock + ' قطعة</td>';
+        html += '<td>' + priceLabel + '</td>';
+        html += '<td>' + statusBadge + '</td>';
+        html += '</tr>';
+
+        html += '<tr class="inv-detail" id="' + rowId + '" style="display:none;"><td colspan="6">';
+        html += '<table class="inv-sub"><thead><tr><th>اللون</th><th>المقاس</th><th>الكمية</th><th>السعر</th><th>الحالة</th></tr></thead><tbody>';
         for (var j = 0; j < variants.length; j++) {
             var v = variants[j];
-            var rowText = (p.name + ' ' + v.color + ' ' + v.size).toLowerCase();
-            if (searchVal && rowText.indexOf(searchVal) < 0) continue;
-
-            var statusBadge = '';
-            if ((v.stock || 0) <= 0) {
-                statusBadge = '<span class="badge badge-danger">نفذ</span>';
-            } else if ((v.stock || 0) <= 5) {
-                statusBadge = '<span class="badge badge-warning">منخفض</span>';
-            } else {
-                statusBadge = '<span class="badge badge-success">متوفر</span>';
-            }
-
+            var vBadge;
+            if ((v.stock || 0) <= 0) vBadge = '<span class="badge badge-danger">نفذ</span>';
+            else if ((v.stock || 0) <= 5) vBadge = '<span class="badge badge-warning">منخفض</span>';
+            else vBadge = '<span class="badge badge-success">متوفر</span>';
             html += '<tr>';
-            html += '<td>' + p.id + '</td>';
-            html += '<td>' + (p.name || '') + '</td>';
             html += '<td>' + (v.color || '') + '</td>';
             html += '<td>' + (v.size || '') + '</td>';
             html += '<td>' + (v.stock || 0) + '</td>';
             html += '<td>\u20AA' + (v.price || 0) + '</td>';
-            html += '<td>' + statusBadge + '</td>';
+            html += '<td>' + vBadge + '</td>';
             html += '</tr>';
         }
+        if (!variants.length) html += '<tr><td colspan="5" style="text-align:center;">لا توجد خيارات</td></tr>';
+        html += '</tbody></table></td></tr>';
     }
 
-    body.innerHTML = html || '<tr><td colspan="7" style="text-align:center;padding:20px;">لا توجد بيانات</td></tr>';
+    body.innerHTML = html || '<tr><td colspan="6" style="text-align:center;padding:20px;">لا توجد بيانات</td></tr>';
+}
+
+function toggleInvRow(rowId) {
+    var detail = document.getElementById(rowId);
+    var caret = document.getElementById('caret_' + rowId);
+    if (!detail) return;
+    var open = detail.style.display !== 'none';
+    detail.style.display = open ? 'none' : 'table-row';
+    if (caret) caret.textContent = open ? '\u25B8' : '\u25BE';
 }
 
 function exportInventory() {
@@ -1160,6 +1353,14 @@ function updateReports() {
     }
     document.getElementById('monthDamage').textContent = monthDamage + ' قطعة';
 
+    var shift = computeShiftSummary();
+    var st = document.getElementById('shiftTotal');
+    if (st) st.textContent = '\u20AA' + shift.total.toFixed(2);
+    var scount = document.getElementById('shiftCount');
+    if (scount) scount.textContent = shift.count + ' فاتورة';
+    var scash = document.getElementById('shiftCash');
+    if (scash) scash.textContent = 'نقدي \u20AA' + shift.cash.toFixed(2) + ' • بطاقة \u20AA' + shift.card.toFixed(2);
+
     var productSales = {};
     for (var i = 0; i < bills.length; i++) {
         var items = bills[i].items || [];
@@ -1256,7 +1457,9 @@ function setupEventListeners() {
     }
 
     document.getElementById('checkoutBtn').addEventListener('click', checkout);
-    document.getElementById('printReceiptBtn').addEventListener('click', function () { window.print(); });
+    document.getElementById('printReceiptBtn').addEventListener('click', function () {
+        if (currentReceiptBill) printReceipt(currentReceiptBill); else window.print();
+    });
     document.getElementById('closeReceiptBtn').addEventListener('click', function () {
         document.getElementById('receiptModal').style.display = 'none';
     });
@@ -1286,6 +1489,34 @@ function setupEventListeners() {
 
     document.getElementById('filterBillsBtn').addEventListener('click', renderBills);
 
+    // Add product to bill by code/id
+    var codeAddBtn = document.getElementById('codeAddBtn');
+    var codeAddInput = document.getElementById('codeAddInput');
+    if (codeAddBtn && codeAddInput) {
+        codeAddBtn.addEventListener('click', function () { addByCode(codeAddInput.value); codeAddInput.value = ''; codeAddInput.focus(); });
+        codeAddInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { addByCode(this.value); this.value = ''; }
+        });
+    }
+
+    // Close work day (admin)
+    var closeDayBtn = document.getElementById('closeDayBtn');
+    if (closeDayBtn) closeDayBtn.addEventListener('click', openCloseDayModal);
+    var confirmCloseDayBtn = document.getElementById('confirmCloseDayBtn');
+    if (confirmCloseDayBtn) confirmCloseDayBtn.addEventListener('click', confirmCloseDay);
+    var cancelCloseDayBtn = document.getElementById('cancelCloseDayBtn');
+    if (cancelCloseDayBtn) cancelCloseDayBtn.addEventListener('click', function () {
+        document.getElementById('closeDayModal').style.display = 'none';
+    });
+    var closeDayX = document.getElementById('closeDayX');
+    if (closeDayX) closeDayX.addEventListener('click', function () {
+        document.getElementById('closeDayModal').style.display = 'none';
+    });
+    var closeDayModal = document.getElementById('closeDayModal');
+    if (closeDayModal) closeDayModal.addEventListener('click', function (e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+
     document.getElementById('productSearch').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
             var val = this.value.trim();
@@ -1313,6 +1544,7 @@ function setupEventListeners() {
 window.changeCartQty = changeCartQty;
 window.removeCartItem = removeCartItem;
 window.viewBill = viewBill;
+window.toggleInvRow = toggleInvRow;
 
 // ============ START ============
 document.addEventListener('DOMContentLoaded', function () {

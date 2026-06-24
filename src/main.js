@@ -68,3 +68,34 @@ ipcMain.handle('show-open-dialog', async function (event, options) {
   return result;
 });
 
+// IPC: Silent print of a fully-formed receipt HTML document to the default printer.
+// Loads the HTML in a hidden window and prints without a dialog (POS thermal printer).
+ipcMain.handle('print-html', function (event, html) {
+  return new Promise(function (resolve) {
+    var printWin = new BrowserWindow({
+      show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true, devTools: false }
+    });
+    var done = false;
+    function finish(result) {
+      if (done) return;
+      done = true;
+      setTimeout(function () { if (printWin && !printWin.isDestroyed()) printWin.close(); }, 800);
+      resolve(result);
+    }
+    printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    printWin.webContents.on('did-finish-load', function () {
+      try {
+        printWin.webContents.print(
+          { silent: true, printBackground: true, margins: { marginType: 'none' } },
+          function (success, failureReason) { finish({ success: success, reason: failureReason || '' }); }
+        );
+      } catch (e) {
+        finish({ success: false, reason: String(e && e.message || e) });
+      }
+    });
+    printWin.webContents.on('did-fail-load', function () { finish({ success: false, reason: 'load failed' }); });
+    setTimeout(function () { finish({ success: false, reason: 'timeout' }); }, 15000);
+  });
+});
+

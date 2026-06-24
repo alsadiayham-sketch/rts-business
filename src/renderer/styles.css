@@ -554,6 +554,146 @@ body {
     pointer-events: none;
 }
 
+.product-card .p-code {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+}
+
+/* Product section headers (sales grid) */
+.products-grid .section-header {
+    grid-column: 1 / -1;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--primary);
+    padding: 10px 6px 6px;
+    border-bottom: 2px solid var(--border);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.products-grid .section-header .section-count {
+    background: var(--primary);
+    color: #fff;
+    border-radius: 10px;
+    font-size: 11px;
+    padding: 1px 8px;
+}
+
+/* Add-by-code row */
+.code-add-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.code-add-row input {
+    flex: 1;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    background: var(--bg-light);
+}
+
+.code-add-row input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.code-add-row button {
+    white-space: nowrap;
+}
+
+/* Expandable inventory rows */
+.inv-master {
+    cursor: pointer;
+}
+
+.inv-master:hover {
+    background: var(--bg);
+}
+
+.inv-master td {
+    font-weight: 600;
+}
+
+.inv-caret {
+    display: inline-block;
+    width: 14px;
+    color: var(--primary);
+    font-size: 11px;
+}
+
+.inv-detail > td {
+    padding: 0 !important;
+    background: var(--bg);
+}
+
+.inv-sub {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.inv-sub th {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    font-size: 12px;
+    padding: 8px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+}
+
+.inv-sub td {
+    padding: 8px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Shift / close-day report card */
+.report-card.report-shift {
+    border: 2px solid var(--primary);
+}
+
+/* Close-day modal */
+.closeday-modal {
+    max-width: 420px;
+}
+
+.closeday-modal .cd-since {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-bottom: 14px;
+}
+
+.closeday-modal .cd-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+}
+
+.closeday-modal .cd-row.cd-total {
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+}
+
+.closeday-modal .cd-note {
+    margin-top: 14px;
+    padding: 10px;
+    background: rgba(255,152,0,0.12);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--warning);
+    text-align: center;
+}
+
 /* Cart Panel */
 .cart-panel {
     width: 360px;
@@ -1130,36 +1270,83 @@ body {
 
 .receipt {
     padding: 20px;
-    background: white;
-    color: #333;
+    background: #fff;
+    color: #000;
     font-family: 'Courier New', monospace;
+    font-weight: bold;
     font-size: 12px;
     direction: rtl;
 }
 
-.receipt h2 {
+.receipt .r-title {
     text-align: center;
-    font-size: 18px;
-    margin-bottom: 8px;
+    font-size: 20px;
+    font-weight: bold;
+    margin-bottom: 4px;
 }
 
-.receipt .receipt-line {
-    border-top: 1px dashed #999;
-    margin: 8px 0;
+.receipt .r-meta {
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 2px;
 }
 
-.receipt .receipt-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 0;
+.receipt .r-items {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
 }
 
-.receipt .receipt-total {
-    font-weight: 700;
-    font-size: 14px;
-    border-top: 2px solid #333;
-    margin-top: 8px;
-    padding-top: 8px;
+.receipt .r-items th {
+    background: #000;
+    color: #fff;
+    font-weight: bold;
+    padding: 5px 4px;
+    border: 1px solid #000;
+    font-size: 12px;
+}
+
+.receipt .r-items td {
+    padding: 5px 4px;
+    border: 1px solid #000;
+    font-weight: bold;
+    font-size: 12px;
+    text-align: center;
+}
+
+.receipt .r-items td.r-name {
+    text-align: right;
+}
+
+.receipt .r-totals {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+}
+
+.receipt .r-totals td {
+    padding: 3px 4px;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+.receipt .r-totals td:last-child {
+    text-align: left;
+}
+
+.receipt .r-totals tr.r-grand td {
+    border-top: 2px solid #000;
+    border-bottom: 2px solid #000;
+    font-size: 16px;
+    padding: 6px 4px;
+}
+
+.receipt .r-thanks {
+    text-align: center;
+    font-weight: bold;
+    margin-top: 10px;
+    font-size: 13px;
 }
 
 /* Status badges */
