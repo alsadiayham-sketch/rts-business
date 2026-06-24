@@ -4,13 +4,16 @@ var rawDb = fbConfig.rawDb;
 var firebase = fbConfig.firebase;
 var setProjectId = fbConfig.setProjectId;
 var getProjectId = fbConfig.getProjectId;
+var isD1 = fbConfig.isD1;
+var serverTimestamp = fbConfig.serverTimestamp;
+var posAuthenticate = fbConfig.posAuthenticate;
 var electron = require('electron');
 var ipcRenderer = electron.ipcRenderer;
 var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '1.0.0';
+var APP_VERSION = '1.1.0';
 
 // ============ STATE ============
 var products = [];
@@ -117,23 +120,44 @@ function attemptLogin() {
             lastChecked: firebase.firestore.FieldValue.serverTimestamp()
         }).catch(function () {});
 
-        // Now authenticate user
+        // Now authenticate user. For D1 tenants the comparison happens
+        // server-side (no hash/password list ever reaches this client).
+        if (isD1()) {
+            return posAuthenticate(username, password).then(function (user) {
+                return { __d1user: user };
+            }).catch(function (e) {
+                if (e.status === 401 || e.status === 403) return { __authFailed: true };
+                throw e;
+            });
+        }
         return db.collection('settings').doc('pos_users').get();
     }).then(function (doc) {
         if (!doc) return; // license expired path
-        if (!doc.exists) {
-            errorEl.textContent = 'لم يتم إعداد المستخدمين بعد';
-            loginBtn.textContent = 'دخول';
-            loginBtn.disabled = false;
-            return;
-        }
-        var data = doc.data();
-        var users = data.users || [];
         var found = null;
-        for (var i = 0; i < users.length; i++) {
-            if (users[i].username === username && users[i].password === password && users[i].active !== false) {
-                found = users[i];
-                break;
+        if (doc.__d1user || doc.__authFailed) {
+            // D1 server-side auth result
+            if (doc.__authFailed || !doc.__d1user) {
+                errorEl.textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+                loginBtn.textContent = 'دخول';
+                loginBtn.disabled = false;
+                return;
+            }
+            var u = doc.__d1user;
+            found = { username: u.username, displayName: u.name, role: u.role, active: true };
+        } else {
+            if (!doc.exists) {
+                errorEl.textContent = 'لم يتم إعداد المستخدمين بعد';
+                loginBtn.textContent = 'دخول';
+                loginBtn.disabled = false;
+                return;
+            }
+            var data = doc.data();
+            var users = data.users || [];
+            for (var i = 0; i < users.length; i++) {
+                if (users[i].username === username && users[i].password === password && users[i].active !== false) {
+                    found = users[i];
+                    break;
+                }
             }
         }
         if (!found) {
@@ -166,6 +190,7 @@ function logout() {
     }
     currentUser = null;
     cart = [];
+    if (fbConfig.clearPosToken) fbConfig.clearPosToken();
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('loginPassword').value = '';
@@ -269,7 +294,7 @@ function logActivity(type, description, details) {
         type: type,
         description: description,
         user: currentUser ? (currentUser.displayName || currentUser.username) : 'system',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        timestamp: serverTimestamp(),
         details: details || null
     };
     db.collection('pos_logs').add(logEntry).catch(function () {});
@@ -648,13 +673,38 @@ function checkout() {
         cashier: currentUser ? (currentUser.displayName || currentUser.username) : 'unknown',
         source: 'pos',
         status: 'completed',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdAt: serverTimestamp(),
         createdAtIso: new Date().toISOString()
     };
 
     var checkoutBtn = document.getElementById('checkoutBtn');
     checkoutBtn.textContent = 'جاري الحفظ...';
     checkoutBtn.disabled = true;
+
+    function onCheckoutSuccess() {
+        logActivity('sale', 'فاتورة ' + billNumber + ' - المجموع: \u20AA' + total.toFixed(2), {
+            billNumber: billNumber, total: total, items: items.length, payment: selectedPayment
+        });
+        showReceipt(billData);
+        cart = [];
+        renderCart();
+        document.getElementById('discountInput').value = 0;
+        checkoutBtn.textContent = 'إتمام البيع';
+        checkoutBtn.disabled = false;
+    }
+    function onCheckoutError(err) {
+        alert('خطأ في حفظ الفاتورة: ' + err.message);
+        checkoutBtn.textContent = 'إتمام البيع';
+        checkoutBtn.disabled = false;
+    }
+
+    // D1 tenants: just post the order; the server deducts variant stock atomically.
+    if (isD1()) {
+        db.collection('orders').doc(billNumber).set(billData)
+            .then(onCheckoutSuccess)
+            .catch(onCheckoutError);
+        return;
+    }
 
     // Atomic batch: save bill + deduct stock together
     var batch = rawDb.batch();
@@ -690,21 +740,7 @@ function checkout() {
         batch.update(pu.ref, { variants: pu.variants });
     }
 
-    batch.commit().then(function () {
-        logActivity('sale', 'فاتورة ' + billNumber + ' - المجموع: \u20AA' + total.toFixed(2), {
-            billNumber: billNumber, total: total, items: items.length, payment: selectedPayment
-        });
-        showReceipt(billData);
-        cart = [];
-        renderCart();
-        document.getElementById('discountInput').value = 0;
-        checkoutBtn.textContent = 'إتمام البيع';
-        checkoutBtn.disabled = false;
-    }).catch(function (err) {
-        alert('خطأ في حفظ الفاتورة: ' + err.message);
-        checkoutBtn.textContent = 'إتمام البيع';
-        checkoutBtn.disabled = false;
-    });
+    batch.commit().then(onCheckoutSuccess).catch(onCheckoutError);
 }
 
 // ============ RECEIPT ============
@@ -890,12 +926,15 @@ function saveAddStock() {
         }
     }
 
-    var ref = rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId);
     var savBtn = document.getElementById('saveStockBtn');
     savBtn.textContent = 'جاري الحفظ...';
     savBtn.disabled = true;
 
-    ref.update({ variants: variants }).then(function () {
+    var doUpdate = isD1()
+        ? db.collection('products').doc(productId).update({ variants: variants })
+        : rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId).update({ variants: variants });
+
+    doUpdate.then(function () {
         logActivity('stock_add', 'إضافة ' + qty + ' قطعة من ' + product.name + ' (' + color + '/' + size + ')', {
             productId: productId, color: color, size: size, qty: qty
         });
@@ -1002,30 +1041,42 @@ function saveDamage() {
         qty: qty,
         reason: reason,
         user: currentUser ? (currentUser.displayName || currentUser.username) : '',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        createdAt: serverTimestamp()
     };
 
     var savBtn = document.getElementById('saveDamageBtn');
     savBtn.textContent = 'جاري الحفظ...';
     savBtn.disabled = true;
 
-    var batch = rawDb.batch();
-    batch.update(ref, { variants: variants });
-    var dmgRef = rawDb.collection('projects').doc(getProjectId()).collection('pos_damage').doc();
-    batch.set(dmgRef, damageData);
-
-    batch.commit().then(function () {
+    function onDamageSuccess() {
         logActivity('damage', 'إتلاف ' + qty + ' من ' + product.name + ' (' + color + '/' + size + ')', { reason: reason });
         document.getElementById('damageForm').style.display = 'none';
         document.getElementById('damageQty').value = 1;
         document.getElementById('damageReason').value = '';
         savBtn.textContent = 'حفظ';
         savBtn.disabled = false;
-    }).catch(function (err) {
+    }
+    function onDamageError(err) {
         alert('خطأ: ' + err.message);
         savBtn.textContent = 'حفظ';
         savBtn.disabled = false;
-    });
+    }
+
+    // D1 tenants: adjust stock via /api/pos-stock then record the damage entry.
+    if (isD1()) {
+        db.collection('products').doc(productId).update({ variants: variants })
+            .then(function () { return db.collection('pos_damage').add(damageData); })
+            .then(onDamageSuccess)
+            .catch(onDamageError);
+        return;
+    }
+
+    var batch = rawDb.batch();
+    batch.update(ref, { variants: variants });
+    var dmgRef = rawDb.collection('projects').doc(getProjectId()).collection('pos_damage').doc();
+    batch.set(dmgRef, damageData);
+
+    batch.commit().then(onDamageSuccess).catch(onDamageError);
 }
 
 // ============ BILLS ============
