@@ -74,25 +74,33 @@ ipcMain.handle('print-html', function (event, html) {
   return new Promise(function (resolve) {
     var printWin = new BrowserWindow({
       show: false,
-      webPreferences: { nodeIntegration: false, contextIsolation: true, devTools: false }
+      width: 380,
+      height: 800,
+      paintWhenInitiallyHidden: true,
+      webPreferences: { nodeIntegration: false, contextIsolation: true, devTools: false, offscreen: false }
     });
     var done = false;
     function finish(result) {
       if (done) return;
       done = true;
-      setTimeout(function () { if (printWin && !printWin.isDestroyed()) printWin.close(); }, 800);
+      setTimeout(function () { if (printWin && !printWin.isDestroyed()) printWin.close(); }, 1200);
       resolve(result);
     }
-    printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    printWin.webContents.on('did-finish-load', function () {
+    function doPrint() {
       try {
         printWin.webContents.print(
-          { silent: true, printBackground: true, margins: { marginType: 'none' } },
+          { silent: true, printBackground: true, color: false, margins: { marginType: 'none' } },
           function (success, failureReason) { finish({ success: success, reason: failureReason || '' }); }
         );
       } catch (e) {
         finish({ success: false, reason: String(e && e.message || e) });
       }
+    }
+    printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    printWin.webContents.on('did-finish-load', function () {
+      // Wait for the renderer to actually paint the receipt before printing,
+      // otherwise the thermal printer spits out a blank page.
+      setTimeout(doPrint, 450);
     });
     printWin.webContents.on('did-fail-load', function () { finish({ success: false, reason: 'load failed' }); });
     setTimeout(function () { finish({ success: false, reason: 'timeout' }); }, 15000);

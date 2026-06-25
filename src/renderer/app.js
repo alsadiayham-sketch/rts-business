@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '1.2.0';
+var APP_VERSION = '1.3.0';
 
 // ============ STATE ============
 var products = [];
@@ -29,6 +29,7 @@ var varModalProduct = null;
 var varModalColor = null;
 var varModalSize = null;
 var currentReceiptBill = null;
+var openInvRows = {};
 
 // ============ SECURITY: LICENSE CHECK ============
 function checkLicense() {
@@ -312,6 +313,31 @@ function initApp() {
     subscribeDamage();
 }
 
+// ============ THEMED CONFIRM / ALERT ============
+var _confirmCb = null;
+function showConfirm(message, onYes, opts) {
+    opts = opts || {};
+    _confirmCb = onYes || null;
+    document.getElementById('confirmIcon').textContent = opts.icon || '⚠️';
+    document.getElementById('confirmTitle').textContent = opts.title || 'تأكيد';
+    document.getElementById('confirmMessage').textContent = message || '';
+    var yes = document.getElementById('confirmYesBtn');
+    var no = document.getElementById('confirmNoBtn');
+    yes.textContent = opts.yesText || 'نعم';
+    no.style.display = opts.alert ? 'none' : 'inline-flex';
+    no.textContent = opts.noText || 'إلغاء';
+    document.getElementById('confirmModal').style.display = 'flex';
+}
+function showAlert(message, opts) {
+    opts = opts || {};
+    opts.alert = true;
+    opts.yesText = opts.yesText || 'حسناً';
+    if (opts.icon === undefined) opts.icon = '✅';
+    if (opts.title === undefined) opts.title = 'تم';
+    showConfirm(message, null, opts);
+}
+function _closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; _confirmCb = null; }
+
 // ============ ROLE-BASED VISIBILITY ============
 function isAdmin() {
     return !!(currentUser && currentUser.role === 'admin');
@@ -356,7 +382,7 @@ function computeShiftSummary() {
 }
 
 function openCloseDayModal() {
-    if (!isAdmin()) { alert('هذه الميزة متاحة للمدير فقط'); return; }
+    if (!isAdmin()) { showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' }); return; }
     var s = computeShiftSummary();
     var sinceStr = new Date(s.since).toLocaleString('ar-EG');
     var html = '';
@@ -370,7 +396,18 @@ function openCloseDayModal() {
     document.getElementById('closeDayModal').style.display = 'flex';
 }
 
+// First confirm button -> ask a second themed confirmation before resetting.
 function confirmCloseDay() {
+    if (!isAdmin()) return;
+    var s = computeShiftSummary();
+    showConfirm(
+        'سيتم تصفير إجمالي الوردية (\u20AA' + s.total.toFixed(2) + ') ولا يمكن التراجع عن العملية. هل أنت متأكد من إغلاق اليوم؟',
+        doCloseDay,
+        { icon: '🔒', title: 'تأكيد إغلاق اليوم', yesText: 'نعم، أغلق اليوم', noText: 'تراجع' }
+    );
+}
+
+function doCloseDay() {
     if (!isAdmin()) return;
     var s = computeShiftSummary();
     setDayStart(Date.now());
@@ -378,8 +415,39 @@ function confirmCloseDay() {
         cash: s.cash, card: s.card, total: s.total, count: s.count
     });
     document.getElementById('closeDayModal').style.display = 'none';
+    printDayClose(s);
     updateReports();
-    alert('تم إغلاق اليوم وتصفير الإجمالي ✅');
+    showAlert('تم إغلاق اليوم وتصفير الإجمالي بنجاح ✅', { icon: '✅', title: 'تم الإغلاق' });
+}
+
+// Build & silently print the day-close (shift) report on the thermal printer.
+function buildDayCloseInnerHTML(s) {
+    var nowStr = new Date().toLocaleString('ar-EG');
+    var sinceStr = new Date(s.since).toLocaleString('ar-EG');
+    var html = '';
+    html += '<div class="r-title">تقرير إغلاق اليوم</div>';
+    html += '<div class="r-meta">عقاد كيدز</div>';
+    html += '<div class="r-meta">تاريخ الطباعة: ' + nowStr + '</div>';
+    html += '<div class="r-meta">منذ: ' + sinceStr + '</div>';
+    if (currentUser && currentUser.username) html += '<div class="r-meta">المدير: ' + currentUser.username + '</div>';
+    html += '<table class="r-totals">';
+    html += '<tr><td>مبيعات نقدي</td><td>\u20AA' + s.cash.toFixed(2) + '</td></tr>';
+    html += '<tr><td>مبيعات بطاقة</td><td>\u20AA' + s.card.toFixed(2) + '</td></tr>';
+    html += '<tr><td>عدد الفواتير</td><td>' + s.count + '</td></tr>';
+    html += '<tr class="r-grand"><td>الإجمالي</td><td>\u20AA' + s.total.toFixed(2) + '</td></tr>';
+    html += '</table>';
+    html += '<div class="r-thanks">المبلغ النقدي يجب أن يطابق الصندوق</div>';
+    return html;
+}
+function printDayClose(s) {
+    try {
+        var inner = buildDayCloseInnerHTML(s);
+        var doc = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
+            RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + inner + '</div></body></html>';
+        if (ipcRenderer && ipcRenderer.invoke) {
+            ipcRenderer.invoke('print-html', doc).catch(function () {});
+        }
+    } catch (e) {}
 }
 
 // ============ FIREBASE SUBSCRIPTIONS ============
@@ -852,7 +920,9 @@ function checkout() {
 
 // ============ RECEIPT ============
 var RECEIPT_PRINT_CSS =
+    '@page { size: 80mm auto; margin: 0; }' +
     '* { margin:0; padding:0; box-sizing:border-box; }' +
+    'html,body { width:80mm; }' +
     'body { font-family:"Courier New",monospace; color:#000; background:#fff; }' +
     '.receipt { width:80mm; padding:4mm 3mm; color:#000; font-weight:bold; }' +
     '.r-title { text-align:center; font-size:20px; font-weight:bold; margin-bottom:4px; }' +
@@ -964,8 +1034,9 @@ function renderInventory() {
         else statusBadge = '<span class="badge badge-success">متوفر</span>';
 
         var rowId = 'inv_' + p.id;
-        html += '<tr class="inv-master" onclick="toggleInvRow(\'' + rowId + '\')">';
-        html += '<td><span class="inv-caret" id="caret_' + rowId + '">\u25B8</span> ' + p.id + '</td>';
+        var isOpen = !!openInvRows[rowId];
+        html += '<tr class="inv-master' + (isOpen ? ' open' : '') + '" onclick="toggleInvRow(\'' + rowId + '\')">';
+        html += '<td><span class="inv-caret" id="caret_' + rowId + '">' + (isOpen ? '\u25BE' : '\u25B8') + '</span> ' + p.id + '</td>';
         html += '<td>' + (p.name || '') + '</td>';
         html += '<td>' + variants.length + ' خيار</td>';
         html += '<td>' + totalStock + ' قطعة</td>';
@@ -973,7 +1044,7 @@ function renderInventory() {
         html += '<td>' + statusBadge + '</td>';
         html += '</tr>';
 
-        html += '<tr class="inv-detail" id="' + rowId + '" style="display:none;"><td colspan="6">';
+        html += '<tr class="inv-detail" id="' + rowId + '" style="display:' + (isOpen ? 'table-row' : 'none') + ';"><td colspan="6">';
         html += '<table class="inv-sub"><thead><tr><th>اللون</th><th>المقاس</th><th>الكمية</th><th>السعر</th><th>الحالة</th></tr></thead><tbody>';
         for (var j = 0; j < variants.length; j++) {
             var v = variants[j];
@@ -1002,7 +1073,10 @@ function toggleInvRow(rowId) {
     if (!detail) return;
     var open = detail.style.display !== 'none';
     detail.style.display = open ? 'none' : 'table-row';
+    if (open) { delete openInvRows[rowId]; } else { openInvRows[rowId] = true; }
     if (caret) caret.textContent = open ? '\u25B8' : '\u25BE';
+    var master = detail.previousElementSibling;
+    if (master) { if (open) master.classList.remove('open'); else master.classList.add('open'); }
 }
 
 function exportInventory() {
@@ -1380,6 +1454,244 @@ function updateReports() {
     document.getElementById('topProductsBody').innerHTML = topHtml || '<tr><td colspan="3" style="text-align:center;">لا توجد بيانات</td></tr>';
 }
 
+// ============ STATISTICS (date range) ============
+function billDateObj(b) {
+    if (b.createdAt && b.createdAt.toDate) return b.createdAt.toDate();
+    if (b.createdAtIso) return new Date(b.createdAtIso);
+    return null;
+}
+function productById(id) {
+    for (var i = 0; i < products.length; i++) { if (products[i].id === id) return products[i]; }
+    return null;
+}
+function lookupBrand(item) {
+    var p = item.productId ? productById(item.productId) : null;
+    if (!p) {
+        for (var i = 0; i < products.length; i++) { if (products[i].name === item.name) { p = products[i]; break; } }
+    }
+    return (p && p.brand) ? p.brand : 'غير محدد';
+}
+
+var lastStatsData = null;
+function runStats() {
+    var fromVal = document.getElementById('statsFrom').value;
+    var toVal = document.getElementById('statsTo').value;
+    if (!fromVal || !toVal) { showAlert('يرجى اختيار تاريخ البداية والنهاية', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var from = new Date(fromVal); from.setHours(0, 0, 0, 0);
+    var to = new Date(toVal); to.setHours(23, 59, 59, 999);
+
+    var byProduct = {}, byBrand = {}, totalRevenue = 0, totalQty = 0, billCount = 0;
+    for (var i = 0; i < bills.length; i++) {
+        var d = billDateObj(bills[i]);
+        if (!d || d < from || d > to) continue;
+        billCount++;
+        var items = bills[i].items || [];
+        for (var j = 0; j < items.length; j++) {
+            var it = items[j];
+            var q = it.qty || 0;
+            var rev = (it.total != null ? it.total : (it.price || 0) * q);
+            var pname = it.name || it.productId || 'غير معروف';
+            if (!byProduct[pname]) byProduct[pname] = { qty: 0, revenue: 0 };
+            byProduct[pname].qty += q; byProduct[pname].revenue += rev;
+            var brand = lookupBrand(it);
+            if (!byBrand[brand]) byBrand[brand] = { qty: 0, revenue: 0 };
+            byBrand[brand].qty += q; byBrand[brand].revenue += rev;
+            totalQty += q; totalRevenue += rev;
+        }
+    }
+    lastStatsData = { from: fromVal, to: toVal, byProduct: byProduct, byBrand: byBrand, totalQty: totalQty, totalRevenue: totalRevenue, billCount: billCount };
+    renderStatsResults(lastStatsData);
+}
+
+function sortedEntries(map) {
+    return Object.keys(map).sort(function (a, b) { return map[b].qty - map[a].qty; });
+}
+
+function renderStatsResults(data) {
+    var html = '';
+    html += '<div class="stats-summary">';
+    html += '<div class="stats-kpi"><span>الفواتير</span><strong>' + data.billCount + '</strong></div>';
+    html += '<div class="stats-kpi"><span>القطع المباعة</span><strong>' + data.totalQty + '</strong></div>';
+    html += '<div class="stats-kpi"><span>الإيرادات</span><strong>\u20AA' + data.totalRevenue.toFixed(2) + '</strong></div>';
+    html += '</div>';
+
+    var prods = sortedEntries(data.byProduct);
+    html += '<h4>حسب المنتج</h4><table class="data-table"><thead><tr><th>المنتج</th><th>الكمية</th><th>الإيرادات</th></tr></thead><tbody>';
+    for (var i = 0; i < prods.length; i++) {
+        html += '<tr><td>' + prods[i] + '</td><td>' + data.byProduct[prods[i]].qty + '</td><td>\u20AA' + data.byProduct[prods[i]].revenue.toFixed(2) + '</td></tr>';
+    }
+    if (!prods.length) html += '<tr><td colspan="3" style="text-align:center;">لا توجد مبيعات في هذه الفترة</td></tr>';
+    html += '</tbody></table>';
+
+    var brands = sortedEntries(data.byBrand);
+    html += '<h4>حسب البراند</h4><table class="data-table"><thead><tr><th>البراند</th><th>الكمية</th><th>الإيرادات</th></tr></thead><tbody>';
+    for (var b = 0; b < brands.length; b++) {
+        html += '<tr><td>' + brands[b] + '</td><td>' + data.byBrand[brands[b]].qty + '</td><td>\u20AA' + data.byBrand[brands[b]].revenue.toFixed(2) + '</td></tr>';
+    }
+    if (!brands.length) html += '<tr><td colspan="3" style="text-align:center;">لا توجد بيانات</td></tr>';
+    html += '</tbody></table>';
+
+    document.getElementById('statsResults').innerHTML = html;
+}
+
+function printStats() {
+    if (!lastStatsData) { showAlert('اعرض الإحصائيات أولاً قبل الطباعة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var d = lastStatsData;
+    var inner = '';
+    inner += '<div class="r-title">تقرير المبيعات</div>';
+    inner += '<div class="r-meta">من ' + d.from + ' إلى ' + d.to + '</div>';
+    inner += '<table class="r-totals">';
+    inner += '<tr><td>عدد الفواتير</td><td>' + d.billCount + '</td></tr>';
+    inner += '<tr><td>القطع المباعة</td><td>' + d.totalQty + '</td></tr>';
+    inner += '<tr class="r-grand"><td>الإيرادات</td><td>\u20AA' + d.totalRevenue.toFixed(2) + '</td></tr>';
+    inner += '</table>';
+    var prods = sortedEntries(d.byProduct);
+    inner += '<table class="r-items"><thead><tr><th>المنتج</th><th>كمية</th><th>إيراد</th></tr></thead><tbody>';
+    for (var i = 0; i < prods.length; i++) {
+        inner += '<tr><td class="r-name">' + prods[i] + '</td><td>' + d.byProduct[prods[i]].qty + '</td><td>\u20AA' + d.byProduct[prods[i]].revenue.toFixed(0) + '</td></tr>';
+    }
+    inner += '</tbody></table>';
+    sendToPrinter(inner);
+}
+
+// ============ MONTHLY CHECK (bought vs sold) ============
+function logTimeMs(entry) {
+    if (entry.timestamp && entry.timestamp.toDate) return entry.timestamp.toDate().getTime();
+    if (typeof entry.timestamp === 'number') return entry.timestamp;
+    if (entry.timestamp && entry.timestamp.seconds) return entry.timestamp.seconds * 1000;
+    return 0;
+}
+
+var lastMonthlyData = null;
+function runMonthlyCheck() {
+    var mVal = document.getElementById('monthlyMonth').value; // yyyy-mm
+    if (!mVal) { showAlert('يرجى اختيار الشهر', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var parts = mVal.split('-');
+    var year = parseInt(parts[0], 10), mon = parseInt(parts[1], 10) - 1;
+    var start = new Date(year, mon, 1, 0, 0, 0, 0).getTime();
+    var end = new Date(year, mon + 1, 1, 0, 0, 0, 0).getTime();
+
+    var btn = document.getElementById('monthlyRunBtn');
+    btn.disabled = true; btn.textContent = 'جاري التحميل...';
+
+    // Sold per product (by id, fallback name) from bills within month.
+    var sold = {};
+    for (var i = 0; i < bills.length; i++) {
+        var d = billDateObj(bills[i]); if (!d) continue;
+        var ms = d.getTime(); if (ms < start || ms >= end) continue;
+        var items = bills[i].items || [];
+        for (var j = 0; j < items.length; j++) {
+            var it = items[j];
+            var pid = it.productId || null;
+            if (!pid) { var pp = null; for (var k = 0; k < products.length; k++) { if (products[k].name === it.name) { pp = products[k]; break; } } pid = pp ? pp.id : ('name:' + (it.name || '')); }
+            sold[pid] = (sold[pid] || 0) + (it.qty || 0);
+        }
+    }
+
+    // Bought (restock) per product from pos_logs (type stock_add) within month.
+    db.collection('pos_logs').get().then(function (snap) {
+        var bought = {};
+        snap.forEach(function (doc) {
+            var e = doc.data();
+            if (e.type !== 'stock_add') return;
+            var ms = logTimeMs(e); if (ms < start || ms >= end) return;
+            var det = e.details || {};
+            var pid = det.productId; if (!pid) return;
+            bought[pid] = (bought[pid] || 0) + (det.qty || 0);
+        });
+        buildMonthlyResults(mVal, sold, bought);
+    }).catch(function () {
+        buildMonthlyResults(mVal, sold, {});
+    }).then(function () {
+        btn.disabled = false; btn.textContent = 'إنشاء الجرد';
+    });
+}
+
+function buildMonthlyResults(mVal, sold, bought) {
+    var rows = [];
+    var seen = {};
+    for (var i = 0; i < products.length; i++) {
+        var p = products[i];
+        seen[p.id] = true;
+        var b = bought[p.id] || 0;
+        var s = sold[p.id] || 0;
+        var stock = getTotalStock(p);
+        // Exclude: not bought AND not sold AND currently out of stock.
+        if (b === 0 && s === 0 && stock <= 0) continue;
+        rows.push({ id: p.id, name: p.name || '', brand: p.brand || 'غير محدد', bought: b, sold: s, stock: stock });
+    }
+    // Include any sold/bought items whose product no longer exists.
+    var extra = {};
+    var key;
+    for (key in sold) { if (sold.hasOwnProperty(key) && !seen[key]) extra[key] = true; }
+    for (key in bought) { if (bought.hasOwnProperty(key) && !seen[key]) extra[key] = true; }
+    for (key in extra) {
+        if (!extra.hasOwnProperty(key)) continue;
+        rows.push({ id: key, name: '(محذوف) ' + key, brand: 'غير محدد', bought: bought[key] || 0, sold: sold[key] || 0, stock: 0 });
+    }
+    rows.sort(function (a, b) { return b.sold - a.sold; });
+    lastMonthlyData = { month: mVal, rows: rows };
+    renderMonthlyResults(lastMonthlyData);
+}
+
+function renderMonthlyResults(data) {
+    var totBought = 0, totSold = 0;
+    var html = '';
+    html += '<table class="data-table"><thead><tr><th>الرقم</th><th>المنتج</th><th>البراند</th><th>المشتراة</th><th>المباعة</th><th>المخزون الحالي</th></tr></thead><tbody>';
+    for (var i = 0; i < data.rows.length; i++) {
+        var r = data.rows[i];
+        totBought += r.bought; totSold += r.sold;
+        html += '<tr><td>' + r.id + '</td><td>' + r.name + '</td><td>' + r.brand + '</td><td>' + r.bought + '</td><td>' + r.sold + '</td><td>' + r.stock + '</td></tr>';
+    }
+    if (!data.rows.length) html += '<tr><td colspan="6" style="text-align:center;">لا توجد حركة في هذا الشهر</td></tr>';
+    html += '</tbody></table>';
+    html = '<div class="stats-summary"><div class="stats-kpi"><span>إجمالي المشتريات</span><strong>' + totBought + '</strong></div>' +
+        '<div class="stats-kpi"><span>إجمالي المبيعات</span><strong>' + totSold + '</strong></div>' +
+        '<div class="stats-kpi"><span>عدد الأصناف</span><strong>' + data.rows.length + '</strong></div></div>' + html;
+    document.getElementById('monthlyResults').innerHTML = html;
+}
+
+function printMonthly() {
+    if (!lastMonthlyData) { showAlert('أنشئ الجرد أولاً قبل الطباعة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var d = lastMonthlyData;
+    var totBought = 0, totSold = 0;
+    var inner = '';
+    inner += '<div class="r-title">الجرد الشهري</div>';
+    inner += '<div class="r-meta">شهر: ' + d.month + '</div>';
+    inner += '<table class="r-items"><thead><tr><th>المنتج</th><th>شراء</th><th>بيع</th></tr></thead><tbody>';
+    for (var i = 0; i < d.rows.length; i++) {
+        var r = d.rows[i];
+        totBought += r.bought; totSold += r.sold;
+        inner += '<tr><td class="r-name">' + r.name + '</td><td>' + r.bought + '</td><td>' + r.sold + '</td></tr>';
+    }
+    inner += '</tbody></table>';
+    inner += '<table class="r-totals"><tr><td>إجمالي الشراء</td><td>' + totBought + '</td></tr>' +
+        '<tr class="r-grand"><td>إجمالي البيع</td><td>' + totSold + '</td></tr></table>';
+    sendToPrinter(inner);
+}
+
+// Shared silent print for report-style documents.
+function sendToPrinter(innerHtml) {
+    try {
+        var doc = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
+            RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + innerHtml + '</div></body></html>';
+        if (ipcRenderer && ipcRenderer.invoke) {
+            ipcRenderer.invoke('print-html', doc).catch(function () {});
+        }
+    } catch (e) {}
+}
+
+function setStatsQuickRange(range) {
+    var to = new Date();
+    var from = new Date();
+    if (range === 'week') from.setDate(from.getDate() - 7);
+    else if (range === 'month') from.setMonth(from.getMonth() - 1);
+    function fmt(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+    document.getElementById('statsFrom').value = fmt(from);
+    document.getElementById('statsTo').value = fmt(to);
+    runStats();
+}
+
 // ============ NAVIGATION ============
 function switchPage(page) {
     currentPage = page;
@@ -1516,6 +1828,41 @@ function setupEventListeners() {
     if (closeDayModal) closeDayModal.addEventListener('click', function (e) {
         if (e.target === this) this.style.display = 'none';
     });
+    var printDayCloseBtn = document.getElementById('printDayCloseBtn');
+    if (printDayCloseBtn) printDayCloseBtn.addEventListener('click', function () { printDayClose(computeShiftSummary()); });
+
+    // Themed confirm/alert modal buttons
+    var confirmYesBtn = document.getElementById('confirmYesBtn');
+    if (confirmYesBtn) confirmYesBtn.addEventListener('click', function () {
+        var cb = _confirmCb;
+        _closeConfirm();
+        if (cb) cb();
+    });
+    var confirmNoBtn = document.getElementById('confirmNoBtn');
+    if (confirmNoBtn) confirmNoBtn.addEventListener('click', _closeConfirm);
+    var confirmModal = document.getElementById('confirmModal');
+    if (confirmModal) confirmModal.addEventListener('click', function (e) {
+        if (e.target === this) _closeConfirm();
+    });
+
+    // Statistics page
+    var statsRunBtn = document.getElementById('statsRunBtn');
+    if (statsRunBtn) statsRunBtn.addEventListener('click', runStats);
+    var statsPrintBtn = document.getElementById('statsPrintBtn');
+    if (statsPrintBtn) statsPrintBtn.addEventListener('click', printStats);
+    var quickBtns = document.querySelectorAll('.stats-quick');
+    for (var qi = 0; qi < quickBtns.length; qi++) {
+        quickBtns[qi].addEventListener('click', function () { setStatsQuickRange(this.getAttribute('data-range')); });
+    }
+    var monthlyRunBtn = document.getElementById('monthlyRunBtn');
+    if (monthlyRunBtn) monthlyRunBtn.addEventListener('click', runMonthlyCheck);
+    var monthlyPrintBtn = document.getElementById('monthlyPrintBtn');
+    if (monthlyPrintBtn) monthlyPrintBtn.addEventListener('click', printMonthly);
+    var monthlyMonth = document.getElementById('monthlyMonth');
+    if (monthlyMonth && !monthlyMonth.value) {
+        var now = new Date();
+        monthlyMonth.value = now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2);
+    }
 
     document.getElementById('productSearch').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {

@@ -91,6 +91,10 @@
                     <span class="nav-icon">📊</span>
                     <span class="nav-label">التقارير</span>
                 </button>
+                <button class="nav-btn" data-page="stats">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-label">الإحصائيات</span>
+                </button>
             </nav>
             <div class="sidebar-footer">
                 <div class="user-info">
@@ -363,6 +367,42 @@
                     </table>
                 </div>
             </section>
+
+            <!-- STATISTICS PAGE -->
+            <section class="page" id="page-stats">
+                <div class="page-header">
+                    <h2>الإحصائيات</h2>
+                </div>
+
+                <!-- Sales statistics by date range -->
+                <div class="stats-block">
+                    <h3>📊 إحصائيات المبيعات حسب الفترة</h3>
+                    <div class="stats-controls">
+                        <label>من <input type="date" id="statsFrom"></label>
+                        <label>إلى <input type="date" id="statsTo"></label>
+                        <button class="btn-secondary stats-quick" data-range="week">آخر أسبوع</button>
+                        <button class="btn-secondary stats-quick" data-range="month">آخر شهر</button>
+                        <button class="btn-primary" id="statsRunBtn">عرض</button>
+                        <button class="btn-secondary" id="statsPrintBtn">🖨️ طباعة</button>
+                    </div>
+                    <div class="stats-results" id="statsResults">
+                        <p class="stats-hint">اختر فترة ثم اضغط «عرض» لاستعراض الكميات المباعة لكل منتج وبراند.</p>
+                    </div>
+                </div>
+
+                <!-- Monthly check: bought vs sold -->
+                <div class="stats-block">
+                    <h3>🗓️ الجرد الشهري (المشتريات مقابل المبيعات)</h3>
+                    <div class="stats-controls">
+                        <label>الشهر <input type="month" id="monthlyMonth"></label>
+                        <button class="btn-primary" id="monthlyRunBtn">إنشاء الجرد</button>
+                        <button class="btn-secondary" id="monthlyPrintBtn">🖨️ طباعة</button>
+                    </div>
+                    <div class="stats-results" id="monthlyResults">
+                        <p class="stats-hint">اختر الشهر ثم اضغط «إنشاء الجرد». المنتجات التي لم تُشترَ ولم تكن متوفرة طوال الشهر لن تظهر.</p>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -412,8 +452,22 @@
             </div>
             <div class="modal-body" id="closeDaySummary"></div>
             <div class="modal-footer">
+                <button class="btn-secondary" id="printDayCloseBtn">🖨️ طباعة التقرير</button>
                 <button class="btn-primary" id="confirmCloseDayBtn">تأكيد الإغلاق وتصفير الإجمالي</button>
                 <button class="btn-secondary" id="cancelCloseDayBtn">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Confirm / Alert Modal (themed) -->
+    <div class="modal-overlay" id="confirmModal" style="display:none;">
+        <div class="modal-content confirm-modal">
+            <div class="confirm-icon" id="confirmIcon">⚠️</div>
+            <h3 id="confirmTitle">تأكيد</h3>
+            <p id="confirmMessage"></p>
+            <div class="confirm-actions">
+                <button class="btn-primary" id="confirmYesBtn">نعم</button>
+                <button class="btn-secondary" id="confirmNoBtn">إلغاء</button>
             </div>
         </div>
     </div>

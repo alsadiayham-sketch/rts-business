@@ -694,6 +694,108 @@ body {
     text-align: center;
 }
 
+/* Themed Confirm / Alert modal */
+.confirm-modal {
+    max-width: 380px;
+    text-align: center;
+    padding: 28px 26px;
+}
+.confirm-modal .confirm-icon {
+    font-size: 46px;
+    line-height: 1;
+    margin-bottom: 12px;
+}
+.confirm-modal h3 {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--primary);
+    margin-bottom: 10px;
+}
+.confirm-modal p {
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.7;
+    margin-bottom: 22px;
+}
+.confirm-modal .confirm-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+.confirm-modal .confirm-actions button {
+    min-width: 120px;
+}
+
+/* Statistics page */
+.stats-block {
+    background: var(--bg-light, #fff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 22px;
+}
+.stats-block > h3 {
+    color: var(--primary);
+    font-size: 17px;
+    margin-bottom: 14px;
+}
+.stats-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.stats-controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--text-dim);
+}
+.stats-controls input[type="date"],
+.stats-controls input[type="month"] {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.stats-hint {
+    color: var(--text-dim);
+    font-size: 14px;
+    text-align: center;
+    padding: 16px;
+}
+.stats-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 18px;
+}
+.stats-kpi {
+    flex: 1;
+    min-width: 140px;
+    background: var(--primary-light);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+}
+.stats-kpi span {
+    display: block;
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+.stats-kpi strong {
+    color: var(--primary);
+    font-size: 22px;
+    font-weight: 800;
+}
+.stats-results h4 {
+    margin: 18px 0 8px;
+    font-size: 15px;
+    color: var(--text);
+}
+
 /* Cart Panel */
 .cart-panel {
     width: 360px;
