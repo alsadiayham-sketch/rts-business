@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '1.4.0';
+var APP_VERSION = '1.4.1';
 
 // ============ STATE ============
 var products = [];
@@ -890,7 +890,34 @@ function updateTotals() {
 }
 
 // ============ CHECKOUT (ATOMIC BATCH) ============
+// Entry point: show a themed confirmation with the total before finishing the sale.
 function checkout() {
+    if (cart.length === 0) return;
+    if (!licenseValid) { showAlert('الترخيص منتهي', { icon: '⛔', title: 'تنبيه' }); return; }
+
+    var subtotal = 0;
+    for (var i = 0; i < cart.length; i++) {
+        subtotal += cart[i].price * cart[i].qty;
+    }
+    var discountVal = parseFloat(document.getElementById('discountInput').value) || 0;
+    var discountType = document.getElementById('discountType').value;
+    var discount = discountType === 'percent' ? subtotal * (discountVal / 100) : discountVal;
+    var total = Math.max(0, subtotal - discount);
+    var payLabel = selectedPayment === 'cash' ? 'نقدي' : 'بطاقة';
+
+    var msg = 'الإجمالي المطلوب: \u20AA' + total.toFixed(2) + '\n';
+    if (discount > 0) { msg += 'الخصم: \u20AA' + discount.toFixed(2) + '\n'; }
+    msg += 'طريقة الدفع: ' + payLabel + '\n\nسيتم إتمام البيع وطباعة الفاتورة وفتح الدرج.';
+
+    showConfirm(msg, function () { doCheckout(); }, {
+        icon: '🧾',
+        title: 'تأكيد البيع',
+        yesText: 'إتمام وطباعة',
+        noText: 'إلغاء'
+    });
+}
+
+function doCheckout() {
     if (cart.length === 0) return;
     if (!licenseValid) { alert('الترخيص منتهي'); return; }
 

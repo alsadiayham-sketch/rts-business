@@ -740,6 +740,7 @@ body {
     color: var(--text);
     line-height: 1.7;
     margin-bottom: 22px;
+    white-space: pre-line;
 }
 .confirm-modal .confirm-actions {
     display: flex;
