@@ -140,14 +140,15 @@ ipcMain.handle('print-html', function (event, html) {
       resolve(result);
     }
     function doPrint() {
-      // Measure the rendered receipt height and print onto an 80mm-wide page sized
-      // to exactly fit the content. Without an explicit pageSize, Electron prints on
-      // the system default (A4/Letter), which on an 80mm thermal printer feeds a
-      // blank page because the content lands outside the printable area.
-      printWin.webContents.executeJavaScript(
-        'Math.ceil((document.body && document.body.scrollHeight) || 0)'
-      ).then(function (heightPx) {
-        var WIDTH_MICRONS = 80000;       // 80mm thermal roll
+      // Force the offscreen window to actually composite a frame before printing.
+      // A hidden window may never paint, which makes webContents.print emit a blank
+      // page on thermal printers. capturePage() forces a real render.
+      printWin.webContents.capturePage().then(function () {
+        return printWin.webContents.executeJavaScript(
+          'Math.ceil((document.body && document.body.scrollHeight) || 0)'
+        );
+      }).then(function (heightPx) {
+        var WIDTH_MICRONS = 58000;       // 58mm thermal roll
         var MICRONS_PER_PX = 264.5833;   // 96 dpi
         var heightMicrons = Math.round((Number(heightPx) || 600) * MICRONS_PER_PX) + 8000; // +small tail
         if (heightMicrons < 60000) heightMicrons = 60000;
