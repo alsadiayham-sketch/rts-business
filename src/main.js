@@ -1,7 +1,40 @@
 const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const path = require('path');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow = null;
+
+// In-app auto-update (electron-updater). Pulls the new build from the public
+// GitHub releases repo and installs it in place — no manual download needed.
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function sendUpdater(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data || {});
+  }
+}
+
+autoUpdater.on('update-available', function (info) {
+  sendUpdater('updater-available', { version: info && info.version });
+});
+autoUpdater.on('update-not-available', function () {
+  sendUpdater('updater-none', {});
+});
+autoUpdater.on('download-progress', function (p) {
+  sendUpdater('updater-progress', {
+    percent: p.percent || 0,
+    transferred: p.transferred || 0,
+    total: p.total || 0,
+    bytesPerSecond: p.bytesPerSecond || 0
+  });
+});
+autoUpdater.on('update-downloaded', function (info) {
+  sendUpdater('updater-downloaded', { version: info && info.version });
+});
+autoUpdater.on('error', function (err) {
+  sendUpdater('updater-error', { message: String((err && err.message) || err) });
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -68,7 +101,27 @@ ipcMain.handle('show-open-dialog', async function (event, options) {
   return result;
 });
 
-// IPC: Silent print of a fully-formed receipt HTML document to the default printer.
+// IPC: Start the in-app update (download from GitHub releases).
+// Returns ok:false with a reason so the renderer can fall back to a browser download.
+ipcMain.handle('updater-start', async function () {
+  if (!app.isPackaged) return { ok: false, reason: 'dev' };
+  try {
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+});
+
+// IPC: Quit and install the downloaded update, then relaunch.
+ipcMain.handle('updater-install', function () {
+  try {
+    setImmediate(function () { autoUpdater.quitAndInstall(true, true); });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+});
 // Loads the HTML in a hidden window and prints without a dialog (POS thermal printer).
 ipcMain.handle('print-html', function (event, html) {
   return new Promise(function (resolve) {

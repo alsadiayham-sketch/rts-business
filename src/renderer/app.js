@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '1.3.0';
+var APP_VERSION = '1.4.0';
 
 // ============ STATE ============
 var products = [];
@@ -178,6 +178,7 @@ function attemptLogin() {
         document.getElementById('sidebarStoreName').textContent = storeName;
         document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
         initApp();
+        setupUpdaterListeners();
         checkForUpdates();
     }).catch(function (err) {
         errorEl.textContent = 'خطأ في الاتصال: ' + err.message;
@@ -265,9 +266,7 @@ function showUpdateAvailable(version, notes, url) {
     var overlay = document.getElementById('updateOverlay');
     document.getElementById('updateVersion').textContent = version;
     document.getElementById('updateNotes').textContent = notes;
-    document.getElementById('updateDownloadBtn').onclick = function () {
-        electron.shell.openExternal(url);
-    };
+    setUpdateButtonToInstall(url);
     document.getElementById('updateDismissBtn').style.display = 'inline-block';
     document.getElementById('updateDismissBtn').onclick = function () {
         overlay.style.display = 'none';
@@ -280,14 +279,99 @@ function showForceUpdate(version, notes, url) {
     var overlay = document.getElementById('updateOverlay');
     document.getElementById('updateVersion').textContent = version;
     document.getElementById('updateNotes').textContent = notes;
-    document.getElementById('updateDownloadBtn').onclick = function () {
-        electron.shell.openExternal(url);
-    };
+    setUpdateButtonToInstall(url);
     document.getElementById('updateDismissBtn').style.display = 'none';
     document.getElementById('updateForceMsg').style.display = 'block';
     overlay.style.display = 'flex';
     // Block the app
     document.getElementById('appContainer').style.display = 'none';
+}
+
+// ===== In-app auto-update wiring (electron-updater) =====
+var _updateDownloadUrl = '';
+var _updaterListening = false;
+
+function setUpdateText(msg) {
+    var el = document.getElementById('updateProgressText');
+    if (el) { el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none'; }
+}
+function setUpdateProgress(pct) {
+    var wrap = document.getElementById('updateProgressWrap');
+    var bar = document.getElementById('updateProgressBar');
+    if (wrap) wrap.style.display = (pct === null) ? 'none' : 'block';
+    if (bar && pct !== null) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+}
+
+// Fall back to a plain browser download if in-app update can't run.
+function fallbackToBrowserDownload(url) {
+    var btn = document.getElementById('updateDownloadBtn');
+    btn.disabled = false;
+    btn.textContent = '⬇ تحميل التحديث من المتصفح';
+    btn.onclick = function () { if (url) electron.shell.openExternal(url); };
+}
+
+function setUpdateButtonToInstall(url) {
+    _updateDownloadUrl = url || '';
+    var btn = document.getElementById('updateDownloadBtn');
+    btn.disabled = false;
+    btn.textContent = '⬇ تحديث التطبيق الآن';
+    setUpdateProgress(null);
+    setUpdateText('');
+    btn.onclick = function () {
+        btn.disabled = true;
+        btn.textContent = '... جارٍ التحقق من التحديث';
+        setUpdateText('جارٍ الاتصال بخادم التحديثات...');
+        if (!ipcRenderer || !ipcRenderer.invoke) { fallbackToBrowserDownload(_updateDownloadUrl); return; }
+        ipcRenderer.invoke('updater-start').then(function (res) {
+            if (!res || !res.ok) {
+                // Dev mode or updater error -> let the user download manually.
+                setUpdateText('تعذّر التحديث التلقائي، يمكنك التحميل يدوياً.');
+                fallbackToBrowserDownload(_updateDownloadUrl);
+            }
+        }).catch(function () {
+            fallbackToBrowserDownload(_updateDownloadUrl);
+        });
+    };
+}
+
+function setupUpdaterListeners() {
+    if (_updaterListening || !ipcRenderer || !ipcRenderer.on) return;
+    _updaterListening = true;
+    var btn = document.getElementById('updateDownloadBtn');
+
+    ipcRenderer.on('updater-available', function () {
+        if (btn) btn.textContent = '... جارٍ تنزيل التحديث';
+        setUpdateText('جارٍ تنزيل التحديث، الرجاء الانتظار...');
+        setUpdateProgress(0);
+    });
+    ipcRenderer.on('updater-progress', function (event, p) {
+        var pct = Math.round(p && p.percent || 0);
+        setUpdateProgress(pct);
+        var mb = (p && p.total) ? (p.transferred / 1048576).toFixed(1) + ' / ' + (p.total / 1048576).toFixed(1) + ' م.ب' : '';
+        setUpdateText('جارٍ التنزيل ' + pct + '% ' + mb);
+    });
+    ipcRenderer.on('updater-downloaded', function () {
+        setUpdateProgress(100);
+        setUpdateText('تم تنزيل التحديث. سيتم إعادة تشغيل التطبيق للتثبيت.');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 إعادة التشغيل والتثبيت الآن';
+            btn.onclick = function () {
+                btn.disabled = true;
+                btn.textContent = '... جارٍ التثبيت';
+                ipcRenderer.invoke('updater-install');
+            };
+        }
+    });
+    ipcRenderer.on('updater-none', function () {
+        setUpdateText('أنت تستخدم أحدث إصدار.');
+        fallbackToBrowserDownload(_updateDownloadUrl);
+    });
+    ipcRenderer.on('updater-error', function (event, e) {
+        setUpdateProgress(null);
+        setUpdateText('حدث خطأ أثناء التحديث التلقائي. يمكنك التحميل يدوياً.');
+        fallbackToBrowserDownload(_updateDownloadUrl);
+    });
 }
 
 // ============ ACTIVITY LOGS ============
