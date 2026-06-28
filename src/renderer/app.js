@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.2';
+var APP_VERSION = '2.0.3';
 
 // ============ STATE ============
 var products = [];
@@ -1483,6 +1483,7 @@ function printReceipt(bill) {
 // Stored per device (a store may have different printers on different machines).
 function printerDeviceKey() { return 'ada_pos_printer_device'; }
 function printerPageModeKey() { return 'ada_pos_printer_pagemode'; }
+function printerLogKey() { return 'ada_pos_printer_logs'; }
 function getSavedPrinterDevice() { try { return localStorage.getItem(printerDeviceKey()) || ''; } catch (e) { return ''; } }
 function getSavedPrinterPageMode() { try { return localStorage.getItem(printerPageModeKey()) || 'auto'; } catch (e) { return 'auto'; } }
 
@@ -1494,6 +1495,37 @@ function posPrintHtml(html) {
     var dev = getSavedPrinterDevice();
     if (dev) opts.deviceName = dev;
     return ipcRenderer.invoke('print-html', html, opts);
+}
+
+// ---- Printer activity log (kept locally so it can be exported and sent to support) ----
+function getPrinterLogs() {
+    try { return JSON.parse(localStorage.getItem(printerLogKey()) || '[]'); } catch (e) { return []; }
+}
+function appendPrinterLog(entry) {
+    try {
+        var logs = getPrinterLogs();
+        logs.push(entry);
+        if (logs.length > 300) logs = logs.slice(logs.length - 300); // keep last 300
+        localStorage.setItem(printerLogKey(), JSON.stringify(logs));
+    } catch (e) {}
+    updatePrinterLogCount();
+}
+function clearPrinterLogs() {
+    try { localStorage.removeItem(printerLogKey()); } catch (e) {}
+    updatePrinterLogCount();
+    showPrinterHint('تم مسح سجلّ الطابعة', true);
+}
+function updatePrinterLogCount() {
+    var el = document.getElementById('printerLogCount');
+    if (el) el.textContent = String(getPrinterLogs().length);
+}
+
+// Pulls deep printer diagnostics (driver, port, paper size, status, versions) from main.
+function gatherPrinterDiagnostics() {
+    if (!(ipcRenderer && ipcRenderer.invoke)) return Promise.resolve(null);
+    return ipcRenderer.invoke('printer-diagnostics').catch(function (e) {
+        return { error: String(e && e.message || e) };
+    });
 }
 
 // Builds a self-contained sample receipt used by the in-app printer test buttons.
@@ -1518,24 +1550,168 @@ function showPrinterHint(msg, ok) {
     el.textContent = msg;
     el.style.color = ok ? '#1a8a4a' : '#c0392b';
     if (showPrinterHint._t) clearTimeout(showPrinterHint._t);
-    showPrinterHint._t = setTimeout(function () { if (el) el.textContent = ''; }, 6000);
+    showPrinterHint._t = setTimeout(function () { if (el) el.textContent = ''; }, 8000);
 }
 
 // Prints a sample with an EXPLICIT mode (ignores the saved default) using the printer
 // currently selected in the dropdown — lets the user trial each config on real hardware.
+// EVERYTHING is logged (selected printer, options, result, full printer diagnostics) so
+// support can read exactly what happened and why a thermal printer printed blank.
 function runTestPrint(mode) {
     var modeLabel = mode === '58mm' ? '58 ملم' : (mode === '80mm' ? '80 ملم' : 'تلقائي');
-    var html = buildSamplePrintDoc(modeLabel);
     if (!(ipcRenderer && ipcRenderer.invoke)) { showPrinterHint('الطباعة غير متاحة في هذا الوضع', false); return; }
+    var html = buildSamplePrintDoc(modeLabel);
     var sel = document.getElementById('printerSelect');
     var dev = (sel && sel.value) || '';
     var opts = { pageSize: mode };
     if (dev) opts.deviceName = dev;
+    var startedAt = Date.now();
     showPrinterHint('جارٍ إرسال الطباعة التجريبية (' + modeLabel + ')...', true);
-    ipcRenderer.invoke('print-html', html, opts).then(function (res) {
-        if (res && res.success) showPrinterHint('تم إرسال الطباعة التجريبية (' + modeLabel + ') ✔', true);
-        else showPrinterHint('فشل الطباعة: ' + ((res && res.reason) || 'تحقق من توصيل الطابعة'), false);
-    }).catch(function (e) { showPrinterHint('خطأ في الطباعة: ' + (e && e.message || e), false); });
+    // Gather diagnostics + run the print in parallel; log the combined outcome.
+    Promise.all([
+        gatherPrinterDiagnostics(),
+        ipcRenderer.invoke('print-html', html, opts).then(
+            function (res) { return res || { success: false, reason: 'no-result' }; },
+            function (e) { return { success: false, reason: String(e && e.message || e) }; }
+        )
+    ]).then(function (arr) {
+        var diagnostics = arr[0];
+        var res = arr[1];
+        var entry = {
+            ts: new Date().toISOString(),
+            appVersion: APP_VERSION,
+            action: 'test_print',
+            mode: mode,
+            deviceRequested: dev || '(system default)',
+            success: !!(res && res.success),
+            reason: (res && res.reason) || '',
+            durationMs: Date.now() - startedAt,
+            diagnostics: diagnostics
+        };
+        appendPrinterLog(entry);
+        // Also record in the shared activity log (visible to admin on app + website).
+        logActivity('printer_test',
+            'اختبار طباعة (' + modeLabel + ') على "' + (dev || 'الافتراضية') + '" — ' + (entry.success ? 'نجح' : 'فشل'),
+            { mode: mode, device: entry.deviceRequested, success: entry.success, reason: entry.reason });
+        if (entry.success) showPrinterHint('تم إرسال الطباعة التجريبية (' + modeLabel + ') ✔ — سُجّلت في السجلّ', true);
+        else showPrinterHint('فشل الطباعة (' + modeLabel + '): ' + (entry.reason || 'تحقق من توصيل الطابعة') + ' — سُجّلت', false);
+    });
+}
+
+// ---- RAW ESC/POS printing (direct to the spooler, bypasses the graphics driver) ----
+// This is how dedicated POS apps print to thermal printers. If the customer's other POS
+// prints fine but ours (and PDF viewers) print blank, this path is the likely fix.
+function strBytes(s) { var a = []; for (var i = 0; i < s.length; i++) a.push(s.charCodeAt(i) & 0xff); return a; }
+function buildEscPosTestBytes() {
+    var b = [];
+    b.push(0x1B, 0x40);             // ESC @  -> initialize
+    b.push(0x1B, 0x61, 0x01);       // center
+    b.push(0x1D, 0x21, 0x11);       // double width/height
+    b = b.concat(strBytes('ADA POS\n'));
+    b.push(0x1D, 0x21, 0x00);       // normal size
+    b = b.concat(strBytes('RAW PRINT TEST (ESC/POS)\n'));
+    b.push(0x1B, 0x61, 0x00);       // left
+    b = b.concat(strBytes('--------------------------------\n'));
+    b = b.concat(strBytes('Item 1           2      40.00\n'));
+    b = b.concat(strBytes('Item 2           1      90.00\n'));
+    b = b.concat(strBytes('--------------------------------\n'));
+    b.push(0x1B, 0x45, 0x01);       // bold on
+    b = b.concat(strBytes('TOTAL                  130.00\n'));
+    b.push(0x1B, 0x45, 0x00);       // bold off
+    b = b.concat(strBytes('\nIf you can read this, RAW works.\n'));
+    b = b.concat(strBytes('\n\n\n\n'));
+    b.push(0x1D, 0x56, 0x01);       // GS V 1 -> partial cut
+    return b;
+}
+
+function runRawTest() {
+    if (!(ipcRenderer && ipcRenderer.invoke)) { showPrinterHint('الطباعة غير متاحة في هذا الوضع', false); return; }
+    var sel = document.getElementById('printerSelect');
+    var dev = (sel && sel.value) || '';
+    if (!dev) { showPrinterHint('اختر الطابعة من القائمة أولاً (الطباعة المباشرة تتطلب تحديد الطابعة)', false); return; }
+    var bytes = buildEscPosTestBytes();
+    var base64 = '';
+    try { base64 = (typeof Buffer !== 'undefined') ? Buffer.from(bytes).toString('base64') : btoa(String.fromCharCode.apply(null, bytes)); }
+    catch (e) { showPrinterHint('تعذّر تجهيز البيانات: ' + (e && e.message || e), false); return; }
+    var startedAt = Date.now();
+    showPrinterHint('جارٍ إرسال طباعة مباشرة (ESC/POS) إلى "' + dev + '"...', true);
+    Promise.all([
+        gatherPrinterDiagnostics(),
+        ipcRenderer.invoke('print-raw', { printerName: dev, base64: base64 }).then(
+            function (res) { return res || { success: false, reason: 'no-result' }; },
+            function (e) { return { success: false, reason: String(e && e.message || e) }; }
+        )
+    ]).then(function (arr) {
+        var diagnostics = arr[0];
+        var res = arr[1];
+        var entry = {
+            ts: new Date().toISOString(),
+            appVersion: APP_VERSION,
+            action: 'raw_escpos_test',
+            deviceRequested: dev,
+            success: !!(res && res.success),
+            reason: (res && res.reason) || '',
+            durationMs: Date.now() - startedAt,
+            diagnostics: diagnostics
+        };
+        appendPrinterLog(entry);
+        logActivity('printer_raw_test',
+            'طباعة مباشرة ESC/POS على "' + dev + '" — ' + (entry.success ? 'نجح' : 'فشل'),
+            { device: dev, success: entry.success, reason: entry.reason });
+        if (entry.success) showPrinterHint('تم إرسال الطباعة المباشرة (ESC/POS) ✔ — تحقّق من الطابعة — سُجّلت', true);
+        else showPrinterHint('فشل الطباعة المباشرة: ' + (entry.reason || 'غير معروف') + ' — سُجّلت', false);
+    });
+}
+
+// Collects + logs printer diagnostics WITHOUT printing, so support can see the config.
+function runPrinterDiagnostics() {
+    showPrinterHint('جارٍ جمع معلومات الطابعات...', true);
+    gatherPrinterDiagnostics().then(function (diagnostics) {
+        var entry = {
+            ts: new Date().toISOString(),
+            appVersion: APP_VERSION,
+            action: 'diagnostics',
+            deviceRequested: getSavedPrinterDevice() || '(system default)',
+            savedPageMode: getSavedPrinterPageMode(),
+            diagnostics: diagnostics
+        };
+        appendPrinterLog(entry);
+        var n = (diagnostics && diagnostics.printers && diagnostics.printers.length) || 0;
+        logActivity('printer_diagnostics', 'جمع معلومات الطابعات (' + n + ' طابعة)', null);
+        showPrinterHint('تم جمع معلومات ' + n + ' طابعة وحفظها في السجلّ ✔', true);
+    });
+}
+
+// Exports the full printer log as a JSON file the user can send to support.
+function exportPrinterLogs() {
+    var logs = getPrinterLogs();
+    if (!logs.length) { showPrinterHint('لا يوجد سجلّ لتصديره. اطبع فاتورة تجريبية أولاً.', false); return; }
+    var payload = {
+        exportedAt: new Date().toISOString(),
+        appVersion: APP_VERSION,
+        store: (typeof getProjectId === 'function' ? getProjectId() : '') || '',
+        user: currentUser ? (currentUser.displayName || currentUser.username) : '',
+        savedDevice: getSavedPrinterDevice() || '(system default)',
+        savedPageMode: getSavedPrinterPageMode(),
+        entries: logs
+    };
+    var json = JSON.stringify(payload, null, 2);
+    var fname = 'printer-log_' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json';
+    if (ipcRenderer && ipcRenderer.invoke) {
+        ipcRenderer.invoke('show-save-dialog', {
+            defaultPath: fname,
+            filters: [{ name: 'JSON', extensions: ['json'] }]
+        }).then(function (result) {
+            if (result && !result.canceled && result.filePath) {
+                try {
+                    fs.writeFileSync(result.filePath, json, 'utf8');
+                    showPrinterHint('تم تصدير السجلّ ✔ — أرسل الملف للدعم الفني', true);
+                } catch (e) {
+                    showPrinterHint('تعذّر حفظ الملف: ' + (e && e.message || e), false);
+                }
+            }
+        });
+    }
 }
 
 // Loads installed printers into the dropdown and restores the saved selection + page mode.
@@ -1576,6 +1752,7 @@ function savePrinterSettings() {
 
 function initPrinterSettings() {
     loadPrinters();
+    updatePrinterLogCount();
     var refreshBtn = document.getElementById('refreshPrintersBtn');
     if (refreshBtn) refreshBtn.addEventListener('click', loadPrinters);
     var saveBtn = document.getElementById('savePrinterBtn');
@@ -1584,6 +1761,14 @@ function initPrinterSettings() {
     testBtns.forEach(function (b) {
         b.addEventListener('click', function () { runTestPrint(this.getAttribute('data-testprint')); });
     });
+    var diagBtn = document.getElementById('printerDiagBtn');
+    if (diagBtn) diagBtn.addEventListener('click', runPrinterDiagnostics);
+    var rawBtn = document.getElementById('printerRawTestBtn');
+    if (rawBtn) rawBtn.addEventListener('click', runRawTest);
+    var exportBtn = document.getElementById('printerExportBtn');
+    if (exportBtn) exportBtn.addEventListener('click', exportPrinterLogs);
+    var clearBtn = document.getElementById('printerClearLogBtn');
+    if (clearBtn) clearBtn.addEventListener('click', clearPrinterLogs);
 }
 
 

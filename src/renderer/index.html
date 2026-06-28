@@ -589,7 +589,7 @@
 
                     <div class="printer-test">
                         <div class="printer-test-title">🧪 طباعة فاتورة تجريبية</div>
-                        <p class="printer-test-desc">جرّب كل إعداد على طابعتك واختر الذي يظهر بوضوح، ثم اضبطه أعلاه واحفظه.</p>
+                        <p class="printer-test-desc">جرّب كل إعداد على طابعتك واختر الذي يظهر بوضوح، ثم اضبطه أعلاه واحفظه. يُسجَّل كل اختبار تلقائياً.</p>
                         <div class="printer-test-buttons">
                             <button class="printer-test-btn" data-testprint="auto">
                                 <span class="ptb-mode">تلقائي</span>
@@ -603,6 +603,20 @@
                                 <span class="ptb-mode">80 ملم</span>
                                 <span class="ptb-tag">ورق كبير</span>
                             </button>
+                            <button class="printer-test-btn printer-test-btn--raw" id="printerRawTestBtn">
+                                <span class="ptb-mode">طباعة مباشرة</span>
+                                <span class="ptb-tag">ESC/POS</span>
+                            </button>
+                        </div>
+                        <p class="printer-test-desc" style="margin-top:8px">💡 «طباعة مباشرة (ESC/POS)» ترسل الأوامر للطابعة مباشرةً متجاوزةً تعريف الرسوميات — جرّبها إذا كانت الفاتورة تطبع فارغة. تتطلب تحديد الطابعة من القائمة أعلاه.</p>
+                    </div>
+
+                    <div class="printer-log-bar">
+                        <span class="printer-log-info">📋 سجلّ الطابعة: <strong id="printerLogCount">0</strong> عملية مُسجّلة</span>
+                        <div class="printer-log-actions">
+                            <button class="btn-secondary" id="printerDiagBtn" title="جمع معلومات الطابعات وحفظها في السجلّ">🔍 تشخيص الطابعة</button>
+                            <button class="btn-secondary" id="printerExportBtn" title="حفظ السجلّ كملف لإرساله للدعم الفني">📤 تصدير السجلّ</button>
+                            <button class="btn-icon-secondary" id="printerClearLogBtn" title="مسح السجلّ" aria-label="مسح السجلّ">🗑️</button>
                         </div>
                     </div>
                     <div class="notes-saved-hint" id="printerSavedHint"></div>

@@ -1,5 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 
 let mainWindow = null;
@@ -217,5 +220,116 @@ ipcMain.handle('list-printers', function () {
   return Promise.resolve([]);
 });
 
+// Gathers deep printer diagnostics via PowerShell (driver, port, paper size, status,
+// default printer) plus Electron/Chrome/OS versions. This is what lets us tell WHY a
+// thermal printer feeds a blank/tiny bill — almost always a wrong PaperSize or driver
+// in the Windows printer config. Returned to the renderer to be logged + exported.
+ipcMain.handle('printer-diagnostics', function () {
+  var versions = {
+    app: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    platform: process.platform,
+    osRelease: require('os').release(),
+    arch: process.arch
+  };
+  var psScript =
+    '$ErrorActionPreference="SilentlyContinue";' +
+    '$out = Get-CimInstance Win32_Printer | ForEach-Object {' +
+    '  $cfg = $null;' +
+    '  try { $cfg = Get-PrintConfiguration -PrinterName $_.Name -ErrorAction Stop } catch {};' +
+    '  [PSCustomObject]@{' +
+    '    Name=$_.Name; Default=$_.Default; DriverName=$_.DriverName; PortName=$_.PortName;' +
+    '    WorkOffline=$_.WorkOffline; PrinterStatus=$_.PrinterStatus; PrinterState=$_.PrinterState;' +
+    '    PaperSize= if($cfg){ "$($cfg.PaperSize)" } else { $null };' +
+    '    Collate= if($cfg){ $cfg.Collate } else { $null };' +
+    '    DriverPaper= ($_.PrinterPaperNames -join ", ")' +
+    '  }' +
+    '};' +
+    'if($out -eq $null){ "[]" } else { $out | ConvertTo-Json -Depth 4 -Compress }';
+  return new Promise(function (resolve) {
+    var settled = false;
+    function done(result) { if (settled) return; settled = true; resolve(result); }
+    try {
+      execFile('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+        { timeout: 12000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+        function (err, stdout, stderr) {
+          var printers = [];
+          try {
+            var parsed = JSON.parse((stdout || '').trim() || '[]');
+            printers = Array.isArray(parsed) ? parsed : [parsed];
+          } catch (e) {}
+          done({
+            versions: versions,
+            printers: printers,
+            psError: err ? String(err.message || err) : (stderr ? String(stderr).trim() : '')
+          });
+        });
+    } catch (e) {
+      done({ versions: versions, printers: [], psError: String(e && e.message || e) });
+    }
+  });
+});
+
+// Sends RAW bytes straight to a printer via the Windows spooler (WritePrinter with the
+// "RAW" datatype, P/Invoked through PowerShell). This is how dedicated POS apps drive
+// thermal printers: ESC/POS commands bypass the GDI graphics driver entirely, so they
+// print on hardware where Chromium's graphical print (and PDF viewers) come out blank.
+// `opts`: { printerName, base64 }  -> base64 is the raw byte stream to send.
+ipcMain.handle('print-raw', function (event, opts) {
+  opts = opts || {};
+  return new Promise(function (resolve) {
+    var settled = false;
+    function done(r) { if (settled) return; settled = true; resolve(r); }
+    var printerName = String(opts.printerName || '');
+    if (!printerName) { done({ success: false, reason: 'no-printer-selected' }); return; }
+    var bytes;
+    try { bytes = Buffer.from(String(opts.base64 || ''), 'base64'); }
+    catch (e) { done({ success: false, reason: 'bad-data' }); return; }
+    if (!bytes.length) { done({ success: false, reason: 'empty-data' }); return; }
+    var tmpFile = path.join(os.tmpdir(), 'ada_raw_' + Date.now() + '.bin');
+    try { fs.writeFileSync(tmpFile, bytes); }
+    catch (e) { done({ success: false, reason: 'tmp-write-failed: ' + (e && e.message || e) }); return; }
+
+    var psScript =
+      '$ErrorActionPreference="Stop";' +
+      '$code=@"' + '\n' +
+      'using System;using System.IO;using System.Runtime.InteropServices;' + '\n' +
+      'public class RawPrinterHelper{' + '\n' +
+      '[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] public class DOCINFOA{public string pDocName;public string pOutputFile;public string pDataType;}' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="OpenPrinterW",SetLastError=true,CharSet=CharSet.Unicode)] public static extern bool OpenPrinter(string src,out IntPtr h,IntPtr pd);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="ClosePrinter",SetLastError=true)] public static extern bool ClosePrinter(IntPtr h);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="StartDocPrinterW",SetLastError=true,CharSet=CharSet.Unicode)] public static extern bool StartDocPrinter(IntPtr h,int level,[In] DOCINFOA di);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="EndDocPrinter",SetLastError=true)] public static extern bool EndDocPrinter(IntPtr h);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="StartPagePrinter",SetLastError=true)] public static extern bool StartPagePrinter(IntPtr h);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="EndPagePrinter",SetLastError=true)] public static extern bool EndPagePrinter(IntPtr h);' + '\n' +
+      '[DllImport("winspool.Drv",EntryPoint="WritePrinter",SetLastError=true)] public static extern bool WritePrinter(IntPtr h,IntPtr buf,int count,out int written);' + '\n' +
+      'public static string Send(string printer,byte[] bytes){IntPtr h;var di=new DOCINFOA();di.pDocName="ADA POS Receipt";di.pDataType="RAW";' + '\n' +
+      'if(!OpenPrinter(printer,out h,IntPtr.Zero)) return "OPEN_FAIL:"+Marshal.GetLastWin32Error();' + '\n' +
+      'string r="UNKNOWN";try{if(StartDocPrinter(h,1,di)){if(StartPagePrinter(h)){IntPtr p=Marshal.AllocHGlobal(bytes.Length);Marshal.Copy(bytes,0,p,bytes.Length);int w;bool ok=WritePrinter(h,p,bytes.Length,out w);Marshal.FreeHGlobal(p);EndPagePrinter(h);r=ok?("OK:"+w):("WRITE_FAIL:"+Marshal.GetLastWin32Error());}else{r="STARTPAGE_FAIL:"+Marshal.GetLastWin32Error();}EndDocPrinter(h);}else{r="STARTDOC_FAIL:"+Marshal.GetLastWin32Error();}}finally{ClosePrinter(h);}return r;}' + '\n' +
+      '}' + '\n' +
+      '"@;' +
+      'Add-Type -TypeDefinition $code -Language CSharp;' +
+      '$bytes=[System.IO.File]::ReadAllBytes($env:ADA_RAW_FILE);' +
+      '[RawPrinterHelper]::Send($env:ADA_RAW_PRINTER,$bytes)';
+
+    try {
+      execFile('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+        { timeout: 15000, windowsHide: true, env: Object.assign({}, process.env, { ADA_RAW_FILE: tmpFile, ADA_RAW_PRINTER: printerName }) },
+        function (err, stdout, stderr) {
+          try { fs.unlinkSync(tmpFile); } catch (e) {}
+          var out = String(stdout || '').trim();
+          if (!err && out.indexOf('OK:') === 0) done({ success: true, reason: out });
+          else done({ success: false, reason: out || String((err && err.message) || stderr || 'raw-print-failed') });
+        });
+    } catch (e) {
+      try { fs.unlinkSync(tmpFile); } catch (e2) {}
+      done({ success: false, reason: String(e && e.message || e) });
+    }
+  });
+});
 
 

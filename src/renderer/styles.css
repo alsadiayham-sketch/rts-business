@@ -1737,10 +1737,23 @@ body {
 .printer-test-btn .ptb-mode { font-size: 15px; font-weight: 800; color: var(--text); }
 .printer-test-btn .ptb-tag { font-size: 11px; font-weight: 600; color: var(--text-dim); }
 .printer-test-btn::before { content: "🖨️"; font-size: 20px; }
+.printer-test-btn--raw { border-color: var(--primary); background: var(--primary-light); }
+.printer-test-btn--raw::before { content: "⚡"; }
+.printer-test-btn--raw .ptb-mode { color: var(--primary); }
+
+.printer-log-bar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 12px; margin-top: 16px; padding: 12px 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.printer-log-info { font-size: 13px; color: var(--text-dim); }
+.printer-log-info strong { color: var(--text); }
+.printer-log-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 720px) {
     .printer-settings { grid-template-columns: 1fr; }
     .printer-actions .btn-primary { width: 100%; }
+    .printer-log-bar { flex-direction: column; align-items: stretch; }
 }
 
 
