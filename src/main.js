@@ -239,15 +239,19 @@ ipcMain.handle('printer-diagnostics', function () {
     '$out = Get-CimInstance Win32_Printer | ForEach-Object {' +
     '  $cfg = $null;' +
     '  try { $cfg = Get-PrintConfiguration -PrinterName $_.Name -ErrorAction Stop } catch {};' +
+    '  $jobs = @(Get-PrintJob -PrinterName $_.Name -ErrorAction SilentlyContinue | ForEach-Object {' +
+    '    [PSCustomObject]@{ Id=$_.Id; Doc="$($_.DocumentName)"; Status="$($_.JobStatus)"; Size=$_.Size }' +
+    '  });' +
     '  [PSCustomObject]@{' +
     '    Name=$_.Name; Default=$_.Default; DriverName=$_.DriverName; PortName=$_.PortName;' +
     '    WorkOffline=$_.WorkOffline; PrinterStatus=$_.PrinterStatus; PrinterState=$_.PrinterState;' +
     '    PaperSize= if($cfg){ "$($cfg.PaperSize)" } else { $null };' +
     '    Collate= if($cfg){ $cfg.Collate } else { $null };' +
+    '    QueuedJobs= $jobs.Count; Jobs= $jobs;' +
     '    DriverPaper= ($_.PrinterPaperNames -join ", ")' +
     '  }' +
     '};' +
-    'if($out -eq $null){ "[]" } else { $out | ConvertTo-Json -Depth 4 -Compress }';
+    'if($out -eq $null){ "[]" } else { $out | ConvertTo-Json -Depth 5 -Compress }';
   return new Promise(function (resolve) {
     var settled = false;
     function done(result) { if (settled) return; settled = true; resolve(result); }
@@ -327,6 +331,35 @@ ipcMain.handle('print-raw', function (event, opts) {
         });
     } catch (e) {
       try { fs.unlinkSync(tmpFile); } catch (e2) {}
+      done({ success: false, reason: String(e && e.message || e) });
+    }
+  });
+});
+
+// Purges all pending jobs from a printer's queue. A single stuck/errored job (common
+// after a failed graphical print to a thermal driver) blocks every later job — including
+// RAW ESC/POS — so the printer goes silent. Clearing the queue unblocks it.
+ipcMain.handle('clear-print-queue', function (event, printerName) {
+  return new Promise(function (resolve) {
+    var settled = false;
+    function done(r) { if (settled) return; settled = true; resolve(r); }
+    var name = String(printerName || '');
+    var psScript = name
+      ? '$ErrorActionPreference="SilentlyContinue";' +
+        '$j = @(Get-PrintJob -PrinterName "' + name.replace(/"/g, '') + '");' +
+        '$j | Remove-PrintJob; "REMOVED:" + $j.Count'
+      : '$ErrorActionPreference="SilentlyContinue";' +
+        '$n=0; Get-Printer | ForEach-Object { $j=@(Get-PrintJob -PrinterName $_.Name); $n+=$j.Count; $j | Remove-PrintJob }; "REMOVED:" + $n';
+    try {
+      execFile('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+        { timeout: 12000, windowsHide: true },
+        function (err, stdout, stderr) {
+          var out = String(stdout || '').trim();
+          if (!err && out.indexOf('REMOVED:') === 0) done({ success: true, removed: parseInt(out.split(':')[1], 10) || 0 });
+          else done({ success: false, reason: out || String((err && err.message) || stderr || 'clear-failed') });
+        });
+    } catch (e) {
       done({ success: false, reason: String(e && e.message || e) });
     }
   });

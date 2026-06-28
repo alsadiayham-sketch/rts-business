@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.3';
+var APP_VERSION = '2.0.4';
 
 // ============ STATE ============
 var products = [];
@@ -1635,15 +1635,17 @@ function runRawTest() {
     catch (e) { showPrinterHint('تعذّر تجهيز البيانات: ' + (e && e.message || e), false); return; }
     var startedAt = Date.now();
     showPrinterHint('جارٍ إرسال طباعة مباشرة (ESC/POS) إلى "' + dev + '"...', true);
-    Promise.all([
-        gatherPrinterDiagnostics(),
-        ipcRenderer.invoke('print-raw', { printerName: dev, base64: base64 }).then(
-            function (res) { return res || { success: false, reason: 'no-result' }; },
-            function (e) { return { success: false, reason: String(e && e.message || e) }; }
-        )
-    ]).then(function (arr) {
-        var diagnostics = arr[0];
-        var res = arr[1];
+    // Print FIRST, then gather diagnostics so the queue snapshot shows whether the
+    // RAW job got stuck (jammed queue = the printer stays silent).
+    ipcRenderer.invoke('print-raw', { printerName: dev, base64: base64 }).then(
+        function (res) { return res || { success: false, reason: 'no-result' }; },
+        function (e) { return { success: false, reason: String(e && e.message || e) }; }
+    ).then(function (res) {
+        return gatherPrinterDiagnostics().then(function (diagnostics) {
+            return { res: res, diagnostics: diagnostics };
+        });
+    }).then(function (o) {
+        var res = o.res, diagnostics = o.diagnostics;
         var entry = {
             ts: new Date().toISOString(),
             appVersion: APP_VERSION,
@@ -1660,6 +1662,36 @@ function runRawTest() {
             { device: dev, success: entry.success, reason: entry.reason });
         if (entry.success) showPrinterHint('تم إرسال الطباعة المباشرة (ESC/POS) ✔ — تحقّق من الطابعة — سُجّلت', true);
         else showPrinterHint('فشل الطباعة المباشرة: ' + (entry.reason || 'غير معروف') + ' — سُجّلت', false);
+    });
+}
+
+// Purges stuck jobs from the selected printer's queue, then logs the result. A single
+// jammed graphical job blocks every later job (including RAW), so this is the first thing
+// to try when the printer accepts jobs (OK) but no paper comes out.
+function clearPrintQueue() {
+    if (!(ipcRenderer && ipcRenderer.invoke)) { showPrinterHint('غير متاح في هذا الوضع', false); return; }
+    var sel = document.getElementById('printerSelect');
+    var dev = (sel && sel.value) || '';
+    showPrinterHint('جارٍ مسح قائمة الطباعة' + (dev ? ' لـ "' + dev + '"' : '') + '...', true);
+    ipcRenderer.invoke('clear-print-queue', dev).then(
+        function (res) { return res || { success: false, reason: 'no-result' }; },
+        function (e) { return { success: false, reason: String(e && e.message || e) }; }
+    ).then(function (res) {
+        var entry = {
+            ts: new Date().toISOString(),
+            appVersion: APP_VERSION,
+            action: 'clear_print_queue',
+            deviceRequested: dev || '(all printers)',
+            success: !!(res && res.success),
+            removed: (res && res.removed) || 0,
+            reason: (res && res.reason) || ''
+        };
+        appendPrinterLog(entry);
+        logActivity('printer_clear_queue',
+            'مسح قائمة الطباعة "' + entry.deviceRequested + '" — ' + (entry.success ? ('أُزيلت ' + entry.removed + ' مهمة') : 'فشل'),
+            { device: entry.deviceRequested, success: entry.success, removed: entry.removed, reason: entry.reason });
+        if (entry.success) showPrinterHint('تم مسح قائمة الطباعة (' + entry.removed + ' مهمة) ✔ — جرّب «طباعة مباشرة» الآن', true);
+        else showPrinterHint('تعذّر مسح القائمة: ' + (entry.reason || 'غير معروف'), false);
     });
 }
 
@@ -1765,6 +1797,8 @@ function initPrinterSettings() {
     if (diagBtn) diagBtn.addEventListener('click', runPrinterDiagnostics);
     var rawBtn = document.getElementById('printerRawTestBtn');
     if (rawBtn) rawBtn.addEventListener('click', runRawTest);
+    var clearQueueBtn = document.getElementById('printerClearQueueBtn');
+    if (clearQueueBtn) clearQueueBtn.addEventListener('click', clearPrintQueue);
     var exportBtn = document.getElementById('printerExportBtn');
     if (exportBtn) exportBtn.addEventListener('click', exportPrinterLogs);
     var clearBtn = document.getElementById('printerClearLogBtn');
