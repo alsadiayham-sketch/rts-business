@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.0';
+var APP_VERSION = '2.0.1';
 
 // ============ STATE ============
 var products = [];
@@ -1385,22 +1385,22 @@ var RECEIPT_PRINT_CSS =
     '@page { size: 58mm auto; margin: 0; }' +
     '* { margin:0; padding:0; box-sizing:border-box; }' +
     'html,body { width:58mm; }' +
-    'body { font-family:"Courier New",monospace; color:#000; background:#fff; }' +
+    'body { font-family:"Courier New",monospace; color:#000; background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }' +
     '.receipt { width:58mm; padding:3mm 2mm; color:#000; font-weight:bold; }' +
-    '.r-title { text-align:center; font-size:18px; font-weight:bold; margin-bottom:4px; }' +
-    '.r-meta { text-align:center; font-size:11px; font-weight:bold; margin-bottom:2px; }' +
+    '.r-title { text-align:center; font-size:22px; font-weight:bold; margin-bottom:4px; }' +
+    '.r-meta { text-align:center; font-size:13px; font-weight:bold; margin-bottom:2px; }' +
     '.r-items { width:100%; border-collapse:collapse; margin:8px 0; }' +
-    '.r-items th { background:#000; color:#fff; font-weight:bold; padding:4px 3px; border:1px solid #000; font-size:11px; }' +
-    '.r-items td { padding:4px 3px; border:1px solid #000; font-weight:bold; font-size:11px; text-align:center; }' +
+    '.r-items th { background:#000; color:#fff; font-weight:bold; padding:5px 3px; border:1px solid #000; font-size:13px; }' +
+    '.r-items td { padding:5px 3px; border:1px solid #000; font-weight:bold; font-size:13px; text-align:center; }' +
     '.r-items td.r-name { text-align:right; }' +
     '.r-totals { width:100%; border-collapse:collapse; margin-top:6px; }' +
-    '.r-totals td { padding:3px 3px; font-weight:bold; font-size:12px; }' +
+    '.r-totals td { padding:3px 3px; font-weight:bold; font-size:14px; }' +
     '.r-totals td:last-child { text-align:left; }' +
-    '.r-totals tr.r-grand td { border-top:2px solid #000; border-bottom:2px solid #000; font-size:15px; padding:6px 3px; }' +
-    '.r-thanks { text-align:center; font-weight:bold; margin-top:10px; font-size:12px; }' +
-    '.r-note { margin-top:6px; font-size:11px; font-weight:bold; text-align:right; border-top:1px dashed #000; padding-top:4px; }' +
+    '.r-totals tr.r-grand td { border-top:2px solid #000; border-bottom:2px solid #000; font-size:17px; padding:6px 3px; }' +
+    '.r-thanks { text-align:center; font-weight:bold; margin-top:10px; font-size:14px; }' +
+    '.r-note { margin-top:6px; font-size:12px; font-weight:bold; text-align:right; border-top:1px dashed #000; padding-top:4px; }' +
     '.r-barcode { text-align:center; margin-top:8px; }' +
-    '.r-barcode svg { width:90%; height:42px; }';
+    '.r-barcode svg { width:90%; height:48px; }';
 
 function buildReceiptInnerHTML(bill) {
     var dateStr = (bill.createdAt && bill.createdAt.toDate)
