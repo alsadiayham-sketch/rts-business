@@ -558,6 +558,55 @@
                     <textarea id="generalNotes" class="general-notes" placeholder="اكتب ملاحظاتك هنا..."></textarea>
                     <div class="notes-saved-hint" id="notesSavedHint"></div>
                 </div>
+
+                <!-- Printer settings & test -->
+                <div class="stats-block">
+                    <h3>🖨️ إعدادات الطابعة واختبارها</h3>
+                    <p class="stats-hint">اختر طابعتك الحرارية وحجم الورق، ثم اطبع فاتورة تجريبية للتأكد من ظهورها كاملة وواضحة. تُحفظ الإعدادات على هذا الجهاز.</p>
+
+                    <div class="printer-settings">
+                        <div class="printer-field">
+                            <label for="printerSelect">الطابعة</label>
+                            <div class="printer-input-row">
+                                <select id="printerSelect" aria-label="اختر الطابعة"></select>
+                                <button class="btn-icon-secondary" id="refreshPrintersBtn" title="تحديث قائمة الطابعات" aria-label="تحديث قائمة الطابعات">↺</button>
+                            </div>
+                        </div>
+
+                        <div class="printer-field">
+                            <label for="printerPageMode">حجم الورق</label>
+                            <select id="printerPageMode" aria-label="حجم ورق الطابعة">
+                                <option value="auto">تلقائي (افتراضي الطابعة) — موصى به</option>
+                                <option value="58mm">58 ملم</option>
+                                <option value="80mm">80 ملم</option>
+                            </select>
+                        </div>
+
+                        <div class="printer-actions">
+                            <button class="btn-primary" id="savePrinterBtn">💾 حفظ الإعدادات</button>
+                        </div>
+                    </div>
+
+                    <div class="printer-test">
+                        <div class="printer-test-title">🧪 طباعة فاتورة تجريبية</div>
+                        <p class="printer-test-desc">جرّب كل إعداد على طابعتك واختر الذي يظهر بوضوح، ثم اضبطه أعلاه واحفظه.</p>
+                        <div class="printer-test-buttons">
+                            <button class="printer-test-btn" data-testprint="auto">
+                                <span class="ptb-mode">تلقائي</span>
+                                <span class="ptb-tag">موصى به</span>
+                            </button>
+                            <button class="printer-test-btn" data-testprint="58mm">
+                                <span class="ptb-mode">58 ملم</span>
+                                <span class="ptb-tag">ورق صغير</span>
+                            </button>
+                            <button class="printer-test-btn" data-testprint="80mm">
+                                <span class="ptb-mode">80 ملم</span>
+                                <span class="ptb-tag">ورق كبير</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="notes-saved-hint" id="printerSavedHint"></div>
+                </div>
             </section>
         </main>
     </div>

@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.1';
+var APP_VERSION = '2.0.2';
 
 // ============ STATE ============
 var products = [];
@@ -411,6 +411,7 @@ function initApp() {
     renderShortcutsEditor();
     initShortcutsUI();
     initGeneralNotes();
+    initPrinterSettings();
     loadHeldSales();
     updatePaymentUI();
     // Load first batch of products fast, then subscribe to rest
@@ -622,7 +623,7 @@ function printDayClose(s) {
         var doc = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
             RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + inner + '</div></body></html>';
         if (ipcRenderer && ipcRenderer.invoke) {
-            ipcRenderer.invoke('print-html', doc).catch(function () {});
+            posPrintHtml(doc).catch(function () {});
         }
     } catch (e) {}
 }
@@ -1469,7 +1470,7 @@ function printReceipt(bill) {
     try {
         var html = buildPrintableReceipt(bill);
         if (ipcRenderer && ipcRenderer.invoke) {
-            ipcRenderer.invoke('print-html', html).catch(function () { window.print(); });
+            posPrintHtml(html).catch(function () { window.print(); });
         } else {
             window.print();
         }
@@ -1477,6 +1478,114 @@ function printReceipt(bill) {
         try { window.print(); } catch (e2) {}
     }
 }
+
+// ============ PRINTER SETTINGS (shared print path) ============
+// Stored per device (a store may have different printers on different machines).
+function printerDeviceKey() { return 'ada_pos_printer_device'; }
+function printerPageModeKey() { return 'ada_pos_printer_pagemode'; }
+function getSavedPrinterDevice() { try { return localStorage.getItem(printerDeviceKey()) || ''; } catch (e) { return ''; } }
+function getSavedPrinterPageMode() { try { return localStorage.getItem(printerPageModeKey()) || 'auto'; } catch (e) { return 'auto'; } }
+
+// Single entry point every receipt print goes through, so the user's saved printer
+// and paper-size choice are always applied consistently.
+function posPrintHtml(html) {
+    if (!(ipcRenderer && ipcRenderer.invoke)) return Promise.reject(new Error('no-ipc'));
+    var opts = { pageSize: getSavedPrinterPageMode() };
+    var dev = getSavedPrinterDevice();
+    if (dev) opts.deviceName = dev;
+    return ipcRenderer.invoke('print-html', html, opts);
+}
+
+// Builds a self-contained sample receipt used by the in-app printer test buttons.
+function buildSamplePrintDoc(modeLabel) {
+    var inner =
+        '<div class="r-title">عقاد كيدز</div>' +
+        '<div class="r-meta">فاتورة تجريبية للطباعة</div>' +
+        '<div class="r-meta">الإعداد: ' + escapeHtml(modeLabel) + '</div>' +
+        '<table class="r-items"><thead><tr><th>الصنف</th><th>كمية</th><th>السعر</th></tr></thead><tbody>' +
+        '<tr><td class="r-name">منتج تجريبي ١</td><td>2</td><td>₪40.00</td></tr>' +
+        '<tr><td class="r-name">منتج تجريبي ٢</td><td>1</td><td>₪90.00</td></tr>' +
+        '</tbody></table>' +
+        '<table class="r-totals"><tr class="r-grand"><td>الإجمالي</td><td>₪130.00</td></tr></table>' +
+        '<div class="r-thanks">إذا ظهرت هذه الفاتورة كاملة وواضحة فهذا الإعداد مناسب ✔</div>';
+    return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
+        RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + inner + '</div></body></html>';
+}
+
+function showPrinterHint(msg, ok) {
+    var el = document.getElementById('printerSavedHint');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.color = ok ? '#1a8a4a' : '#c0392b';
+    if (showPrinterHint._t) clearTimeout(showPrinterHint._t);
+    showPrinterHint._t = setTimeout(function () { if (el) el.textContent = ''; }, 6000);
+}
+
+// Prints a sample with an EXPLICIT mode (ignores the saved default) using the printer
+// currently selected in the dropdown — lets the user trial each config on real hardware.
+function runTestPrint(mode) {
+    var modeLabel = mode === '58mm' ? '58 ملم' : (mode === '80mm' ? '80 ملم' : 'تلقائي');
+    var html = buildSamplePrintDoc(modeLabel);
+    if (!(ipcRenderer && ipcRenderer.invoke)) { showPrinterHint('الطباعة غير متاحة في هذا الوضع', false); return; }
+    var sel = document.getElementById('printerSelect');
+    var dev = (sel && sel.value) || '';
+    var opts = { pageSize: mode };
+    if (dev) opts.deviceName = dev;
+    showPrinterHint('جارٍ إرسال الطباعة التجريبية (' + modeLabel + ')...', true);
+    ipcRenderer.invoke('print-html', html, opts).then(function (res) {
+        if (res && res.success) showPrinterHint('تم إرسال الطباعة التجريبية (' + modeLabel + ') ✔', true);
+        else showPrinterHint('فشل الطباعة: ' + ((res && res.reason) || 'تحقق من توصيل الطابعة'), false);
+    }).catch(function (e) { showPrinterHint('خطأ في الطباعة: ' + (e && e.message || e), false); });
+}
+
+// Loads installed printers into the dropdown and restores the saved selection + page mode.
+function loadPrinters() {
+    var sel = document.getElementById('printerSelect');
+    var modeSel = document.getElementById('printerPageMode');
+    if (modeSel) modeSel.value = getSavedPrinterPageMode();
+    if (!sel) return;
+    var saved = getSavedPrinterDevice();
+    if (!(ipcRenderer && ipcRenderer.invoke)) {
+        sel.innerHTML = '<option value="">الطابعة الافتراضية للنظام</option>';
+        return;
+    }
+    ipcRenderer.invoke('list-printers').then(function (printers) {
+        var html = '<option value="">الطابعة الافتراضية للنظام</option>';
+        (printers || []).forEach(function (p) {
+            var label = escapeHtml(p.displayName || p.name) + (p.isDefault ? ' (افتراضية)' : '');
+            var selected = (saved && saved === p.name) ? ' selected' : '';
+            html += '<option value="' + escapeHtml(p.name) + '"' + selected + '>' + label + '</option>';
+        });
+        sel.innerHTML = html;
+    }).catch(function () {
+        sel.innerHTML = '<option value="">الطابعة الافتراضية للنظام</option>';
+    });
+}
+
+function savePrinterSettings() {
+    var sel = document.getElementById('printerSelect');
+    var modeSel = document.getElementById('printerPageMode');
+    try {
+        localStorage.setItem(printerDeviceKey(), (sel && sel.value) || '');
+        localStorage.setItem(printerPageModeKey(), (modeSel && modeSel.value) || 'auto');
+        showPrinterHint('تم حفظ إعدادات الطابعة ✔', true);
+    } catch (e) {
+        showPrinterHint('تعذّر حفظ الإعدادات', false);
+    }
+}
+
+function initPrinterSettings() {
+    loadPrinters();
+    var refreshBtn = document.getElementById('refreshPrintersBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadPrinters);
+    var saveBtn = document.getElementById('savePrinterBtn');
+    if (saveBtn) saveBtn.addEventListener('click', savePrinterSettings);
+    var testBtns = document.querySelectorAll('[data-testprint]');
+    testBtns.forEach(function (b) {
+        b.addEventListener('click', function () { runTestPrint(this.getAttribute('data-testprint')); });
+    });
+}
+
 
 // ============ INVENTORY ============
 function renderInventory() {
@@ -2288,7 +2397,7 @@ function sendToPrinter(innerHtml) {
         var doc = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
             RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + innerHtml + '</div></body></html>';
         if (ipcRenderer && ipcRenderer.invoke) {
-            ipcRenderer.invoke('print-html', doc).catch(function () {});
+            posPrintHtml(doc).catch(function () {});
         }
     } catch (e) {}
 }
@@ -3424,7 +3533,7 @@ function printReturnReceipt(rec) {
     html += '<div class="r-thanks">شكراً لتعاملكم معنا</div>';
     var doc = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>' +
         RECEIPT_PRINT_CSS + '</style></head><body><div class="receipt">' + html + '</div></body></html>';
-    try { if (ipcRenderer && ipcRenderer.invoke) ipcRenderer.invoke('print-html', doc).catch(function () {}); } catch (e) {}
+    try { if (ipcRenderer && ipcRenderer.invoke) posPrintHtml(doc).catch(function () {}); } catch (e) {}
 }
 
 // ============ HELD / PARKED SALES ============

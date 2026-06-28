@@ -125,45 +125,36 @@ ipcMain.handle('updater-install', function () {
   }
 });
 // Loads the HTML in a hidden window and prints without a dialog (POS thermal printer).
-ipcMain.handle('print-html', function (event, html) {
+//
+// `opts` (all optional, used by the Settings > Printer Test tool and saved preferences):
+//   - deviceName : exact Windows printer name to print to. When omitted, the OS default
+//                  printer is used (silent print always targets the default otherwise).
+//   - pageSize   : 'auto' (or omitted) | '58mm' | '80mm'.
+//        * 'auto'  -> do NOT pass a pageSize. The receipt CSS declares `@page {size:58mm auto}`
+//                    and the thermal driver uses its own configured roll width. This is the
+//                    simple, proven path. Passing a custom micron pageSize made many thermal
+//                    drivers reject the job and feed a blank/tiny bill (the regression we fixed).
+//        * '58mm'/'80mm' -> pass an explicit width with a measured height. Offered only as a
+//                    fallback for printers that need an explicit size; let the user test which
+//                    one actually prints cleanly on their hardware.
+ipcMain.handle('print-html', function (event, html, opts) {
+  opts = opts || {};
   return new Promise(function (resolve) {
     var printWin = new BrowserWindow({
       show: false,
-      x: -32000,
-      y: -32000,
-      width: 380,
-      height: 800,
-      skipTaskbar: true,
-      paintWhenInitiallyHidden: true,
-      webPreferences: { nodeIntegration: false, contextIsolation: true, devTools: false, offscreen: false }
+      webPreferences: { nodeIntegration: false, contextIsolation: true, devTools: false }
     });
     var done = false;
     function finish(result) {
       if (done) return;
       done = true;
-      setTimeout(function () { if (printWin && !printWin.isDestroyed()) printWin.close(); }, 1200);
+      setTimeout(function () { if (printWin && !printWin.isDestroyed()) printWin.close(); }, 1000);
       resolve(result);
     }
-    // Print with an EXPLICIT page size. A 58mm-wide page fits 58/60/80mm thermal
-    // rolls. We must always pass pageSize — printing with no pageSize falls back to
-    // the system default (A4/Letter), which on a thermal printer feeds a blank page.
-    function printWithSize(heightPx) {
-      var WIDTH_MICRONS = 58000;       // 58mm roll (also safe on 60mm/80mm printers)
-      var MICRONS_PER_PX = 264.5833;   // 96 dpi
-      var h = Number(heightPx) || 0;
-      if (h < 40) h = 600;             // body not measured -> sane default, never blank
-      var heightMicrons = Math.round(h * MICRONS_PER_PX) + 8000; // + small feed tail
-      if (heightMicrons < 60000) heightMicrons = 60000;
+    function runPrint(printOptions) {
       try {
         printWin.webContents.print(
-          {
-            silent: true,
-            printBackground: true,
-            color: false,
-            landscape: false,
-            margins: { marginType: 'none' },
-            pageSize: { width: WIDTH_MICRONS, height: heightMicrons }
-          },
+          printOptions,
           function (success, failureReason) { finish({ success: success, reason: failureReason || '' }); }
         );
       } catch (e) {
@@ -171,23 +162,60 @@ ipcMain.handle('print-html', function (event, html) {
       }
     }
     function doPrint() {
-      // Force the off-screen window to actually paint (without stealing focus from
-      // the POS) so the printer receives real content, then size the page to the
-      // measured receipt height and print silently. NOTE: do NOT use capturePage()
-      // here — it can reject on a hidden window and previously caused blank prints.
-      try { printWin.showInactive(); } catch (e) {}
-      printWin.webContents.executeJavaScript(
-        'Math.ceil((document.body && document.body.scrollHeight) || 0)'
-      ).then(printWithSize).catch(function () { printWithSize(0); });
+      var base = {
+        silent: true,
+        printBackground: true,
+        color: false,
+        margins: { marginType: 'none' }
+      };
+      if (opts.deviceName) base.deviceName = String(opts.deviceName);
+      var mode = opts.pageSize;
+      if (mode === '58mm' || mode === '80mm') {
+        // Explicit width + height measured from the rendered receipt (microns @ 96dpi).
+        var widthMicrons = mode === '80mm' ? 80000 : 58000;
+        printWin.webContents.executeJavaScript(
+          'Math.ceil((document.body && document.body.scrollHeight) || 0)'
+        ).then(function (h) {
+          var MICRONS_PER_PX = 264.5833;
+          h = Number(h) || 0;
+          if (h < 40) h = 600;
+          var heightMicrons = Math.round(h * MICRONS_PER_PX) + 8000;
+          if (heightMicrons < 60000) heightMicrons = 60000;
+          base.pageSize = { width: widthMicrons, height: heightMicrons };
+          runPrint(base);
+        }).catch(function () {
+          base.pageSize = { width: widthMicrons, height: 200000 };
+          runPrint(base);
+        });
+      } else {
+        // 'auto' / default: no pageSize — proven thermal path.
+        runPrint(base);
+      }
     }
     printWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
     printWin.webContents.on('did-finish-load', function () {
-      // Wait for the renderer to lay out and paint the receipt before printing,
-      // otherwise the thermal printer spits out a blank page.
-      setTimeout(doPrint, 500);
+      // Small delay so the renderer fully lays out the receipt before printing.
+      setTimeout(doPrint, 300);
     });
     printWin.webContents.on('did-fail-load', function () { finish({ success: false, reason: 'load failed' }); });
     setTimeout(function () { finish({ success: false, reason: 'timeout' }); }, 15000);
   });
 });
+
+// Returns the list of installed printers (name, display name, default flag, status)
+// so the Settings > Printer Test tool can let the user pick the thermal printer.
+ipcMain.handle('list-printers', function () {
+  try {
+    if (mainWindow && mainWindow.webContents && mainWindow.webContents.getPrintersAsync) {
+      return mainWindow.webContents.getPrintersAsync().then(function (printers) {
+        return (printers || []).map(function (p) {
+          return { name: p.name, displayName: p.displayName || p.name, isDefault: !!p.isDefault, status: p.status };
+        });
+      }).catch(function () { return []; });
+    }
+  } catch (e) {}
+  return Promise.resolve([]);
+});
+
+
 
