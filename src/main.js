@@ -59,9 +59,11 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.setMenuBarVisibility(false);
 
-  // Prevent opening DevTools via keyboard
+  // Prevent opening DevTools via keyboard. F12 is intentionally left free so it
+  // can be used as a configurable POS shortcut — DevTools is already disabled
+  // via webPreferences.devTools:false, so F12 cannot open the inspector anyway.
   mainWindow.webContents.on('before-input-event', function (event, input) {
-    if (input.key === 'F12' || (input.control && input.shift && (input.key === 'I' || input.key === 'i'))) {
+    if (input.control && input.shift && (input.key === 'I' || input.key === 'i')) {
       event.preventDefault();
     }
   });

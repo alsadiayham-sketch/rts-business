@@ -91,6 +91,14 @@
                     <span class="nav-icon">🧾</span>
                     <span class="nav-label">الفواتير</span>
                 </button>
+                <button class="nav-btn" data-page="returns">
+                    <span class="nav-icon">↩️</span>
+                    <span class="nav-label">المرتجعات</span>
+                </button>
+                <button class="nav-btn" data-page="debts">
+                    <span class="nav-icon">📒</span>
+                    <span class="nav-label">الذمم</span>
+                </button>
                 <button class="nav-btn" data-page="reports">
                     <span class="nav-icon">📊</span>
                     <span class="nav-label">التقارير</span>
@@ -98,6 +106,10 @@
                 <button class="nav-btn" data-page="stats">
                     <span class="nav-icon">📈</span>
                     <span class="nav-label">الإحصائيات</span>
+                </button>
+                <button class="nav-btn" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">الإعدادات</span>
                 </button>
             </nav>
             <div class="sidebar-footer">
@@ -123,7 +135,7 @@
                         <div class="panel-header">
                             <h2>المنتجات</h2>
                             <div class="search-box">
-                                <input type="text" id="productSearch" placeholder="بحث بالاسم أو مسح الباركود..." autofocus>
+                                <input type="text" id="productSearch" placeholder="بحث بالاسم أو مسح الباركود..." aria-label="بحث عن منتج بالاسم أو الباركود" autofocus>
                             </div>
                             <div class="filter-row">
                                 <select id="categoryFilter">
@@ -135,12 +147,16 @@
                                 </select>
                             </div>
                             <div class="code-add-row">
-                                <input type="text" id="codeAddInput" placeholder="أدخل رقم المنتج (الكود) لإضافته للفاتورة...">
+                                <input type="text" id="codeAddInput" placeholder="أدخل رقم المنتج (الكود) لإضافته للفاتورة..." aria-label="إدخال رقم المنتج لإضافته للفاتورة">
                                 <button class="btn-secondary" id="codeAddBtn">+ إضافة</button>
                             </div>
                         </div>
-                        <div class="products-grid" id="productsGrid">
-                            <!-- Products loaded dynamically -->
+                        <div class="products-scroll">
+                            <div class="category-boxes-title" id="categoryBoxesTitle">التصنيفات</div>
+                            <div class="category-boxes" id="categoryBoxes"></div>
+                            <div class="products-grid" id="productsGrid">
+                                <!-- Products loaded dynamically -->
+                            </div>
                         </div>
                     </div>
 
@@ -177,9 +193,22 @@
                             </div>
                         </div>
                         <div class="cart-actions">
+                            <div class="bill-note-row">
+                                <input type="text" id="billNote" placeholder="📝 ملاحظة على الفاتورة (اختياري)...">
+                            </div>
+                            <div class="tender-row" id="tenderRow">
+                                <label>المبلغ المدفوع</label>
+                                <input type="number" id="tenderInput" min="0" placeholder="₪ المبلغ المدفوع من الزبون">
+                                <span class="change-due" id="changeDue"></span>
+                            </div>
                             <div class="payment-methods">
                                 <button class="pay-btn cash active" data-method="cash">نقدي</button>
                                 <button class="pay-btn card" data-method="card">بطاقة</button>
+                                <button class="pay-btn debt" data-method="debt">آجل (ذمم)</button>
+                            </div>
+                            <div class="cart-action-buttons">
+                                <button class="btn-secondary" id="holdSaleBtn">⏸️ تعليق</button>
+                                <button class="btn-secondary" id="resumeSaleBtn" style="display:none;">▶️ الفواتير المعلقة (<span id="heldCount">0</span>)</button>
                             </div>
                             <button class="btn-checkout" id="checkoutBtn" disabled>إتمام البيع</button>
                         </div>
@@ -192,7 +221,7 @@
                 <div class="page-header">
                     <h2>إدارة المخزون</h2>
                     <div class="header-actions">
-                        <input type="text" id="inventorySearch" placeholder="بحث في المخزون...">
+                        <input type="text" id="inventorySearch" placeholder="بحث في المخزون..." aria-label="بحث في المخزون">
                         <button class="btn-primary" id="addStockBtn">+ إضافة كمية</button>
                         <button class="btn-secondary" id="exportInventoryBtn">تصدير CSV</button>
                     </div>
@@ -301,6 +330,7 @@
                 <div class="page-header">
                     <h2>الفواتير</h2>
                     <div class="header-actions">
+                        <input type="text" id="billsSearch" placeholder="🔍 امسح باركود الفاتورة أو ابحث باسم منتج / رقم..." aria-label="بحث في الفواتير بالباركود أو الاسم أو الرقم">
                         <input type="date" id="billsDateFrom">
                         <input type="date" id="billsDateTo">
                         <button class="btn-primary" id="filterBillsBtn">بحث</button>
@@ -327,7 +357,10 @@
             <section class="page" id="page-reports">
                 <div class="page-header">
                     <h2>التقارير</h2>
-                    <button class="btn-primary" id="closeDayBtn" style="display:none;">🔒 إغلاق اليوم</button>
+                    <div class="header-actions">
+                        <button class="btn-secondary" id="withdrawBtn">💸 سحب شخصي</button>
+                        <button class="btn-primary" id="closeDayBtn" style="display:none;">🔒 إغلاق اليوم</button>
+                    </div>
                 </div>
                 <div class="reports-grid">
                     <div class="report-card report-shift">
@@ -335,6 +368,7 @@
                         <div class="report-value" id="shiftTotal">₪0</div>
                         <div class="report-sub" id="shiftCount">0 فاتورة</div>
                         <div class="report-sub" id="shiftCash">نقدي ₪0 • بطاقة ₪0</div>
+                        <div class="report-sub" id="shiftDrawer">الصندوق المتوقع ₪0</div>
                     </div>
                     <div class="report-card">
                         <h3>مبيعات اليوم</h3>
@@ -368,6 +402,87 @@
                             </tr>
                         </thead>
                         <tbody id="topProductsBody"></tbody>
+                    </table>
+                </div>
+                <div class="reports-detail">
+                    <h3>💸 السحوبات الشخصية (الوردية الحالية)</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>الوقت</th>
+                                <th>الموظف</th>
+                                <th>المبلغ</th>
+                                <th>السبب</th>
+                            </tr>
+                        </thead>
+                        <tbody id="withdrawalsBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- RETURNS PAGE -->
+            <section class="page" id="page-returns">
+                <div class="page-header">
+                    <h2>المرتجعات والاستبدال</h2>
+                </div>
+                <div class="stats-block">
+                    <h3>↩️ إنشاء مرتجع / استبدال</h3>
+                    <p class="stats-hint">امسح باركود الفاتورة أو أدخل رقمها لاستدعائها، ثم اختر الأصناف المرتجعة وأضف بدائل إن وُجدت.</p>
+                    <div class="code-add-row">
+                        <input type="text" id="returnBillSearch" placeholder="امسح باركود الفاتورة أو أدخل الرقم..." aria-label="بحث عن فاتورة للإرجاع بالباركود أو الرقم">
+                        <button class="btn-secondary" id="returnBillLoadBtn">استدعاء</button>
+                    </div>
+                    <div id="returnEditor" style="display:none;"></div>
+                </div>
+                <div class="stats-block">
+                    <h3>سجل المرتجعات</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>الوقت</th>
+                                <th>الفاتورة الأصلية</th>
+                                <th>قيمة المرتجع</th>
+                                <th>قيمة البديل</th>
+                                <th>الصافي</th>
+                                <th>الموظف</th>
+                            </tr>
+                        </thead>
+                        <tbody id="returnsBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- DEBTS PAGE -->
+            <section class="page" id="page-debts">
+                <div class="page-header">
+                    <h2>الذمم المدينة</h2>
+                    <div class="header-actions">
+                        <button class="btn-primary" id="addDebtBtn">+ إضافة ذمة</button>
+                    </div>
+                </div>
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>إجمالي الذمم المستحقة</h3>
+                        <div class="report-value" id="debtsTotalOutstanding">₪0</div>
+                        <div class="report-sub" id="debtsCustomersCount">0 عميل</div>
+                    </div>
+                </div>
+                <div class="stats-block">
+                    <div class="code-add-row">
+                        <input type="text" id="debtsSearch" placeholder="🔍 بحث باسم العميل أو رقم الهاتف..." aria-label="بحث في الذمم باسم العميل أو الهاتف">
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>العميل</th>
+                                <th>الهاتف</th>
+                                <th>إجمالي الذمم</th>
+                                <th>المدفوع</th>
+                                <th>المتبقي</th>
+                                <th>إجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="debtsBody"></tbody>
                     </table>
                 </div>
             </section>
@@ -407,15 +522,74 @@
                     </div>
                 </div>
             </section>
+
+            <!-- SETTINGS PAGE -->
+            <section class="page" id="page-settings">
+                <div class="page-header">
+                    <h2>الإعدادات</h2>
+                </div>
+
+                <!-- Keyboard shortcuts -->
+                <div class="stats-block">
+                    <h3>⌨️ اختصارات لوحة المفاتيح (F1 – F12)</h3>
+                    <p class="stats-hint">اختر الإجراء لكل مفتاح. تُحفظ الإعدادات تلقائياً على هذا الجهاز.</p>
+                    <div class="shortcuts-grid" id="shortcutsGrid"></div>
+                    <div class="form-actions" style="margin-top:14px;">
+                        <button class="btn-secondary" id="resetShortcutsBtn">↺ استعادة الافتراضي</button>
+                    </div>
+                </div>
+
+                <!-- Register opening balance -->
+                <div class="stats-block">
+                    <h3>🏦 رصيد الصندوق النقدي (مشترك للمتجر)</h3>
+                    <p class="stats-hint">المبلغ النقدي الحالي في الصندوق. يُستخدم كرصيد افتتاحي ويظهر في إغلاق اليوم، ويُحدَّث تلقائياً عند كل إغلاق. عيّنه أول مرة، أو صحّحه عند الحاجة.</p>
+                    <div class="register-balance-row">
+                        <span class="reg-current">الرصيد الحالي: <strong id="regCurrentBalance">₪0.00</strong></span>
+                        <input type="number" id="regSetInput" min="0" step="0.01" placeholder="₪ المبلغ في الصندوق">
+                        <button class="btn-primary" id="regSetBtn">حفظ الرصيد</button>
+                    </div>
+                    <div class="notes-saved-hint" id="regSavedHint"></div>
+                </div>
+
+                <!-- General notes -->
+                <div class="stats-block">
+                    <h3>🗒️ ملاحظات عامة</h3>
+                    <p class="stats-hint">مفكرة عامة للملاحظات والتذكيرات. تُحفظ تلقائياً على هذا الجهاز.</p>
+                    <textarea id="generalNotes" class="general-notes" placeholder="اكتب ملاحظاتك هنا..."></textarea>
+                    <div class="notes-saved-hint" id="notesSavedHint"></div>
+                </div>
+            </section>
         </main>
     </div>
 
+    <!-- Category browse modal (brands + filters) -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="categoryModal" style="display:none;">
+        <div class="modal-content category-modal">
+            <div class="modal-header">
+                <h3 id="categoryModalTitle">التصنيف</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="categoryModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="cat-search-row">
+                    <input type="text" id="categorySearch" placeholder="🔍 بحث بالاسم أو رقم المنتج أو مسح الباركود..." aria-label="بحث داخل التصنيف بالاسم أو الرقم أو الباركود">
+                </div>
+                <div class="cat-filter-label" id="categoryCatsLabel" style="display:none;">التصنيفات</div>
+                <div class="cat-chips" id="categoryCats" style="display:none;"></div>
+                <div class="cat-filter-label">العلامات التجارية</div>
+                <div class="cat-chips" id="categoryBrands"></div>
+                <div class="cat-filter-label">المقاسات</div>
+                <div class="cat-chips" id="categorySizes"></div>
+                <div class="products-grid cat-products-grid" id="categoryProducts"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Variant Selection Modal -->
-    <div class="modal-overlay" id="variantModal" style="display:none;">
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="variantModal" style="display:none;">
         <div class="modal-content variant-modal">
             <div class="modal-header">
                 <h3 id="variantModalTitle">اختر اللون والمقاس</h3>
-                <button class="modal-close" id="closeVariantModal">&times;</button>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" id="closeVariantModal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="variant-colors" id="variantColors"></div>
@@ -423,9 +597,9 @@
                 <div class="variant-qty">
                     <label>الكمية:</label>
                     <div class="qty-control">
-                        <button class="qty-btn" id="varQtyMinus">-</button>
-                        <input type="number" id="varQtyInput" value="1" min="1">
-                        <button class="qty-btn" id="varQtyPlus">+</button>
+                        <button class="qty-btn" id="varQtyMinus" aria-label="إنقاص الكمية">-</button>
+                        <input type="number" id="varQtyInput" value="1" min="1" aria-label="الكمية">
+                        <button class="qty-btn" id="varQtyPlus" aria-label="زيادة الكمية">+</button>
                     </div>
                     <span class="stock-info" id="varStockInfo"></span>
                 </div>
@@ -437,7 +611,7 @@
     </div>
 
     <!-- Receipt Modal -->
-    <div class="modal-overlay" id="receiptModal" style="display:none;">
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="receiptModal" style="display:none;">
         <div class="modal-content receipt-modal">
             <div class="receipt" id="receiptContent"></div>
             <div class="modal-footer">
@@ -448,11 +622,11 @@
     </div>
 
     <!-- Close Day Modal -->
-    <div class="modal-overlay" id="closeDayModal" style="display:none;">
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="closeDayModal" style="display:none;">
         <div class="modal-content closeday-modal">
             <div class="modal-header">
                 <h3>🔒 إغلاق يوم العمل</h3>
-                <button class="modal-close" id="closeDayX">&times;</button>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" id="closeDayX">&times;</button>
             </div>
             <div class="modal-body" id="closeDaySummary"></div>
             <div class="modal-footer">
@@ -464,7 +638,7 @@
     </div>
 
     <!-- Generic Confirm / Alert Modal (themed) -->
-    <div class="modal-overlay" id="confirmModal" style="display:none;">
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="confirmModal" style="display:none;">
         <div class="modal-content confirm-modal">
             <div class="confirm-icon" id="confirmIcon">⚠️</div>
             <h3 id="confirmTitle">تأكيد</h3>
@@ -473,6 +647,118 @@
                 <button class="btn-primary" id="confirmYesBtn">نعم</button>
                 <button class="btn-secondary" id="confirmNoBtn">إلغاء</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Personal Withdrawal Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="withdrawModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💸 سحب شخصي من الصندوق</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="withdrawModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group full-width">
+                    <label>المبلغ المسحوب (₪)</label>
+                    <input type="number" id="withdrawAmount" min="0" placeholder="0">
+                </div>
+                <div class="form-group full-width">
+                    <label>الموظف</label>
+                    <input type="text" id="withdrawWho" placeholder="اسم الموظف">
+                </div>
+                <div class="form-group full-width">
+                    <label>السبب</label>
+                    <input type="text" id="withdrawReason" placeholder="سبب السحب (اختياري)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="saveWithdrawBtn">تأكيد السحب</button>
+                <button class="btn-secondary" data-close="withdrawModal">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Picker Modal (for debt sales) -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="customerModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="customerModalTitle">بيانات العميل (بيع آجل)</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="customerModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group full-width">
+                    <label>رقم الهاتف</label>
+                    <input type="text" id="customerPhone" placeholder="ابحث أو أدخل رقم الهاتف...">
+                    <div id="customerMatches" class="customer-matches"></div>
+                </div>
+                <div class="form-group full-width">
+                    <label>اسم العميل</label>
+                    <input type="text" id="customerName" placeholder="اسم العميل">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="customerConfirmBtn">تأكيد ومتابعة</button>
+                <button class="btn-secondary" data-close="customerModal">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Debt Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="addDebtModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📒 إضافة ذمة لعميل</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="addDebtModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group full-width">
+                    <label>رقم الهاتف</label>
+                    <input type="text" id="debtPhone" placeholder="ابحث أو أدخل رقم الهاتف...">
+                    <div id="debtMatches" class="customer-matches"></div>
+                </div>
+                <div class="form-group full-width">
+                    <label>اسم العميل</label>
+                    <input type="text" id="debtName" placeholder="اسم العميل">
+                </div>
+                <div class="form-group full-width">
+                    <label>قيمة الذمة (₪)</label>
+                    <input type="number" id="debtAmount" min="0" placeholder="0">
+                </div>
+                <div class="form-group full-width">
+                    <label>ملاحظة</label>
+                    <input type="text" id="debtNote" placeholder="سبب الذمة (اختياري)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="saveDebtBtn">حفظ الذمة</button>
+                <button class="btn-secondary" data-close="addDebtModal">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settle Debt Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="settleDebtModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💰 تسديد ذمة</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="settleDebtModal">&times;</button>
+            </div>
+            <div class="modal-body" id="settleDebtBody"></div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="saveSettleBtn">تأكيد التسديد</button>
+                <button class="btn-secondary" data-close="settleDebtModal">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Held Sales Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="heldModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⏸️ الفواتير المعلقة</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="heldModal">&times;</button>
+            </div>
+            <div class="modal-body" id="heldBody"></div>
         </div>
     </div>
 
