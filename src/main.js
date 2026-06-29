@@ -277,26 +277,18 @@ ipcMain.handle('printer-diagnostics', function () {
   });
 });
 
-// Sends RAW bytes straight to a printer via the Windows spooler (WritePrinter with the
-// "RAW" datatype, P/Invoked through PowerShell). This is how dedicated POS apps drive
-// thermal printers: ESC/POS commands bypass the GDI graphics driver entirely, so they
-// print on hardware where Chromium's graphical print (and PDF viewers) come out blank.
-// `opts`: { printerName, base64 }  -> base64 is the raw byte stream to send.
-ipcMain.handle('print-raw', function (event, opts) {
-  opts = opts || {};
+// Spools raw bytes to a printer via WritePrinter (RAW datatype) — bypasses GDI entirely.
+// Reused by both the ESC/POS test and the real receipt raster path.
+function spoolRawToPrinter(printerName, bytes) {
   return new Promise(function (resolve) {
     var settled = false;
     function done(r) { if (settled) return; settled = true; resolve(r); }
-    var printerName = String(opts.printerName || '');
+    printerName = String(printerName || '');
     if (!printerName) { done({ success: false, reason: 'no-printer-selected' }); return; }
-    var bytes;
-    try { bytes = Buffer.from(String(opts.base64 || ''), 'base64'); }
-    catch (e) { done({ success: false, reason: 'bad-data' }); return; }
-    if (!bytes.length) { done({ success: false, reason: 'empty-data' }); return; }
+    if (!bytes || !bytes.length) { done({ success: false, reason: 'empty-data' }); return; }
     var tmpFile = path.join(os.tmpdir(), 'ada_raw_' + Date.now() + '.bin');
     try { fs.writeFileSync(tmpFile, bytes); }
     catch (e) { done({ success: false, reason: 'tmp-write-failed: ' + (e && e.message || e) }); return; }
-
     var psScript =
       '$ErrorActionPreference="Stop";' +
       '$code=@"' + '\n' +
@@ -318,11 +310,10 @@ ipcMain.handle('print-raw', function (event, opts) {
       'Add-Type -TypeDefinition $code -Language CSharp;' +
       '$bytes=[System.IO.File]::ReadAllBytes($env:ADA_RAW_FILE);' +
       '[RawPrinterHelper]::Send($env:ADA_RAW_PRINTER,$bytes)';
-
     try {
       execFile('powershell.exe',
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-        { timeout: 15000, windowsHide: true, env: Object.assign({}, process.env, { ADA_RAW_FILE: tmpFile, ADA_RAW_PRINTER: printerName }) },
+        { timeout: 20000, windowsHide: true, env: Object.assign({}, process.env, { ADA_RAW_FILE: tmpFile, ADA_RAW_PRINTER: printerName }) },
         function (err, stdout, stderr) {
           try { fs.unlinkSync(tmpFile); } catch (e) {}
           var out = String(stdout || '').trim();
@@ -333,6 +324,69 @@ ipcMain.handle('print-raw', function (event, opts) {
       try { fs.unlinkSync(tmpFile); } catch (e2) {}
       done({ success: false, reason: String(e && e.message || e) });
     }
+  });
+}
+
+// RAW ESC/POS test print (bytes built in renderer). Bypasses the GDI graphics driver.
+ipcMain.handle('print-raw', function (event, opts) {
+  opts = opts || {};
+  var bytes;
+  try { bytes = Buffer.from(String(opts.base64 || ''), 'base64'); }
+  catch (e) { return Promise.resolve({ success: false, reason: 'bad-data' }); }
+  return spoolRawToPrinter(opts.printerName, bytes);
+});
+
+// Renders the receipt HTML to a 1-bit bitmap and prints it as an ESC/POS raster image
+// (GS v 0) over the RAW spool. Arabic prints reliably because the receipt is sent as an
+// image, not text — and RAW bypasses the thermal driver that blanks graphical prints.
+ipcMain.handle('print-receipt-raw', function (event, opts) {
+  opts = opts || {};
+  var widthDots = parseInt(opts.widthDots, 10) || 576;
+  var html = String(opts.html || '');
+  if (!html) return Promise.resolve({ success: false, reason: 'no-html' });
+  return new Promise(function (resolve) {
+    var win = new BrowserWindow({
+      show: false, width: Math.round(widthDots / 2), height: 2400,
+      paintWhenInitiallyHidden: true,
+      webPreferences: { offscreen: false }
+    });
+    var resolved = false;
+    function finish(r) { if (resolved) return; resolved = true; try { win.destroy(); } catch (e) {} resolve(r); }
+    win.webContents.once('did-finish-load', function () {
+      setTimeout(function () {
+        win.webContents.executeJavaScript('document.body.scrollHeight').then(function (sh) {
+          var rect = { x: 0, y: 0, width: Math.round(widthDots / 2), height: Math.min(Math.max(parseInt(sh, 10) || 600, 60), 2400) };
+          return win.webContents.capturePage(rect);
+        }).then(function (img) {
+          var resized = img.resize({ width: widthDots });
+          var size = resized.getSize();
+          var w = size.width, h = size.height;
+          var bmp = resized.toBitmap(); // BGRA, length w*h*4
+          var widthBytes = Math.ceil(w / 8);
+          var raster = Buffer.alloc(widthBytes * h, 0);
+          var lastInkRow = 0;
+          for (var y = 0; y < h; y++) {
+            var rowInk = false;
+            for (var x = 0; x < w; x++) {
+              var i = (y * w + x) * 4;
+              var lum = (bmp[i] + bmp[i + 1] + bmp[i + 2]) / 3; // BGR avg
+              if (lum < 160) { raster[y * widthBytes + (x >> 3)] |= (0x80 >> (x & 7)); rowInk = true; }
+            }
+            if (rowInk) lastInkRow = y;
+          }
+          h = Math.min(h, lastInkRow + 8); // trim trailing blank rows (avoid wasted paper)
+          raster = raster.slice(0, widthBytes * h);
+          var header = Buffer.from([0x1B, 0x40, 0x1D, 0x76, 0x30, 0x00,
+            widthBytes & 0xff, (widthBytes >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff]);
+          var footer = Buffer.from([0x0A, 0x0A, 0x0A, 0x1D, 0x56, 0x01]); // feed + partial cut
+          var bytes = Buffer.concat([header, raster, footer]);
+          spoolRawToPrinter(opts.printerName, bytes).then(finish);
+        }).catch(function (e) { finish({ success: false, reason: 'capture-failed: ' + (e && e.message || e) }); });
+      }, 350);
+    });
+    win.webContents.on('did-fail-load', function () { finish({ success: false, reason: 'load-failed' }); });
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    setTimeout(function () { finish({ success: false, reason: 'render-timeout' }); }, 12000);
   });
 });
 

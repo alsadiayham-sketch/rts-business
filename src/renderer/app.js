@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.4';
+var APP_VERSION = '2.0.5';
 
 // ============ STATE ============
 var products = [];
@@ -1487,14 +1487,27 @@ function printerLogKey() { return 'ada_pos_printer_logs'; }
 function getSavedPrinterDevice() { try { return localStorage.getItem(printerDeviceKey()) || ''; } catch (e) { return ''; } }
 function getSavedPrinterPageMode() { try { return localStorage.getItem(printerPageModeKey()) || 'auto'; } catch (e) { return 'auto'; } }
 
-// Single entry point every receipt print goes through, so the user's saved printer
-// and paper-size choice are always applied consistently.
+// Single entry point every receipt print goes through. The store's thermal printers
+// (POS-80 vendor GDI driver) print BLANK via Chromium's graphical print, but work
+// perfectly via RAW ESC/POS — so we render the receipt to a monochrome bitmap and send
+// it as an ESC/POS raster image directly to the spooler. Falls back to graphical print
+// if no device is selected or the raster path fails.
 function posPrintHtml(html) {
     if (!(ipcRenderer && ipcRenderer.invoke)) return Promise.reject(new Error('no-ipc'));
-    var opts = { pageSize: getSavedPrinterPageMode() };
     var dev = getSavedPrinterDevice();
-    if (dev) opts.deviceName = dev;
-    return ipcRenderer.invoke('print-html', html, opts);
+    var mode = getSavedPrinterPageMode();
+    var widthDots = (mode === '58mm') ? 384 : 576; // 80mm/auto = 576 dots @ 203dpi
+    function graphical() {
+        var opts = { pageSize: mode };
+        if (dev) opts.deviceName = dev;
+        return ipcRenderer.invoke('print-html', html, opts);
+    }
+    if (!dev) return graphical();
+    return ipcRenderer.invoke('print-receipt-raw', { html: html, printerName: dev, widthDots: widthDots })
+        .then(function (res) {
+            if (res && res.success) return res;
+            return graphical(); // fall back if raster rendering/spooling failed
+        }, function () { return graphical(); });
 }
 
 // ---- Printer activity log (kept locally so it can be exported and sent to support) ----
