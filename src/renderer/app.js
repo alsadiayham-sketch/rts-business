@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.5';
+var APP_VERSION = '2.0.6';
 
 // ============ STATE ============
 var products = [];
@@ -1315,7 +1315,7 @@ function doCheckout() {
             billNumber: billNumber, total: total, items: items.length, payment: selectedPayment
         });
         showReceipt(billData);
-        printReceipt(billData);
+        printReceipt(billData, true); // open drawer on every checkout (cash, card, debt)
         cart = [];
         renderCart();
         document.getElementById('discountInput').value = 0;
@@ -1466,11 +1466,11 @@ function buildPrintableReceipt(bill) {
 }
 
 // Silent print to the default (thermal) printer; falls back to the browser dialog.
-function printReceipt(bill) {
+function printReceipt(bill, openDrawer) {
     try {
         var html = buildPrintableReceipt(bill);
         if (ipcRenderer && ipcRenderer.invoke) {
-            posPrintHtml(html).catch(function () { window.print(); });
+            posPrintHtml(html, { openDrawer: !!openDrawer }).catch(function () { window.print(); });
         } else {
             window.print();
         }
@@ -1492,8 +1492,9 @@ function getSavedPrinterPageMode() { try { return localStorage.getItem(printerPa
 // perfectly via RAW ESC/POS — so we render the receipt to a monochrome bitmap and send
 // it as an ESC/POS raster image directly to the spooler. Falls back to graphical print
 // if no device is selected or the raster path fails.
-function posPrintHtml(html) {
+function posPrintHtml(html, options) {
     if (!(ipcRenderer && ipcRenderer.invoke)) return Promise.reject(new Error('no-ipc'));
+    options = options || {};
     var dev = getSavedPrinterDevice();
     var mode = getSavedPrinterPageMode();
     var widthDots = (mode === '58mm') ? 384 : 576; // 80mm/auto = 576 dots @ 203dpi
@@ -1503,11 +1504,24 @@ function posPrintHtml(html) {
         return ipcRenderer.invoke('print-html', html, opts);
     }
     if (!dev) return graphical();
-    return ipcRenderer.invoke('print-receipt-raw', { html: html, printerName: dev, widthDots: widthDots })
+    return ipcRenderer.invoke('print-receipt-raw', { html: html, printerName: dev, widthDots: widthDots, openDrawer: !!options.openDrawer })
         .then(function (res) {
             if (res && res.success) return res;
             return graphical(); // fall back if raster rendering/spooling failed
         }, function () { return graphical(); });
+}
+
+// Sends just the ESC/POS drawer-kick to the printer the cash drawer is wired to. Used by
+// the manual "open cash drawer" hotkey (and could be called anywhere a drawer-open is needed).
+function openCashDrawer() {
+    if (!(ipcRenderer && ipcRenderer.invoke)) return;
+    var dev = getSavedPrinterDevice();
+    if (!dev) { showAlert('اختر الطابعة من الإعدادات أولاً (درج الكاش موصول بها)', { icon: '⚠️', title: 'تنبيه' }); return; }
+    ipcRenderer.invoke('open-cash-drawer', dev).then(function (res) {
+        if (!(res && res.success)) {
+            showAlert('تعذّر فتح الدرج: ' + ((res && res.reason) || 'تحقق من توصيل الطابعة'), { icon: '⚠️', title: 'درج الكاش' });
+        }
+    }, function () {});
 }
 
 // ---- Printer activity log (kept locally so it can be exported and sent to support) ----
@@ -3010,6 +3024,8 @@ function setupEventListeners() {
     if (holdSaleBtn) holdSaleBtn.addEventListener('click', holdSale);
     var resumeSaleBtn = document.getElementById('resumeSaleBtn');
     if (resumeSaleBtn) resumeSaleBtn.addEventListener('click', openHeldModal);
+    var openDrawerBtn = document.getElementById('openDrawerBtn');
+    if (openDrawerBtn) openDrawerBtn.addEventListener('click', openCashDrawer);
 }
 
 // ============ HELPERS: HTML ESCAPE + BILL DIGITS ============
@@ -3066,6 +3082,7 @@ var SHORTCUT_ACTIONS = [
     { id: 'page-stats', label: 'صفحة الإحصائيات' },
     { id: 'page-settings', label: 'صفحة الإعدادات' },
     { id: 'focus-bill-search', label: 'بحث الفواتير' },
+    { id: 'open-drawer', label: 'فتح درج الكاش' },
     { id: 'close-day', label: 'إغلاق اليوم (مدير)' }
 ];
 var DEFAULT_SHORTCUTS = {
@@ -3073,11 +3090,16 @@ var DEFAULT_SHORTCUTS = {
     F5: 'clear-cart', F6: 'toggle-payment', F7: 'page-sales', F8: 'page-inventory',
     F9: 'page-damage', F10: 'page-reports', F11: 'page-stats', F12: 'page-settings'
 };
+// Special reverse-style shortcut: the ACTION is fixed (open cash drawer) and the
+// KEY is user-configurable (default Ctrl), unlike the F-keys where the key is fixed.
+var DEFAULT_DRAWER_KEY = 'Control';
+var capturingDrawerKey = false;
 var shortcuts = {};
 function shortcutsKey() { return 'ada_pos_shortcuts_' + (getProjectId() || ''); }
 function loadShortcuts() {
     shortcuts = {};
     for (var k in DEFAULT_SHORTCUTS) shortcuts[k] = DEFAULT_SHORTCUTS[k];
+    shortcuts.drawerKey = DEFAULT_DRAWER_KEY;
     try {
         var raw = localStorage.getItem(shortcutsKey());
         if (raw) {
@@ -3111,14 +3133,35 @@ function runShortcutAction(action) {
         case 'page-stats': switchPage('stats'); break;
         case 'page-settings': switchPage('settings'); break;
         case 'focus-bill-search': switchPage('bills'); var bs = document.getElementById('billsSearch'); if (bs) { bs.focus(); bs.select(); } break;
+        case 'open-drawer': openCashDrawer(); break;
         case 'close-day': if (isAdmin()) openCloseDayModal(); break;
     }
+}
+function drawerKeyLabel(k) {
+    if (!k) return 'بدون';
+    var map = { Control: 'Ctrl', Alt: 'Alt', Shift: 'Shift', ' ': 'Space', Enter: 'Enter', Tab: 'Tab', Escape: 'Esc' };
+    if (map[k]) return map[k];
+    return k.length === 1 ? k.toUpperCase() : k;
+}
+function isEditableTarget(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
 }
 function handleShortcutKey(e) {
     // Escape closes the top-most open modal (accessibility / quick dismiss).
     if (e.key === 'Escape') {
         if (closeTopModal()) e.preventDefault();
         return;
+    }
+    // Reverse-style drawer shortcut: fixed action, user-chosen key (default Ctrl).
+    if (shortcuts.drawerKey && shortcuts.drawerKey !== 'none' && e.key === shortcuts.drawerKey) {
+        // Avoid hijacking text entry when the chosen key is a printable character.
+        if (!(shortcuts.drawerKey.length === 1 && isEditableTarget(e.target))) {
+            e.preventDefault();
+            openCashDrawer();
+            return;
+        }
     }
     if (!/^F([1-9]|1[0-2])$/.test(e.key)) return;
     var action = shortcuts[e.key];
@@ -3142,6 +3185,8 @@ function renderShortcutsEditor() {
         html += '</select></div>';
     }
     grid.innerHTML = html;
+    var dkBtn = document.getElementById('drawerKeyBtn');
+    if (dkBtn && !capturingDrawerKey) dkBtn.textContent = drawerKeyLabel(shortcuts.drawerKey);
 }
 function initShortcutsUI() {
     var grid = document.getElementById('shortcutsGrid');
@@ -3157,9 +3202,32 @@ function initShortcutsUI() {
     if (reset) reset.addEventListener('click', function () {
         shortcuts = {};
         for (var k in DEFAULT_SHORTCUTS) shortcuts[k] = DEFAULT_SHORTCUTS[k];
+        shortcuts.drawerKey = DEFAULT_DRAWER_KEY;
         saveShortcuts();
         renderShortcutsEditor();
     });
+    var dkBtn = document.getElementById('drawerKeyBtn');
+    if (dkBtn) {
+        dkBtn.addEventListener('click', function () {
+            if (capturingDrawerKey) return;
+            capturingDrawerKey = true;
+            dkBtn.classList.add('capturing');
+            dkBtn.textContent = 'اضغط أي زر…';
+            var onCapture = function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                document.removeEventListener('keydown', onCapture, true);
+                capturingDrawerKey = false;
+                dkBtn.classList.remove('capturing');
+                if (ev.key !== 'Escape') {
+                    shortcuts.drawerKey = ev.key;
+                    saveShortcuts();
+                }
+                renderShortcutsEditor();
+            };
+            document.addEventListener('keydown', onCapture, true);
+        });
+    }
     document.addEventListener('keydown', handleShortcutKey);
 }
 

@@ -376,8 +376,12 @@ ipcMain.handle('print-receipt-raw', function (event, opts) {
           }
           h = Math.min(h, lastInkRow + 8); // trim trailing blank rows (avoid wasted paper)
           raster = raster.slice(0, widthBytes * h);
-          var header = Buffer.from([0x1B, 0x40, 0x1D, 0x76, 0x30, 0x00,
+          // ESC @ (init) + optional drawer kick + GS v 0 raster header.
+          var head = [0x1B, 0x40];
+          if (opts.openDrawer) head = head.concat([0x1B, 0x70, 0x00, 0x19, 0xFA, 0x1B, 0x70, 0x01, 0x19, 0xFA]); // kick pin 2 + pin 5
+          head = head.concat([0x1D, 0x76, 0x30, 0x00,
             widthBytes & 0xff, (widthBytes >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff]);
+          var header = Buffer.from(head);
           var footer = Buffer.from([0x0A, 0x0A, 0x0A, 0x1D, 0x56, 0x01]); // feed + partial cut
           var bytes = Buffer.concat([header, raster, footer]);
           spoolRawToPrinter(opts.printerName, bytes).then(finish);
@@ -388,6 +392,13 @@ ipcMain.handle('print-receipt-raw', function (event, opts) {
     win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
     setTimeout(function () { finish({ success: false, reason: 'render-timeout' }); }, 12000);
   });
+});
+
+// Opens the cash drawer on its own (not tied to a print) by sending the ESC/POS drawer
+// kick to the printer the drawer is wired to. Used by the manual "open drawer" hotkey.
+ipcMain.handle('open-cash-drawer', function (event, printerName) {
+  var kick = Buffer.from([0x1B, 0x70, 0x00, 0x19, 0xFA, 0x1B, 0x70, 0x01, 0x19, 0xFA]); // kick pin 2 + pin 5
+  return spoolRawToPrinter(printerName, kick);
 });
 
 // Purges all pending jobs from a printer's queue. A single stuck/errored job (common

@@ -209,6 +209,7 @@
                             <div class="cart-action-buttons">
                                 <button class="btn-secondary" id="holdSaleBtn">⏸️ تعليق</button>
                                 <button class="btn-secondary" id="resumeSaleBtn" style="display:none;">▶️ الفواتير المعلقة (<span id="heldCount">0</span>)</button>
+                                <button class="btn-secondary" id="openDrawerBtn" title="فتح درج الكاش">💵 فتح الدرج</button>
                             </div>
                             <button class="btn-checkout" id="checkoutBtn" disabled>إتمام البيع</button>
                         </div>
@@ -534,6 +535,13 @@
                     <h3>⌨️ اختصارات لوحة المفاتيح (F1 – F12)</h3>
                     <p class="stats-hint">اختر الإجراء لكل مفتاح. تُحفظ الإعدادات تلقائياً على هذا الجهاز.</p>
                     <div class="shortcuts-grid" id="shortcutsGrid"></div>
+                    <div class="drawer-shortcut" id="drawerShortcutRow">
+                        <div class="drawer-shortcut-info">
+                            <strong>💵 فتح الدرج</strong>
+                            <span>الإجراء ثابت — اختر الزر الذي يفتح درج الكاش (افتراضياً Ctrl).</span>
+                        </div>
+                        <button class="btn-secondary drawer-key-btn" id="drawerKeyBtn" type="button">Ctrl</button>
+                    </div>
                     <div class="form-actions" style="margin-top:14px;">
                         <button class="btn-secondary" id="resetShortcutsBtn">↺ استعادة الافتراضي</button>
                     </div>

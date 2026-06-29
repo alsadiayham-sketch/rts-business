@@ -1580,6 +1580,34 @@ body {
 }
 .shortcut-select:focus { outline: none; border-color: var(--primary); }
 
+.drawer-shortcut {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: var(--bg-light);
+    border: 1px dashed var(--primary);
+    border-radius: var(--radius);
+}
+.drawer-shortcut-info { display: flex; flex-direction: column; gap: 3px; }
+.drawer-shortcut-info strong { font-size: 14px; color: var(--text); }
+.drawer-shortcut-info span { font-size: 12px; color: var(--muted); }
+.drawer-key-btn {
+    flex: 0 0 auto;
+    min-width: 120px;
+    font-weight: 700;
+    font-family: monospace;
+    font-size: 14px;
+}
+.drawer-key-btn.capturing {
+    border-color: var(--primary);
+    color: var(--primary);
+    animation: drawerKeyPulse 1s ease-in-out infinite;
+}
+@keyframes drawerKeyPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
 .general-notes {
     width: 100%;
     min-height: 180px;
