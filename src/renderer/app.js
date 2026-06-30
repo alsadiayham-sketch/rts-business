@@ -5,6 +5,7 @@ var firebase = fbConfig.firebase;
 var setProjectId = fbConfig.setProjectId;
 var getProjectId = fbConfig.getProjectId;
 var isD1 = fbConfig.isD1;
+var registerD1Tenant = fbConfig.registerD1Tenant;
 var serverTimestamp = fbConfig.serverTimestamp;
 var posAuthenticate = fbConfig.posAuthenticate;
 var electron = require('electron');
@@ -13,7 +14,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '3.0.1';
+var APP_VERSION = '3.1.0';
 
 // ============ STATE ============
 var products = [];
@@ -72,6 +73,9 @@ function checkLicense() {
             return;
         }
         var data = doc.data();
+        if (data.dataBackend === 'd1' && data.apiBaseUrl) {
+            registerD1Tenant(storeId, data.apiBaseUrl);
+        }
         if (!data.warrantyEnd) {
             showLicenseExpired(new Date());
             return;
@@ -136,6 +140,12 @@ function attemptLogin() {
             return;
         }
         var data = doc.data();
+        // Stores linked to a web-designer project's secure backend declare a D1
+        // data source in their license doc. Register it before any product/order
+        // routing so the shared live catalog resolves to the right tenant.
+        if (data.dataBackend === 'd1' && data.apiBaseUrl) {
+            registerD1Tenant(storeName, data.apiBaseUrl);
+        }
         if (data.warrantyEnd) {
             var endDate = data.warrantyEnd.toDate ? data.warrantyEnd.toDate() : new Date(data.warrantyEnd);
             if (endDate < new Date()) {

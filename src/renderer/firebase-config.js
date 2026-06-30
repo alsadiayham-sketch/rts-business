@@ -34,6 +34,15 @@ var posToken = null; // cashier bearer token, set by posAuthenticate()
 function isD1() { return !!(PROJECT_ID && D1_TENANTS[PROJECT_ID]); }
 function d1Base() { return D1_TENANTS[PROJECT_ID]; }
 
+// Register (or update) a D1 tenant at runtime. Lets stores be linked to a
+// web-designer project's secure backend via their Firestore license doc
+// (settings/pos.apiBaseUrl) instead of being hardcoded here. Called at login
+// once the license doc is read, before any products/orders are fetched.
+function registerD1Tenant(projectId, baseUrl) {
+    if (!projectId || !baseUrl) return;
+    D1_TENANTS[projectId] = String(baseUrl).replace(/\/+$/, '');
+}
+
 // Per-collection D1 list endpoint config
 var D1_CONFIG = {
     products: { list: '/api/products', key: 'products', limitParam: false },
@@ -256,6 +265,7 @@ module.exports = {
     setProjectId: setProjectId,
     getProjectId: function () { return PROJECT_ID; },
     isD1: isD1,
+    registerD1Tenant: registerD1Tenant,
     serverTimestamp: serverTimestamp,
     posAuthenticate: posAuthenticate,
     clearPosToken: clearPosToken
