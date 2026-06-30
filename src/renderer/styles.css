@@ -385,6 +385,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .nav-btn {
@@ -420,6 +422,7 @@ body {
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border);
+    flex-shrink: 0;
 }
 
 .sync-status {
@@ -1580,6 +1583,28 @@ body {
 }
 .shortcut-select:focus { outline: none; border-color: var(--primary); }
 
+.reports-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+@media (max-width: 900px) { .reports-2col { grid-template-columns: 1fr; } }
+.report-lowstock .report-value { color: var(--danger, #e63946); }
+.report-outstock .report-value { color: #9b1c2e; }
+.hour-bar {
+    background: var(--bg-light);
+    border-radius: 6px;
+    height: 12px;
+    width: 100%;
+    overflow: hidden;
+}
+.hour-bar-fill {
+    height: 100%;
+    background: var(--gradient, var(--primary));
+    border-radius: 6px;
+    transition: width .3s ease;
+}
+
 .drawer-shortcut {
     display: flex;
     align-items: center;
@@ -1841,3 +1866,89 @@ body {
 
 .category-chip { display: inline-block; padding: 6px 12px; margin: 3px; border-radius: 16px; background: #eef0f4; cursor: pointer; font-size: 13px; }
 .category-chip.active { background: #4a6cf7; color: #fff; }
+
+/* CRM customer profile */
+.btn-small { padding:4px 10px; font-size:12px; border:none; border-radius:6px; background:#3498db; color:#fff; cursor:pointer; margin-right:4px; }
+.btn-small:hover { background:#2980b9; }
+.profile-summary { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; background:#f7f9fc; border:1px solid #e3e8ef; border-radius:8px; padding:12px; margin-bottom:12px; }
+.profile-summary .profile-k { color:#7a8699; font-size:13px; }
+.customer-attach-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+.attached-customer { background:#eef7ff; border:1px solid #cfe6ff; border-radius:6px; padding:3px 10px; font-size:13px; }
+.loyalty-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:8px 0; }
+.loyalty-rewards-block, .loyalty-raffle-block { margin-top:14px; padding-top:12px; border-top:1px dashed #e3e8ef; }
+.reward-add-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
+.reward-add-row input, .reward-add-row select { padding:6px 8px; border:1px solid #cfd8e3; border-radius:6px; }
+.raffle-result { margin-top:10px; font-size:15px; }
+.report-profit { border-left:4px solid #16a085; }
+.report-profit .report-value { color:#16a085; }
+
+/* Settings sub-navigation */
+.settings-subnav { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; border-bottom:2px solid #e3e8ef; padding-bottom:10px; }
+.settings-subnav-btn { padding:9px 18px; border:1px solid #d7dee8; background:#f4f6fa; color:#33405a; border-radius:10px; cursor:pointer; font-size:14px; font-weight:600; transition:all .15s; }
+.settings-subnav-btn:hover { background:#e9edf5; }
+.settings-subnav-btn.active { background:#4a6cf7; color:#fff; border-color:#4a6cf7; box-shadow:0 2px 6px rgba(74,108,247,.3); }
+.settings-panel { display:none; }
+.settings-panel.active { display:block; animation:settingsFade .2s ease; }
+@keyframes settingsFade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
+/* Loyalty enable/disable toggle */
+.loyalty-toggle-row { display:flex; align-items:center; gap:12px; margin:8px 0 4px; }
+.loyalty-status-badge { font-size:13px; font-weight:600; padding:3px 12px; border-radius:14px; background:#f0d9d9; color:#a33; }
+.loyalty-status-badge.on { background:#d6f3e2; color:#157a47; }
+.btn-danger { background:#e74c3c !important; color:#fff !important; border:none !important; padding:11px 22px; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; transition:all .15s; box-shadow:0 2px 6px rgba(231,76,60,.25); }
+.btn-danger:hover { background:#c0392b !important; box-shadow:0 3px 10px rgba(192,57,43,.35); }
+.loyalty-campaign-block, .loyalty-reset-block { margin-top:14px; padding-top:12px; border-top:1px dashed #e3e8ef; }
+.campaign-action-btns { display:flex; flex-wrap:wrap; gap:10px; margin:6px 0 4px; }
+.campaign-action-btn { padding:11px 18px; border:1.5px solid #d7dee8; background:#f4f6fa; color:#33405a; border-radius:12px; cursor:pointer; font-size:14px; font-weight:600; transition:all .15s; }
+.campaign-action-btn:hover { background:#e9edf5; }
+.campaign-action-btn.active { background:#4a6cf7; color:#fff; border-color:#4a6cf7; box-shadow:0 2px 8px rgba(74,108,247,.3); }
+.raffle-winners { margin:8px 0 0; padding-inline-start:20px; }
+.raffle-winners li { margin:3px 0; }
+
+/* Add-ons grid */
+.addons-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; margin:10px 0; }
+.addon-card { display:block; border:1px solid #e3e8ef; border-radius:12px; padding:14px; cursor:pointer; transition:all .15s; background:#fff; }
+.addon-card:hover { border-color:#4a6cf7; box-shadow:0 2px 8px rgba(74,108,247,.12); }
+.addon-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.addon-ico { font-size:24px; }
+.addon-head input[type=checkbox] { width:20px; height:20px; cursor:pointer; }
+.addon-title { font-weight:700; font-size:15px; color:#1f2a44; }
+.addon-desc { font-size:12px; color:#7a8699; margin-top:4px; line-height:1.5; }
+.addon-config { margin-top:12px; padding:14px; background:#f7f9fc; border:1px solid #e3e8ef; border-radius:10px; }
+
+/* ===== Restaurant tables & hookah/custom services ===== */
+.tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; margin-top: 12px; }
+.table-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px 10px; border: 2px solid #d0d7de; border-radius: 12px; cursor: pointer; font-family: inherit; transition: transform .1s, box-shadow .1s; }
+.table-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.table-card .table-no { font-weight: 700; font-size: 15px; }
+.table-card .table-state { font-size: 12px; }
+.table-card.free { background: #eafaf0; border-color: #2ecc71; color: #1e7e44; }
+.table-card.occupied { background: #fdecec; border-color: #e74c3c; color: #b03a2e; }
+.hookah-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
+.hookah-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px 10px; border: 2px solid #d0d7de; border-radius: 12px; cursor: pointer; font-family: inherit; background: #fff; transition: transform .1s, box-shadow .1s; }
+.hookah-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.12); border-color: #6c5ce7; }
+.hookah-card .hookah-name { font-weight: 700; font-size: 14px; text-align: center; }
+.hookah-card .hookah-price { color: #6c5ce7; font-weight: 700; }
+
+/* Stocktake pagination controls */
+.stk-pager { display:flex; align-items:center; justify-content:center; gap:12px; margin:12px 0 4px; flex-wrap:wrap; }
+.stk-pager .stk-page-info { font-size:13px; color:var(--text-secondary,#666); }
+.stk-pager button[disabled] { opacity:.5; cursor:not-allowed; }
+
+/* Barcode label preview inside the print modal */
+.label-preview { display:flex; justify-content:center; padding:10px; background:#f6f6f6; border:1px solid #e0e0e0; border-radius:8px; }
+.label-preview .label { width:48mm; min-height:30mm; border:1px dashed #bbb; padding:2mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; overflow:hidden; background:#fff; }
+.label-preview .l-store { font-size:9px; color:#555; }
+.label-preview .l-name { font-size:11px; font-weight:700; line-height:1.1; }
+.label-preview .l-price { font-size:13px; font-weight:700; margin:1px 0; }
+.label-preview .l-bc svg { height:34px; width:auto; max-width:44mm; }
+.label-preview .l-code { font-size:9px; letter-spacing:1px; }
+
+/* Generic toggle button (used for include-price in label modal) */
+.toggle-btn { padding:10px 14px; border-radius:8px; border:2px solid var(--primary); background:#fff; color:var(--primary); font-weight:700; cursor:pointer; transition:all .15s ease; font-size:13px; }
+.toggle-btn:hover { background:var(--primary-light); }
+.toggle-btn.active { background:var(--primary); color:#fff; }
+
+/* Per-row print-sticker button in the inventory table */
+.inv-label-btn { background:var(--primary-light); border:1px solid var(--primary); color:var(--primary); border-radius:6px; padding:4px 9px; cursor:pointer; font-size:15px; line-height:1; transition:all .15s ease; }
+.inv-label-btn:hover { background:var(--primary); color:#fff; }

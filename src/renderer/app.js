@@ -13,22 +13,34 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '2.0.6';
+var APP_VERSION = '3.0.0';
 
 // ============ STATE ============
 var products = [];
 var cart = [];
 var bills = [];
 var withdrawals = [];
+var deposits = [];
 var debtPayments = [];
 var debtManual = [];
 var returnRecords = [];
+var customerRecords = [];
+var loyaltyTxns = [];
+var loyaltyConfig = null;
+var storeConfig = null;
 var registerRecords = [];
+var storeCredits = [];
+var supplierRecords = [];
+var purchaseOrders = [];
+var stocktakeRecords = [];
+var hookahItems = [];
 var registerBalance = 0;
 var heldSales = [];
 var damageRecords = [];
 var selectedPayment = 'cash';
 var pendingCustomer = null;
+var pendingRedeem = null; // {points, value} loyalty redemption applied to current sale
+var pendingCreditUse = 0; // store-credit (₪) applied to current sale
 var currentPage = 'sales';
 var currentUser = null;
 var licenseValid = false;
@@ -496,6 +508,11 @@ function computeShiftSummary() {
         if (billTimeMs(withdrawals[i]) < start) continue;
         withdrawn += withdrawals[i].amount || 0; wCount++;
     }
+    var deposited = 0, dCount = 0;
+    for (var i = 0; i < deposits.length; i++) {
+        if (billTimeMs(deposits[i]) < start) continue;
+        deposited += deposits[i].amount || 0; dCount++;
+    }
     var debtPaidCash = 0;
     for (var i = 0; i < debtPayments.length; i++) {
         if (billTimeMs(debtPayments[i]) < start) continue;
@@ -511,10 +528,11 @@ function computeShiftSummary() {
     }
     cash += debtPaidCash;
     var opening = registerBalance || 0;
-    var drawer = opening + cash - withdrawn + returnsCash;
+    var drawer = opening + cash - withdrawn + deposited + returnsCash;
     return {
         cash: cash, card: card, debtNew: debtNew, total: cash + card,
         count: count, withdrawn: withdrawn, wCount: wCount,
+        deposited: deposited, dCount: dCount,
         debtPaidCash: debtPaidCash, returnsCash: returnsCash,
         opening: opening, drawer: drawer, since: start
     };
@@ -534,6 +552,7 @@ function openCloseDayModal() {
     if (s.debtNew) html += '<div class="cd-row"><span>مبيعات آجلة (ذمم جديدة) 📒</span><span>\u20AA' + s.debtNew.toFixed(2) + '</span></div>';
     if (s.debtPaidCash) html += '<div class="cd-row"><span>تسديد ذمم (نقدي) 💰</span><span>\u20AA' + s.debtPaidCash.toFixed(2) + '</span></div>';
     if (s.returnsCash) html += '<div class="cd-row"><span>صافي المرتجعات (نقدي) ↩️</span><span>\u20AA' + s.returnsCash.toFixed(2) + '</span></div>';
+    if (s.deposited) html += '<div class="cd-row"><span>إيداعات في الصندوق (' + s.dCount + ') 💵</span><span>+\u20AA' + s.deposited.toFixed(2) + '</span></div>';
     if (s.withdrawn) html += '<div class="cd-row"><span>سحوبات شخصية (' + s.wCount + ') 💸</span><span>-\u20AA' + s.withdrawn.toFixed(2) + '</span></div>';
     html += '<div class="cd-row cd-total"><span>الصندوق المتوقع (نقدي)</span><span>\u20AA' + s.drawer.toFixed(2) + '</span></div>';
     html += '<div class="cd-left-row"><label>المبلغ المتروك في الصندوق (رصيد الغد) 🏦</label>' +
@@ -675,33 +694,76 @@ function subscribeBills() {
     db.collection('orders').onSnapshot(function (snapshot) {
         bills = [];
         withdrawals = [];
+        deposits = [];
         debtPayments = [];
         debtManual = [];
         returnRecords = [];
+        customerRecords = [];
+        loyaltyTxns = [];
         registerRecords = [];
+        storeCredits = [];
+        supplierRecords = [];
+        purchaseOrders = [];
+        stocktakeRecords = [];
+        hookahItems = [];
+        var newLoyaltyConfig = null;
+        var newStoreConfig = null;
         snapshot.forEach(function (doc) {
             var b = doc.data();
             b.id = doc.id;
             var rt = b.recordType;
             if (rt === 'withdrawal') withdrawals.push(b);
+            else if (rt === 'deposit') deposits.push(b);
             else if (rt === 'debt-payment') debtPayments.push(b);
             else if (rt === 'debt-manual') debtManual.push(b);
             else if (rt === 'return') returnRecords.push(b);
+            else if (rt === 'customer') customerRecords.push(b);
+            else if (rt === 'loyalty-txn') loyaltyTxns.push(b);
+            else if (rt === 'loyalty-config') {
+                if (!newLoyaltyConfig || billTimeMs(b) > billTimeMs(newLoyaltyConfig)) newLoyaltyConfig = b;
+            }
+            else if (rt === 'store-config') {
+                if (!newStoreConfig || billTimeMs(b) > billTimeMs(newStoreConfig)) newStoreConfig = b;
+            }
             else if (rt === 'register') registerRecords.push(b);
+            else if (rt === 'store-credit') storeCredits.push(b);
+            else if (rt === 'supplier') supplierRecords.push(b);
+            else if (rt === 'purchase-order') purchaseOrders.push(b);
+            else if (rt === 'stocktake') stocktakeRecords.push(b);
+            else if (rt === 'hookah-item') hookahItems.push(b);
             else bills.push(b); // normal or debt sale
         });
+        loyaltyConfig = newLoyaltyConfig;
+        storeConfig = newStoreConfig;
         bills.sort(billSortDesc);
         withdrawals.sort(billSortDesc);
+        deposits.sort(billSortDesc);
         debtPayments.sort(billSortDesc);
         debtManual.sort(billSortDesc);
         returnRecords.sort(billSortDesc);
+        customerRecords.sort(billSortDesc);
+        loyaltyTxns.sort(billSortDesc);
         registerRecords.sort(billSortDesc);
+        storeCredits.sort(billSortDesc);
+        supplierRecords.sort(billSortDesc);
+        purchaseOrders.sort(billSortDesc);
+        stocktakeRecords.sort(billSortDesc);
+        hookahItems.sort(billSortDesc);
         registerBalance = registerRecords.length ? (registerRecords[0].balance || 0) : 0;
         renderBills();
         updateReports();
         renderReturnsHistory();
         renderDebts();
         renderRegisterSettings();
+        if (typeof renderCustomers === 'function') renderCustomers();
+        if (typeof loadLoyaltyEditor === 'function' && currentPage !== 'settings') loadLoyaltyEditor();
+        if (typeof applyFeatureFlags === 'function') applyFeatureFlags();
+        if (typeof loadAddonsEditor === 'function' && currentPage !== 'settings') loadAddonsEditor();
+        if (typeof checkCampaignEnd === 'function') checkCampaignEnd();
+        if (typeof renderSuppliers === 'function') renderSuppliers();
+        if (typeof renderPurchaseOrders === 'function') renderPurchaseOrders();
+        if (typeof renderStocktakeHistory === 'function') renderStocktakeHistory();
+        if (typeof renderHookahGrid === 'function') renderHookahGrid();
     }, function (err) {
         console.error('Bills subscription error:', err);
     });
@@ -1096,6 +1158,7 @@ function addVariantToCart(product, color, size, qty) {
             color: color,
             size: size,
             price: variant.price || 0,
+            cost: variant.cost || 0,
             qty: qty,
             maxStock: variant.stock
         });
@@ -1182,18 +1245,55 @@ function removeCartItem(key) {
     renderCart();
 }
 
-function updateTotals() {
+function computeSaleTotals() {
     var subtotal = 0;
-    for (var i = 0; i < cart.length; i++) {
-        subtotal += cart[i].price * cart[i].qty;
-    }
+    for (var i = 0; i < cart.length; i++) subtotal += cart[i].price * cart[i].qty;
     var discountVal = parseFloat(document.getElementById('discountInput').value) || 0;
     var discountType = document.getElementById('discountType').value;
     var discount = discountType === 'percent' ? subtotal * (discountVal / 100) : discountVal;
-    var total = Math.max(0, subtotal - discount);
-
-    document.getElementById('subtotal').textContent = '\u20AA' + subtotal.toFixed(2);
-    document.getElementById('totalAmount').textContent = '\u20AA' + total.toFixed(2);
+    var redeemValue = (pendingRedeem && pendingCustomer) ? pendingRedeem.value : 0;
+    var base = Math.max(0, subtotal - discount - redeemValue);
+    var s = (typeof getStoreConfig === 'function') ? getStoreConfig() : { features: {}, taxPercent: 0, taxIncluded: false };
+    var rate = s.features.tax ? (s.taxPercent || 0) : 0;
+    var tax = 0, total = base;
+    if (rate > 0) {
+        if (s.taxIncluded) { tax = base - base / (1 + rate / 100); total = base; }
+        else { tax = base * rate / 100; total = base + tax; }
+    }
+    var creditUse = (pendingCreditUse > 0 && pendingCustomer) ? Math.min(pendingCreditUse, total) : 0;
+    total = Math.max(0, total - creditUse);
+    return {
+        subtotal: subtotal, discount: discount, discountVal: discountVal, discountType: discountType,
+        redeemValue: redeemValue, base: base, rate: rate, tax: Math.round(tax * 100) / 100,
+        taxIncluded: !!s.taxIncluded, creditUse: Math.round(creditUse * 100) / 100, total: Math.round(total * 100) / 100
+    };
+}
+function updateTotals() {
+    var t = computeSaleTotals();
+    document.getElementById('subtotal').textContent = '\u20AA' + t.subtotal.toFixed(2);
+    document.getElementById('totalAmount').textContent = '\u20AA' + t.total.toFixed(2);
+    var taxRow = document.getElementById('taxRow');
+    if (taxRow) {
+        if (t.rate > 0) {
+            taxRow.style.display = '';
+            var lbl = document.getElementById('taxLabel');
+            if (lbl) lbl.textContent = 'الضريبة (' + t.rate + '%)' + (t.taxIncluded ? ' — شامل' : '');
+            var amt = document.getElementById('taxAmount');
+            if (amt) amt.textContent = '\u20AA' + t.tax.toFixed(2);
+        } else {
+            taxRow.style.display = 'none';
+        }
+    }
+    var creditRow = document.getElementById('creditRow');
+    if (creditRow) {
+        if (t.creditUse > 0) {
+            creditRow.style.display = '';
+            var camt = document.getElementById('creditAmount');
+            if (camt) camt.textContent = '-\u20AA' + t.creditUse.toFixed(2);
+        } else {
+            creditRow.style.display = 'none';
+        }
+    }
 }
 
 // ============ CHECKOUT (ATOMIC BATCH) ============
@@ -1202,14 +1302,11 @@ function checkout() {
     if (cart.length === 0) return;
     if (!licenseValid) { showAlert('الترخيص منتهي', { icon: '⛔', title: 'تنبيه' }); return; }
 
-    var subtotal = 0;
-    for (var i = 0; i < cart.length; i++) {
-        subtotal += cart[i].price * cart[i].qty;
-    }
-    var discountVal = parseFloat(document.getElementById('discountInput').value) || 0;
-    var discountType = document.getElementById('discountType').value;
-    var discount = discountType === 'percent' ? subtotal * (discountVal / 100) : discountVal;
-    var total = Math.max(0, subtotal - discount);
+    var st = computeSaleTotals();
+    var subtotal = st.subtotal;
+    var discount = st.discount;
+    var redeemValue = st.redeemValue;
+    var total = st.total;
 
     // Pay-later (debt) requires a customer first.
     if (selectedPayment === 'debt' && !pendingCustomer) {
@@ -1222,6 +1319,7 @@ function checkout() {
 
     var msg = 'الإجمالي المطلوب: \u20AA' + total.toFixed(2) + '\n';
     if (discount > 0) { msg += 'الخصم: \u20AA' + discount.toFixed(2) + '\n'; }
+    if (st.rate > 0) { msg += 'الضريبة (' + st.rate + '%): \u20AA' + st.tax.toFixed(2) + (st.taxIncluded ? ' (شامل)' : '') + '\n'; }
     msg += 'طريقة الدفع: ' + paymentLabel(selectedPayment) + '\n';
 
     if (selectedPayment === 'cash') {
@@ -1249,14 +1347,13 @@ function doCheckout() {
     if (cart.length === 0) return;
     if (!licenseValid) { alert('الترخيص منتهي'); return; }
 
-    var subtotal = 0;
-    for (var i = 0; i < cart.length; i++) {
-        subtotal += cart[i].price * cart[i].qty;
-    }
-    var discountVal = parseFloat(document.getElementById('discountInput').value) || 0;
-    var discountType = document.getElementById('discountType').value;
-    var discount = discountType === 'percent' ? subtotal * (discountVal / 100) : discountVal;
-    var total = Math.max(0, subtotal - discount);
+    var st = computeSaleTotals();
+    var subtotal = st.subtotal;
+    var discountVal = st.discountVal;
+    var discountType = st.discountType;
+    var discount = st.discount;
+    var redeemValue = st.redeemValue;
+    var total = st.total;
 
     var billNumber = 'POS-' + Date.now();
     var billNoteEl = document.getElementById('billNote');
@@ -1269,6 +1366,7 @@ function doCheckout() {
             color: cart[i].color,
             size: cart[i].size,
             price: cart[i].price,
+            cost: cart[i].cost || 0,
             qty: cart[i].qty,
             total: cart[i].price * cart[i].qty
         });
@@ -1282,6 +1380,11 @@ function doCheckout() {
         discount: discount,
         discountType: discountType,
         discountValue: discountVal,
+        redeemPoints: redeemValue > 0 ? pendingRedeem.points : 0,
+        redeemValue: redeemValue,
+        taxRate: st.rate,
+        taxAmount: st.tax,
+        taxIncluded: st.taxIncluded,
         total: total,
         totalBase: total,
         paymentMethod: selectedPayment,
@@ -1296,6 +1399,12 @@ function doCheckout() {
     if (selectedPayment === 'debt' && pendingCustomer) {
         billData.customer = pendingCustomer;
         billData.paidAmount = 0;
+    } else if (pendingCustomer) {
+        billData.customer = pendingCustomer; // loyalty: customer attached to a paid sale
+    }
+    if (st.creditUse > 0 && pendingCustomer) {
+        billData.creditUsed = st.creditUse;
+        billData.customer = billData.customer || pendingCustomer;
     }
     if (selectedPayment === 'cash') {
         var tEl = document.getElementById('tenderInput');
@@ -1316,6 +1425,20 @@ function doCheckout() {
         });
         showReceipt(billData);
         printReceipt(billData, true); // open drawer on every checkout (cash, card, debt)
+        // Loyalty: earn points when a customer is attached and the system is enabled.
+        if (billData.customer) {
+            if (redeemValue > 0 && pendingRedeem) {
+                recordLoyaltyTxn(billData.customer, -pendingRedeem.points, 'استبدال نقاط فاتورة ' + billNumber, billNumber);
+            }
+            if (billData.creditUsed > 0) {
+                addStoreCredit(billData.customer, -billData.creditUsed, 'استخدام رصيد فاتورة ' + billNumber);
+            }
+            var earned = pointsForAmount(total);
+            if (earned > 0) {
+                recordLoyaltyTxn(billData.customer, earned, 'شراء فاتورة ' + billNumber, billNumber);
+                showAlert('تم منح ' + earned + ' نقطة للعميل', { icon: '⭐', title: 'نقاط الولاء' });
+            }
+        }
         cart = [];
         renderCart();
         document.getElementById('discountInput').value = 0;
@@ -1325,8 +1448,11 @@ function doCheckout() {
         var changeEl = document.getElementById('changeDue');
         if (changeEl) changeEl.textContent = '';
         pendingCustomer = null;
+        pendingRedeem = null;
+        pendingCreditUse = 0;
         setPaymentMethod('cash');
         updatePaymentUI();
+        if (typeof updateAttachedCustomerLabel === 'function') updateAttachedCustomerLabel();
         checkoutBtn.textContent = 'إتمام البيع';
         checkoutBtn.disabled = false;
     }
@@ -1430,6 +1556,12 @@ function buildReceiptInnerHTML(bill) {
     html += '<tr><td>المجموع</td><td>\u20AA' + (bill.subtotal || 0).toFixed(2) + '</td></tr>';
     if (bill.discount > 0) {
         html += '<tr><td>الخصم</td><td>-\u20AA' + bill.discount.toFixed(2) + '</td></tr>';
+    }
+    if (bill.redeemValue > 0) {
+        html += '<tr><td>خصم نقاط</td><td>-\u20AA' + Number(bill.redeemValue).toFixed(2) + '</td></tr>';
+    }
+    if (bill.taxRate > 0) {
+        html += '<tr><td>الضريبة (' + bill.taxRate + '%)' + (bill.taxIncluded ? ' شامل' : '') + '</td><td>\u20AA' + Number(bill.taxAmount || 0).toFixed(2) + '</td></tr>';
     }
     html += '<tr class="r-grand"><td>الإجمالي</td><td>\u20AA' + (bill.total || 0).toFixed(2) + '</td></tr>';
     html += '<tr><td>الدفع</td><td>' + paymentLabel(bill.paymentMethod) + '</td></tr>';
@@ -1869,6 +2001,7 @@ function renderInventory() {
 
         var rowId = 'inv_' + p.id;
         var isOpen = !!openInvRows[rowId];
+        var labelsOn = !!(getStoreConfig().features && getStoreConfig().features.barcodeLabels);
         html += '<tr class="inv-master' + (isOpen ? ' open' : '') + '" onclick="toggleInvRow(\'' + escapeHtml(rowId) + '\')">';
         html += '<td><span class="inv-caret" id="caret_' + escapeHtml(rowId) + '">' + (isOpen ? '\u25BE' : '\u25B8') + '</span> ' + escapeHtml(p.id) + '</td>';
         html += '<td>' + escapeHtml(p.name || '') + '</td>';
@@ -1876,18 +2009,21 @@ function renderInventory() {
         html += '<td>' + totalStock + ' قطعة</td>';
         html += '<td>' + priceLabel + '</td>';
         html += '<td>' + statusBadge + '</td>';
+        html += '<td>' + (labelsOn
+            ? '<button class="inv-label-btn" title="طباعة ملصق باركود" onclick="event.stopPropagation();printProductLabel(\'' + escapeHtml(p.id) + '\')">🏷️</button>'
+            : '') + '</td>';
         html += '</tr>';
 
         // The variant detail row is built LAZILY (only when expanded) — pre-building
         // every product's variant sub-table makes the DOM huge with thousands of
         // products (e.g. 3000 products = 36k rows). We store the product id on the
         // row and fill the sub-table on first expand in toggleInvRow().
-        html += '<tr class="inv-detail" id="' + escapeHtml(rowId) + '" data-pid="' + escapeHtml(p.id) + '" style="display:' + (isOpen ? 'table-row' : 'none') + ';"><td colspan="6">';
+        html += '<tr class="inv-detail" id="' + escapeHtml(rowId) + '" data-pid="' + escapeHtml(p.id) + '" style="display:' + (isOpen ? 'table-row' : 'none') + ';"><td colspan="7">';
         if (isOpen) html += buildInvDetailHTML(p);
         html += '</td></tr>';
     }
 
-    body.innerHTML = html || '<tr><td colspan="6" style="text-align:center;padding:20px;">لا توجد بيانات</td></tr>';
+    body.innerHTML = html || '<tr><td colspan="7" style="text-align:center;padding:20px;">لا توجد بيانات</td></tr>';
 }
 
 // Build the variant sub-table HTML for one product (used lazily on row expand).
@@ -2262,7 +2398,9 @@ function renderBills() {
         html += '<td>' + payCell + '</td>';
         var who = b.cashier || (b.customer && b.customer.name) || b.customerName || '-';
         html += '<td>' + escapeHtml(who) + '</td>';
-        html += '<td><button class="btn-secondary" onclick="viewBill(\'' + escapeHtml(b.billNumber || b.orderNumber || b.id) + '\')">عرض</button></td>';
+        var ref = escapeHtml(b.billNumber || b.orderNumber || b.id);
+        html += '<td><button class="btn-secondary" onclick="viewBill(\'' + ref + '\')">عرض</button> ' +
+            '<button class="btn-secondary" title="إعادة طباعة" onclick="reprintBill(\'' + ref + '\')">🖨️</button></td>';
         html += '</tr>';
     }
 
@@ -2365,18 +2503,31 @@ function updateReports() {
     var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
 
     var todaySales = 0, todayCount = 0, monthSales = 0, monthCount = 0;
+    var todayProfit = 0, monthProfit = 0;
     for (var i = 0; i < bills.length; i++) {
         var b = bills[i];
         var d = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate() : null;
         if (!d) continue;
-        if (d >= today) { todaySales += b.total || 0; todayCount++; }
-        if (d >= monthStart) { monthSales += b.total || 0; monthCount++; }
+        var bProfit = 0, bItems = b.items || [];
+        for (var pj = 0; pj < bItems.length; pj++) {
+            bProfit += ((bItems[pj].price || 0) - itemUnitCost(bItems[pj])) * (bItems[pj].qty || 0);
+        }
+        if (d >= today) { todaySales += b.total || 0; todayCount++; todayProfit += bProfit; }
+        if (d >= monthStart) { monthSales += b.total || 0; monthCount++; monthProfit += bProfit; }
     }
 
     document.getElementById('todaySales').textContent = '\u20AA' + todaySales.toFixed(2);
     document.getElementById('todayCount').textContent = todayCount + ' فاتورة';
     document.getElementById('monthSales').textContent = '\u20AA' + monthSales.toFixed(2);
     document.getElementById('monthCount').textContent = monthCount + ' فاتورة';
+    var tpEl = document.getElementById('todayProfit');
+    if (tpEl) tpEl.textContent = '\u20AA' + todayProfit.toFixed(2);
+    var tpSub = document.getElementById('todayProfitSub');
+    if (tpSub) tpSub.textContent = todaySales > 0 ? 'هامش ' + Math.round(todayProfit / todaySales * 100) + '%' : 'هامش 0%';
+    var mpEl = document.getElementById('monthProfit');
+    if (mpEl) mpEl.textContent = '\u20AA' + monthProfit.toFixed(2);
+    var mpSub = document.getElementById('monthProfitSub');
+    if (mpSub) mpSub.textContent = monthSales > 0 ? 'هامش ' + Math.round(monthProfit / monthSales * 100) + '%' : 'هامش 0%';
 
     var totalStock = 0;
     for (var i = 0; i < products.length; i++) { totalStock += getTotalStock(products[i]); }
@@ -2399,26 +2550,75 @@ function updateReports() {
     var scash = document.getElementById('shiftCash');
     if (scash) scash.textContent = 'نقدي \u20AA' + shift.cash.toFixed(2) + ' • بطاقة \u20AA' + shift.card.toFixed(2);
     var sdraw = document.getElementById('shiftDrawer');
-    if (sdraw) sdraw.textContent = 'الصندوق المتوقع \u20AA' + shift.drawer.toFixed(2) + (shift.withdrawn ? ' • سحوبات \u20AA' + shift.withdrawn.toFixed(2) : '');
+    if (sdraw) sdraw.textContent = 'الصندوق المتوقع \u20AA' + shift.drawer.toFixed(2) +
+        (shift.deposited ? ' • إيداعات \u20AA' + shift.deposited.toFixed(2) : '') +
+        (shift.withdrawn ? ' • سحوبات \u20AA' + shift.withdrawn.toFixed(2) : '');
     renderWithdrawals(shift.since);
+    renderDeposits(shift.since);
+    renderLowStock();
+    renderCashierHourReports();
 
     var productSales = {};
     for (var i = 0; i < bills.length; i++) {
         var items = bills[i].items || [];
         for (var j = 0; j < items.length; j++) {
             var key = items[j].name || items[j].productId;
-            if (!productSales[key]) productSales[key] = { qty: 0, revenue: 0 };
+            if (!productSales[key]) productSales[key] = { qty: 0, revenue: 0, profit: 0 };
             productSales[key].qty += items[j].qty || 0;
             productSales[key].revenue += items[j].total || 0;
+            productSales[key].profit += ((items[j].price || 0) - itemUnitCost(items[j])) * (items[j].qty || 0);
         }
     }
     var sorted = Object.keys(productSales).sort(function (a, b) { return productSales[b].qty - productSales[a].qty; }).slice(0, 10);
     var topHtml = '';
     for (var i = 0; i < sorted.length; i++) {
         var name = sorted[i];
-        topHtml += '<tr><td>' + escapeHtml(name) + '</td><td>' + productSales[name].qty + '</td><td>\u20AA' + productSales[name].revenue.toFixed(2) + '</td></tr>';
+        topHtml += '<tr><td>' + escapeHtml(name) + '</td><td>' + productSales[name].qty + '</td><td>\u20AA' + productSales[name].revenue.toFixed(2) + '</td><td>\u20AA' + productSales[name].profit.toFixed(2) + '</td></tr>';
     }
-    document.getElementById('topProductsBody').innerHTML = topHtml || '<tr><td colspan="3" style="text-align:center;">لا توجد بيانات</td></tr>';
+    document.getElementById('topProductsBody').innerHTML = topHtml || '<tr><td colspan="4" style="text-align:center;">لا توجد بيانات</td></tr>';
+}
+
+// Sales-by-cashier and sales-by-hour for TODAY (POS sales only).
+function renderCashierHourReports() {
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var byCashier = {}, byHour = {};
+    for (var i = 0; i < bills.length; i++) {
+        var b = bills[i];
+        if (b.source !== 'pos') continue;
+        var d = b.createdAt && b.createdAt.toDate ? b.createdAt.toDate() : (b.createdAtIso ? new Date(b.createdAtIso) : null);
+        if (!d || d < today) continue;
+        var t = b.total || 0;
+        var who = b.cashier || '-';
+        if (!byCashier[who]) byCashier[who] = { count: 0, total: 0 };
+        byCashier[who].count++; byCashier[who].total += t;
+        var h = d.getHours();
+        if (!byHour[h]) byHour[h] = { count: 0, total: 0 };
+        byHour[h].count++; byHour[h].total += t;
+    }
+    var cBody = document.getElementById('cashierReportBody');
+    if (cBody) {
+        var keys = Object.keys(byCashier).sort(function (a, b) { return byCashier[b].total - byCashier[a].total; });
+        var ch = '';
+        for (var k = 0; k < keys.length; k++) {
+            ch += '<tr><td>' + escapeHtml(keys[k]) + '</td><td>' + byCashier[keys[k]].count + '</td><td>\u20AA' +
+                byCashier[keys[k]].total.toFixed(2) + '</td></tr>';
+        }
+        cBody.innerHTML = ch || '<tr><td colspan="3" style="text-align:center;padding:14px;">لا توجد مبيعات اليوم</td></tr>';
+    }
+    var hBody = document.getElementById('hourReportBody');
+    if (hBody) {
+        var maxTotal = 0;
+        for (var hk in byHour) { if (byHour[hk].total > maxTotal) maxTotal = byHour[hk].total; }
+        var hh = '';
+        for (var hr = 0; hr < 24; hr++) {
+            if (!byHour[hr]) continue;
+            var pct = maxTotal > 0 ? Math.round((byHour[hr].total / maxTotal) * 100) : 0;
+            var label = (hr < 10 ? '0' + hr : hr) + ':00';
+            hh += '<tr><td>' + label + '</td><td>' + byHour[hr].count + '</td><td>\u20AA' + byHour[hr].total.toFixed(2) +
+                '</td><td><div class="hour-bar"><div class="hour-bar-fill" style="width:' + pct + '%"></div></div></td></tr>';
+        }
+        hBody.innerHTML = hh || '<tr><td colspan="4" style="text-align:center;padding:14px;">لا توجد مبيعات اليوم</td></tr>';
+    }
 }
 
 // ============ STATISTICS (date range) ============
@@ -2430,6 +2630,18 @@ function billDateObj(b) {
 function productById(id) {
     for (var i = 0; i < products.length; i++) { if (products[i].id === id) return products[i]; }
     return null;
+}
+// Cost of a sold line item: prefer the snapshot stored at sale time; fall back to
+// current product variant cost for older bills that predate cost tracking.
+function itemUnitCost(item) {
+    if (item.cost != null && item.cost > 0) return item.cost;
+    var p = item.productId ? productById(item.productId) : null;
+    if (p && p.variants) {
+        for (var i = 0; i < p.variants.length; i++) {
+            if (p.variants[i].color === item.color && p.variants[i].size === item.size) return p.variants[i].cost || 0;
+        }
+    }
+    return 0;
 }
 function lookupBrand(item) {
     var p = item.productId ? productById(item.productId) : null;
@@ -2566,15 +2778,28 @@ function runMonthlyCheck() {
             var pid = det.productId; if (!pid) return;
             bought[pid] = (bought[pid] || 0) + (det.qty || 0);
         });
-        buildMonthlyResults(mVal, sold, bought);
+        buildMonthlyResults(mVal, sold, bought, monthlyPurchaseSummary(start, end));
     }).catch(function () {
-        buildMonthlyResults(mVal, sold, {});
+        buildMonthlyResults(mVal, sold, {}, monthlyPurchaseSummary(start, end));
     }).then(function () {
         btn.disabled = false; btn.textContent = 'إنشاء الجرد';
     });
 }
+// Aggregate supplier purchase-order spending for the month (value + count + per-supplier).
+function monthlyPurchaseSummary(start, end) {
+    var total = 0, count = 0, bySupplier = {};
+    for (var i = 0; i < purchaseOrders.length; i++) {
+        var po = purchaseOrders[i];
+        var ms = billTimeMs(po);
+        if (!ms || ms < start || ms >= end) continue;
+        total += (po.total || 0); count++;
+        var sup = po.supplier || 'غير محدد';
+        bySupplier[sup] = (bySupplier[sup] || 0) + (po.total || 0);
+    }
+    return { total: total, count: count, bySupplier: bySupplier };
+}
 
-function buildMonthlyResults(mVal, sold, bought) {
+function buildMonthlyResults(mVal, sold, bought, purchases) {
     var rows = [];
     var seen = {};
     for (var i = 0; i < products.length; i++) {
@@ -2597,7 +2822,7 @@ function buildMonthlyResults(mVal, sold, bought) {
         rows.push({ id: key, name: '(محذوف) ' + key, brand: 'غير محدد', bought: bought[key] || 0, sold: sold[key] || 0, stock: 0 });
     }
     rows.sort(function (a, b) { return b.sold - a.sold; });
-    lastMonthlyData = { month: mVal, rows: rows };
+    lastMonthlyData = { month: mVal, rows: rows, purchases: purchases || { total: 0, count: 0, bySupplier: {} } };
     renderMonthlyResults(lastMonthlyData);
 }
 
@@ -2612,10 +2837,23 @@ function renderMonthlyResults(data) {
     }
     if (!data.rows.length) html += '<tr><td colspan="6" style="text-align:center;">لا توجد حركة في هذا الشهر</td></tr>';
     html += '</tbody></table>';
-    html = '<div class="stats-summary"><div class="stats-kpi"><span>إجمالي المشتريات</span><strong>' + totBought + '</strong></div>' +
-        '<div class="stats-kpi"><span>إجمالي المبيعات</span><strong>' + totSold + '</strong></div>' +
-        '<div class="stats-kpi"><span>عدد الأصناف</span><strong>' + data.rows.length + '</strong></div></div>' + html;
-    document.getElementById('monthlyResults').innerHTML = html;
+    var pur = data.purchases || { total: 0, count: 0, bySupplier: {} };
+    var kpi = '<div class="stats-summary"><div class="stats-kpi"><span>إجمالي الكميات المشتراة</span><strong>' + totBought + '</strong></div>' +
+        '<div class="stats-kpi"><span>إجمالي الكميات المباعة</span><strong>' + totSold + '</strong></div>' +
+        '<div class="stats-kpi"><span>عدد الأصناف</span><strong>' + data.rows.length + '</strong></div>' +
+        '<div class="stats-kpi"><span>قيمة أوامر الشراء (الموردون)</span><strong>\u20AA' + pur.total.toFixed(2) + '</strong></div>' +
+        '<div class="stats-kpi"><span>عدد أوامر الشراء</span><strong>' + pur.count + '</strong></div></div>';
+    // Per-supplier purchase breakdown (only when there are POs this month).
+    var supKeys = Object.keys(pur.bySupplier || {});
+    if (supKeys.length) {
+        var supHtml = '<h4 style="margin:14px 0 6px;">🚚 المشتريات حسب المورد</h4><table class="data-table"><thead><tr><th>المورد</th><th>إجمالي المشتريات</th></tr></thead><tbody>';
+        for (var k = 0; k < supKeys.length; k++) {
+            supHtml += '<tr><td>' + escapeHtml(supKeys[k]) + '</td><td>\u20AA' + (pur.bySupplier[supKeys[k]] || 0).toFixed(2) + '</td></tr>';
+        }
+        supHtml += '</tbody></table>';
+        html = html + supHtml;
+    }
+    document.getElementById('monthlyResults').innerHTML = kpi + html;
 }
 
 function printMonthly() {
@@ -2672,6 +2910,11 @@ function switchPage(page) {
     if (page === 'debts') renderDebts();
     else if (page === 'returns') renderReturnsHistory();
     else if (page === 'reports') updateReports();
+    else if (page === 'customers') renderCustomers();
+    else if (page === 'suppliers') { renderSuppliers(); renderSupplierOptions(); renderPurchaseOrders(); }
+    else if (page === 'stocktake') { renderStocktakeRows(); renderStocktakeHistory(); }
+    else if (page === 'restaurant') renderTables();
+    else if (page === 'hookah') renderHookahGrid();
 }
 
 // ============ EVENT LISTENERS ============
@@ -2899,6 +3142,10 @@ function setupEventListeners() {
     if (withdrawBtn) withdrawBtn.addEventListener('click', openWithdrawModal);
     var saveWithdrawBtn = document.getElementById('saveWithdrawBtn');
     if (saveWithdrawBtn) saveWithdrawBtn.addEventListener('click', saveWithdrawal);
+    var depositBtn = document.getElementById('depositBtn');
+    if (depositBtn) depositBtn.addEventListener('click', openDepositModal);
+    var saveDepositBtn = document.getElementById('saveDepositBtn');
+    if (saveDepositBtn) saveDepositBtn.addEventListener('click', saveDeposit);
 
     // Customer picker (debt sale)
     var customerConfirmBtn = document.getElementById('customerConfirmBtn');
@@ -2936,6 +3183,10 @@ function setupEventListeners() {
     if (saveDebtBtn) saveDebtBtn.addEventListener('click', saveAddDebt);
     var debtsSearch = document.getElementById('debtsSearch');
     if (debtsSearch) debtsSearch.addEventListener('input', debounce(renderDebts, 150));
+    var customerSearchInput = document.getElementById('customerSearchInput');
+    if (customerSearchInput) customerSearchInput.addEventListener('input', debounce(renderCustomers, 150));
+    var addCustomerBtn = document.getElementById('addCustomerBtn');
+    if (addCustomerBtn) addCustomerBtn.addEventListener('click', openNewCustomer);
     var debtPhone = document.getElementById('debtPhone');
     if (debtPhone) debtPhone.addEventListener('input', function () {
         renderCustomerMatches(this.value, document.getElementById('debtMatches'));
@@ -2970,7 +3221,109 @@ function setupEventListeners() {
     var regSetBtn = document.getElementById('regSetBtn');
     if (regSetBtn) regSetBtn.addEventListener('click', saveRegisterBalance);
 
-    // Category boxes + brand/filter popup
+    var lowStockSaveBtn = document.getElementById('lowStockSaveBtn');
+    if (lowStockSaveBtn) {
+        var lowCur = document.getElementById('lowStockCurrent');
+        var lowInput = document.getElementById('lowStockInput');
+        if (lowCur) lowCur.textContent = getLowStockThreshold();
+        if (lowInput) lowInput.value = getLowStockThreshold();
+        lowStockSaveBtn.addEventListener('click', function () {
+            var v = parseInt(lowInput.value, 10);
+            if (isNaN(v) || v < 0) { showAlert('أدخل رقماً صحيحاً', { icon: '⚠️', title: 'تنبيه' }); return; }
+            setLowStockThreshold(v);
+            if (lowCur) lowCur.textContent = v;
+            var hint = document.getElementById('lowStockSavedHint');
+            if (hint) { hint.textContent = '✔ تم حفظ الحد'; setTimeout(function () { hint.textContent = ''; }, 1500); }
+            renderLowStock();
+        });
+    }
+
+    // Loyalty program settings wiring
+    var loyaltyToggleBtn = document.getElementById('loyaltyToggleBtn');
+    if (loyaltyToggleBtn) loyaltyToggleBtn.addEventListener('click', toggleLoyalty);
+    var loyaltySaveBtn = document.getElementById('loyaltySaveBtn');
+    if (loyaltySaveBtn) loyaltySaveBtn.addEventListener('click', saveLoyaltySettings);
+    var addRewardBtn = document.getElementById('addRewardBtn');
+    if (addRewardBtn) addRewardBtn.addEventListener('click', addReward);
+    var drawRaffleBtn = document.getElementById('drawRaffleBtn');
+    if (drawRaffleBtn) drawRaffleBtn.addEventListener('click', drawRaffle);
+    var resetAllPointsBtn = document.getElementById('resetAllPointsBtn');
+    if (resetAllPointsBtn) resetAllPointsBtn.addEventListener('click', function () { resetAllLoyaltyPoints(false); });
+    var campaignActionBtns = document.getElementById('campaignActionBtns');
+    if (campaignActionBtns) campaignActionBtns.addEventListener('click', function (e) {
+        var b = e.target.closest('.campaign-action-btn');
+        if (b) toggleCampaignAction(b.getAttribute('data-action'));
+    });
+    loadLoyaltyEditor();
+
+    // Settings sub-navigation
+    var settingsSubnav = document.getElementById('settingsSubnav');
+    if (settingsSubnav) settingsSubnav.addEventListener('click', function (e) {
+        var b = e.target.closest('.settings-subnav-btn');
+        if (b) switchSettingsTab(b.getAttribute('data-settings-tab'));
+    });
+
+    // Reports sub-navigation
+    var reportsSubnav = document.getElementById('reportsSubnav');
+    if (reportsSubnav) reportsSubnav.addEventListener('click', function (e) {
+        var b = e.target.closest('.settings-subnav-btn');
+        if (b) switchReportsTab(b.getAttribute('data-reports-tab'));
+    });
+
+    // Add-ons (optional features) wiring
+    var addonsSaveBtn = document.getElementById('addonsSaveBtn');
+    if (addonsSaveBtn) addonsSaveBtn.addEventListener('click', saveAddons);
+    var featTaxCb = document.getElementById('feat-tax');
+    if (featTaxCb) featTaxCb.addEventListener('change', function () {
+        var tb = document.getElementById('taxConfigBlock');
+        if (tb) tb.style.display = featTaxCb.checked ? '' : 'none';
+    });
+    loadAddonsEditor();
+
+    // Suppliers / Purchase orders
+    var addSupplierBtn = document.getElementById('addSupplierBtn');
+    if (addSupplierBtn) addSupplierBtn.addEventListener('click', addSupplier);
+    var addPoBtn = document.getElementById('addPoBtn');
+    if (addPoBtn) addPoBtn.addEventListener('click', addPurchaseOrder);
+
+    // Stocktake (Excel export/import)
+    var stkLoadBtn = document.getElementById('stocktakeLoadBtn');
+    if (stkLoadBtn) stkLoadBtn.addEventListener('click', reloadStocktake);
+    var stkExportBtn = document.getElementById('stocktakeExportBtn');
+    if (stkExportBtn) stkExportBtn.addEventListener('click', exportStocktakeCSV);
+    var stkImportBtn = document.getElementById('stocktakeImportBtn');
+    var stkFileInput = document.getElementById('stocktakeFileInput');
+    if (stkImportBtn && stkFileInput) stkImportBtn.addEventListener('click', function () { stkFileInput.value = ''; stkFileInput.click(); });
+    if (stkFileInput) stkFileInput.addEventListener('change', function (e) { handleStocktakeFile(e.target.files && e.target.files[0]); });
+    var applyStkBtn = document.getElementById('applyStocktakeBtn');
+    if (applyStkBtn) applyStkBtn.addEventListener('click', applyStocktake);
+    var stkReportExportBtn = document.getElementById('stocktakeReportExportBtn');
+    if (stkReportExportBtn) stkReportExportBtn.addEventListener('click', exportStocktakeReport);
+    var stkSearch = document.getElementById('stocktakeSearch');
+    if (stkSearch) stkSearch.addEventListener('input', function () { _stocktakePage = 1; renderStocktakeRows(); });
+
+    // Restaurant tables
+    var saveTableCountBtn = document.getElementById('saveTableCountBtn');
+    if (saveTableCountBtn) saveTableCountBtn.addEventListener('click', saveTableCount);
+
+    // Hookah / custom items
+    var addHookahBtn = document.getElementById('addHookahBtn');
+    if (addHookahBtn) addHookahBtn.addEventListener('click', addHookahItem);
+
+    // Barcode labels
+    var printLabelsBtn = document.getElementById('printLabelsBtn');
+    if (printLabelsBtn) printLabelsBtn.addEventListener('click', printBarcodeLabels);
+    var labelProductSel = document.getElementById('labelProduct');
+    if (labelProductSel) labelProductSel.addEventListener('change', onLabelProductChange);
+    var labelVariantSel = document.getElementById('labelVariant');
+    if (labelVariantSel) labelVariantSel.addEventListener('change', renderLabelPreview);
+    var labelIncEl = document.getElementById('labelIncludePrice');
+    if (labelIncEl) labelIncEl.addEventListener('click', toggleLabelPrice);
+    var labelPrintBtn = document.getElementById('doPrintLabelsBtn');
+    if (labelPrintBtn) labelPrintBtn.addEventListener('click', doPrintLabels);
+    var labelRefreshPrintersBtn = document.getElementById('labelRefreshPrintersBtn');
+    if (labelRefreshPrintersBtn) labelRefreshPrintersBtn.addEventListener('click', loadLabelPrinters);
+
     var categoryBoxes = document.getElementById('categoryBoxes');
     if (categoryBoxes) categoryBoxes.addEventListener('click', function (e) {
         var bx = e.target.closest('.category-box');
@@ -3026,6 +3379,88 @@ function setupEventListeners() {
     if (resumeSaleBtn) resumeSaleBtn.addEventListener('click', openHeldModal);
     var openDrawerBtn = document.getElementById('openDrawerBtn');
     if (openDrawerBtn) openDrawerBtn.addEventListener('click', openCashDrawer);
+    var attachCustomerBtn = document.getElementById('attachCustomerBtn');
+    if (attachCustomerBtn) attachCustomerBtn.addEventListener('click', function () {
+        openCustomerModal('ربط عميل بالفاتورة', function (cust) {
+            pendingCustomer = cust;
+            pendingRedeem = null;
+            updateAttachedCustomerLabel();
+        });
+    });
+    var redeemPointsBtn = document.getElementById('redeemPointsBtn');
+    if (redeemPointsBtn) redeemPointsBtn.addEventListener('click', redeemPoints);
+    var useCreditBtn = document.getElementById('useCreditBtn');
+    if (useCreditBtn) useCreditBtn.addEventListener('click', useStoreCredit);
+}
+function updateAttachedCustomerLabel() {
+    var lbl = document.getElementById('attachedCustomerLabel');
+    var redeemBtn = document.getElementById('redeemPointsBtn');
+    var creditBtn = document.getElementById('useCreditBtn');
+    var L = getLoyalty();
+    if (!lbl) return;
+    if (pendingCustomer) {
+        lbl.style.display = '';
+        var cust = findCustomerByKey(customerKey(pendingCustomer));
+        var pts = cust ? (cust.points || 0) : 0;
+        var ptsTxt = L.enabled ? ' — ' + pts + ' نقطة' : '';
+        var credit = (typeof getCustomerCredit === 'function') ? getCustomerCredit(pendingCustomer) : 0;
+        var creditOn = isFeatureOn('storeCredit');
+        var creditTxt = (creditOn && credit > 0) ? ' — رصيد ₪' + credit.toFixed(2) : '';
+        var redeemTxt = pendingRedeem ? ' <span style="color:#27ae60;">(خصم نقاط ₪' + pendingRedeem.value.toFixed(2) + ')</span>' : '';
+        var creditUseTxt = pendingCreditUse > 0 ? ' <span style="color:#27ae60;">(رصيد ₪' + pendingCreditUse.toFixed(2) + ')</span>' : '';
+        lbl.innerHTML = '👤 ' + escapeHtml(pendingCustomer.name || pendingCustomer.phone || 'عميل') + ptsTxt + creditTxt + redeemTxt + creditUseTxt +
+            ' <a href="#" onclick="clearAttachedCustomer();return false;" style="color:#e74c3c;">✕</a>';
+        if (redeemBtn) redeemBtn.style.display = (L.enabled && pts >= L.minRedeem && pts > 0) ? '' : 'none';
+        if (creditBtn) creditBtn.style.display = (creditOn && credit > 0 && pendingCreditUse <= 0) ? '' : 'none';
+    } else {
+        lbl.style.display = 'none';
+        lbl.innerHTML = '';
+        if (redeemBtn) redeemBtn.style.display = 'none';
+        if (creditBtn) creditBtn.style.display = 'none';
+    }
+}
+function useStoreCredit() {
+    if (!pendingCustomer) return;
+    var credit = getCustomerCredit(pendingCustomer);
+    if (credit <= 0) { showAlert('لا يوجد رصيد للعميل', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var t = computeSaleTotals();
+    var beforeCredit = t.total + (t.creditUse || 0);
+    var apply = Math.min(credit, beforeCredit);
+    var ans = prompt('رصيد العميل: ₪' + credit.toFixed(2) + '\nالمطلوب: ₪' + beforeCredit.toFixed(2) + '\nكم تريد استخدام من الرصيد؟', apply.toFixed(2));
+    if (ans === null) return;
+    var v = parseFloat(ans) || 0;
+    if (v <= 0) { pendingCreditUse = 0; }
+    else { pendingCreditUse = Math.min(v, credit, beforeCredit); }
+    updateAttachedCustomerLabel();
+    updateTotals();
+    renderCart();
+}
+function redeemPoints() {
+    if (!pendingCustomer) return;
+    var L = getLoyalty();
+    var cust = findCustomerByKey(customerKey(pendingCustomer));
+    var pts = cust ? (cust.points || 0) : 0;
+    if (pts < L.minRedeem || pts <= 0) { showAlert('لا توجد نقاط كافية للاستبدال', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var maxValue = pts / L.redeemRate;
+    var ans = prompt('للعميل ' + pts + ' نقطة = خصم حتى ₪' + maxValue.toFixed(2) + '\nكم نقطة تريد استبدالها؟ (مضاعفات ' + L.redeemRate + ')', String(pts));
+    if (ans === null) return;
+    var usePts = parseInt(ans, 10) || 0;
+    if (usePts <= 0 || usePts > pts) { showAlert('عدد نقاط غير صالح', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var value = Math.floor(usePts / L.redeemRate * 100) / 100;
+    if (value <= 0) { showAlert('النقاط أقل من اللازم لخصم ₪1', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var usedPts = Math.round(value * L.redeemRate);
+    pendingRedeem = { points: usedPts, value: value };
+    updateAttachedCustomerLabel();
+    renderCart();
+    showAlert('تم تطبيق خصم نقاط ₪' + value.toFixed(2), { icon: '⭐', title: 'استبدال النقاط' });
+}
+function clearAttachedCustomer() {
+    if (selectedPayment === 'debt') return; // debt requires a customer
+    pendingCustomer = null;
+    pendingRedeem = null;
+    pendingCreditUse = 0;
+    updateAttachedCustomerLabel();
+    renderCart();
 }
 
 // ============ HELPERS: HTML ESCAPE + BILL DIGITS ============
@@ -3081,8 +3516,21 @@ var SHORTCUT_ACTIONS = [
     { id: 'page-reports', label: 'صفحة التقارير' },
     { id: 'page-stats', label: 'صفحة الإحصائيات' },
     { id: 'page-settings', label: 'صفحة الإعدادات' },
+    { id: 'page-returns', label: 'صفحة المرتجعات' },
+    { id: 'page-debts', label: 'صفحة الذمم' },
+    { id: 'page-customers', label: 'صفحة العملاء' },
+    { id: 'page-suppliers', label: 'صفحة الموردين' },
+    { id: 'page-stocktake', label: 'صفحة الجرد' },
+    { id: 'page-restaurant', label: 'صفحة الطاولات' },
+    { id: 'page-hookah', label: 'صفحة الأرجيلة' },
     { id: 'focus-bill-search', label: 'بحث الفواتير' },
+    { id: 'hold-sale', label: 'تعليق الفاتورة' },
+    { id: 'resume-sale', label: 'استئناف فاتورة معلّقة' },
+    { id: 'new-customer', label: 'عميل جديد' },
     { id: 'open-drawer', label: 'فتح درج الكاش' },
+    { id: 'reprint-last', label: 'إعادة طباعة آخر فاتورة' },
+    { id: 'cash-in', label: 'إيداع نقدي في الصندوق' },
+    { id: 'withdraw', label: 'سحب شخصي (مسحوبات)' },
     { id: 'close-day', label: 'إغلاق اليوم (مدير)' }
 ];
 var DEFAULT_SHORTCUTS = {
@@ -3132,8 +3580,21 @@ function runShortcutAction(action) {
         case 'page-reports': switchPage('reports'); break;
         case 'page-stats': switchPage('stats'); break;
         case 'page-settings': switchPage('settings'); break;
+        case 'page-returns': switchPage('returns'); break;
+        case 'page-debts': switchPage('debts'); break;
+        case 'page-customers': switchPage('customers'); break;
+        case 'page-suppliers': if (isFeatureOn('suppliers')) switchPage('suppliers'); break;
+        case 'page-stocktake': if (isFeatureOn('stocktake')) switchPage('stocktake'); break;
+        case 'page-restaurant': if (isFeatureOn('restaurant')) switchPage('restaurant'); break;
+        case 'page-hookah': if (isFeatureOn('hookah')) switchPage('hookah'); break;
         case 'focus-bill-search': switchPage('bills'); var bs = document.getElementById('billsSearch'); if (bs) { bs.focus(); bs.select(); } break;
+        case 'hold-sale': switchPage('sales'); holdSale(); break;
+        case 'resume-sale': openHeldModal(); break;
+        case 'new-customer': openNewCustomer(); break;
         case 'open-drawer': openCashDrawer(); break;
+        case 'reprint-last': reprintLastBill(); break;
+        case 'cash-in': openDepositModal(); break;
+        case 'withdraw': openWithdrawModal(); break;
         case 'close-day': if (isAdmin()) openCloseDayModal(); break;
     }
 }
@@ -3377,12 +3838,30 @@ function buildCustomerIndex() {
     var idx = {};
     function ensure(c) {
         var key = customerKey(c);
-        if (!idx[key]) idx[key] = { key: key, name: (c && c.name) || '', phone: normalizePhone(c && c.phone), debt: 0, paid: 0 };
+        if (!idx[key]) idx[key] = { key: key, name: (c && c.name) || '', phone: normalizePhone(c && c.phone), debt: 0, paid: 0, spent: 0, visits: 0, lastVisit: 0, points: 0, notes: '', birthday: '', joinedAt: 0 };
         if (c && c.name && !idx[key].name) idx[key].name = c.name;
         return idx[key];
     }
+    // Explicit customer profile records (CRM registry).
+    for (var i = 0; i < customerRecords.length; i++) {
+        var cr = customerRecords[i];
+        var e = ensure({ name: cr.name, phone: cr.phone });
+        if (cr.name) e.name = cr.name;
+        if (cr.notes) e.notes = cr.notes;
+        if (cr.birthday) e.birthday = cr.birthday;
+        var jt = billTimeMs(cr);
+        if (jt && (!e.joinedAt || jt < e.joinedAt)) e.joinedAt = jt;
+    }
     for (var i = 0; i < bills.length; i++) {
         var b = bills[i];
+        if (b.source !== 'pos') continue;
+        if (b.customer) {
+            var ce = ensure(b.customer);
+            ce.spent += b.total || 0;
+            ce.visits += 1;
+            var vt = billTimeMs(b);
+            if (vt > ce.lastVisit) ce.lastVisit = vt;
+        }
         if (b.paymentMethod === 'debt' && b.customer) ensure(b.customer).debt += b.total || 0;
     }
     for (var i = 0; i < debtManual.length; i++) {
@@ -3392,6 +3871,11 @@ function buildCustomerIndex() {
     for (var i = 0; i < debtPayments.length; i++) {
         var p = debtPayments[i];
         if (p.customer) ensure(p.customer).paid += p.amount || 0;
+    }
+    // Loyalty point ledger.
+    for (var i = 0; i < loyaltyTxns.length; i++) {
+        var lt = loyaltyTxns[i];
+        if (lt.customer) ensure(lt.customer).points += lt.delta || 0;
     }
     return idx;
 }
@@ -3407,7 +3891,1201 @@ function customerList() {
     return arr;
 }
 
-// Customer picker modal (used by debt sales)
+// ============ STORE CONFIG / ADD-ONS (الإضافات والميزات الاختيارية) ============
+// Optional features the owner can switch on per-store. Persisted store-wide via
+// a 'store-config' record (latest-wins), so all devices share the same setup.
+var DEFAULT_STORE_CONFIG = {
+    features: {
+        tax: false,            // VAT / ضريبة
+        storeCredit: false,    // رصيد العميل / store credit
+        suppliers: false,      // الموردون وأوامر الشراء
+        stocktake: false,      // الجرد
+        barcodeLabels: false,  // طباعة ملصقات الباركود
+        restaurant: false,     // وضع المطاعم (طاولات/طلبات)
+        hookah: false          // الأرجيلة / التبغ
+    },
+    taxPercent: 16,            // admin-configurable tax rate
+    taxIncluded: false,        // true = prices already include tax
+    businessType: 'retail'     // retail | restaurant | cafe
+};
+function getStoreConfig() {
+    var c = storeConfig || {};
+    var f = c.features || {};
+    var df = DEFAULT_STORE_CONFIG.features;
+    return {
+        features: {
+            tax: !!f.tax, storeCredit: !!f.storeCredit, suppliers: !!f.suppliers,
+            stocktake: !!f.stocktake, barcodeLabels: !!f.barcodeLabels,
+            restaurant: !!f.restaurant, hookah: !!f.hookah
+        },
+        taxPercent: (c.taxPercent != null && c.taxPercent >= 0) ? c.taxPercent : DEFAULT_STORE_CONFIG.taxPercent,
+        taxIncluded: !!c.taxIncluded,
+        businessType: c.businessType || DEFAULT_STORE_CONFIG.businessType
+    };
+}
+function isFeatureOn(name) {
+    var f = getStoreConfig().features;
+    return !!f[name];
+}
+function getTaxPercent() {
+    var s = getStoreConfig();
+    return s.features.tax ? (s.taxPercent || 0) : 0;
+}
+function saveStoreConfig(cfg, onOk) {
+    var rec = {
+        recordType: 'store-config',
+        features: cfg.features || DEFAULT_STORE_CONFIG.features,
+        taxPercent: cfg.taxPercent, taxIncluded: !!cfg.taxIncluded,
+        businessType: cfg.businessType || 'retail',
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'store-config'
+    };
+    savePosRecord(rec, 'SC', function () { if (onOk) onOk(); });
+}
+// Apply feature visibility across the app (nav tabs, sales rows, settings panels).
+function applyFeatureFlags() {
+    var s = getStoreConfig();
+    var map = {
+        suppliers: ['feature-suppliers'],
+        stocktake: ['feature-stocktake'],
+        storeCredit: ['feature-storecredit'],
+        tax: ['feature-tax'],
+        barcodeLabels: ['feature-barcode'],
+        restaurant: ['feature-restaurant'],
+        hookah: ['feature-hookah']
+    };
+    for (var key in map) {
+        if (!map.hasOwnProperty(key)) continue;
+        var on = !!s.features[key];
+        var cls = map[key];
+        for (var i = 0; i < cls.length; i++) {
+            var els = document.getElementsByClassName(cls[i]);
+            for (var j = 0; j < els.length; j++) {
+                els[j].style.display = on ? '' : 'none';
+            }
+        }
+    }
+    // Tax config block visibility within add-ons panel
+    var taxBlock = document.getElementById('taxConfigBlock');
+    if (taxBlock) taxBlock.style.display = s.features.tax ? '' : 'none';
+}
+var _addonsEdit = null;
+function loadAddonsEditor() {
+    var s = getStoreConfig();
+    _addonsEdit = { features: Object.assign({}, s.features), taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, businessType: s.businessType };
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah'];
+    for (var i = 0; i < keys.length; i++) {
+        var cb = document.getElementById('feat-' + keys[i]);
+        if (cb) cb.checked = !!s.features[keys[i]];
+    }
+    var tp = document.getElementById('taxPercentInput'); if (tp) tp.value = s.taxPercent;
+    var ti = document.getElementById('taxIncludedSelect'); if (ti) ti.value = s.taxIncluded ? 'true' : 'false';
+    var taxBlock = document.getElementById('taxConfigBlock');
+    if (taxBlock) taxBlock.style.display = s.features.tax ? '' : 'none';
+}
+function saveAddons() {
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah'];
+    var features = {};
+    for (var i = 0; i < keys.length; i++) {
+        var cb = document.getElementById('feat-' + keys[i]);
+        features[keys[i]] = cb ? cb.checked : false;
+    }
+    var cfg = {
+        features: features,
+        taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || 0,
+        taxIncluded: (document.getElementById('taxIncludedSelect') || {}).value === 'true',
+        businessType: features.restaurant ? 'restaurant' : 'retail'
+    };
+    var hint = document.getElementById('addonsSavedHint');
+    saveStoreConfig(cfg, function () {
+        storeConfig = Object.assign({ recordType: 'store-config' }, cfg);
+        applyFeatureFlags();
+        if (hint) { hint.textContent = '✅ تم حفظ الإضافات'; setTimeout(function () { hint.textContent = ''; }, 3000); }
+        if (typeof renderProducts === 'function') renderProducts();
+        if (typeof updateTotals === 'function') updateTotals();
+    });
+}
+
+// ============ PRODUCT STOCK HELPER ============
+function updateProductVariantsDoc(productId, variants) {
+    return isD1()
+        ? db.collection('products').doc(productId).update({ variants: variants })
+        : rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId).update({ variants: variants });
+}
+
+// ============ SUPPLIERS & PURCHASE ORDERS (الموردون وأوامر الشراء) ============
+function addSupplier() {
+    var name = (document.getElementById('supplierName').value || '').trim();
+    var phone = (document.getElementById('supplierPhone').value || '').trim();
+    var note = (document.getElementById('supplierNote').value || '').trim();
+    if (!name) { showAlert('أدخل اسم المورد', { icon: '⚠️', title: 'تنبيه' }); return; }
+    savePosRecord({ recordType: 'supplier', name: name, phone: phone, note: note }, 'sup', function () {
+        document.getElementById('supplierName').value = '';
+        document.getElementById('supplierPhone').value = '';
+        document.getElementById('supplierNote').value = '';
+        logActivity('supplier_add', 'إضافة مورد: ' + name, { name: name });
+        showAlert('تم حفظ المورد', { icon: '✅', title: 'تم' });
+    });
+}
+function supplierPurchaseTotal(name) {
+    var t = 0;
+    for (var i = 0; i < purchaseOrders.length; i++) {
+        if (purchaseOrders[i].supplier === name) t += (purchaseOrders[i].total || 0);
+    }
+    return t;
+}
+function renderSuppliers() {
+    var body = document.getElementById('suppliersBody');
+    if (!body) return;
+    if (!supplierRecords.length) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:16px;">لا يوجد موردون</td></tr>'; return; }
+    var html = '';
+    for (var i = 0; i < supplierRecords.length; i++) {
+        var s = supplierRecords[i];
+        html += '<tr><td>' + escapeHtml(s.name || '') + '</td><td>' + escapeHtml(s.phone || '') +
+            '</td><td>\u20AA' + supplierPurchaseTotal(s.name).toFixed(2) + '</td><td>' + escapeHtml(s.note || '') + '</td></tr>';
+    }
+    body.innerHTML = html;
+}
+function renderSupplierOptions() {
+    var sel = document.getElementById('poSupplier');
+    if (!sel) return;
+    var html = '<option value="">— اختر المورد —</option>';
+    for (var i = 0; i < supplierRecords.length; i++) {
+        html += '<option value="' + escapeHtml(supplierRecords[i].name) + '">' + escapeHtml(supplierRecords[i].name) + '</option>';
+    }
+    sel.innerHTML = html;
+}
+function addPurchaseOrder() {
+    var supplier = document.getElementById('poSupplier').value || '';
+    var invoice = (document.getElementById('poInvoice').value || '').trim();
+    var total = parseFloat(document.getElementById('poTotal').value) || 0;
+    var items = (document.getElementById('poItems').value || '').trim();
+    if (!supplier) { showAlert('اختر المورد', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (total <= 0) { showAlert('أدخل قيمة الفاتورة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    savePosRecord({ recordType: 'purchase-order', supplier: supplier, invoice: invoice, total: total, items: items }, 'po', function () {
+        document.getElementById('poInvoice').value = '';
+        document.getElementById('poTotal').value = '';
+        document.getElementById('poItems').value = '';
+        logActivity('purchase_order', 'أمر شراء من ' + supplier + ' بقيمة ' + total, { supplier: supplier, total: total });
+        showAlert('تم حفظ أمر الشراء', { icon: '✅', title: 'تم' });
+    });
+}
+function renderPurchaseOrders() {
+    var body = document.getElementById('poBody');
+    if (!body) return;
+    if (!purchaseOrders.length) { body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;">لا توجد أوامر شراء</td></tr>'; return; }
+    var html = '';
+    for (var i = 0; i < purchaseOrders.length; i++) {
+        var p = purchaseOrders[i];
+        var d = p.createdAt ? new Date(billTimeMs(p)).toLocaleDateString('ar-EG') : '';
+        html += '<tr><td>' + d + '</td><td>' + escapeHtml(p.supplier || '') + '</td><td>' + escapeHtml(p.invoice || '') +
+            '</td><td>\u20AA' + (p.total || 0).toFixed(2) + '</td><td>' + escapeHtml(p.items || '') + '</td></tr>';
+    }
+    body.innerHTML = html;
+}
+
+// ============ STOCKTAKE (الجرد) — Excel export/import workflow ============
+var _stocktakeRows = [];
+var _stocktakeImport = null; // { adjustments:[...], counted, varianceTotal }
+var _stocktakePage = 1;
+var STOCKTAKE_PAGE_SIZE = 20;
+function buildStocktakeRows() {
+    _stocktakeRows = [];
+    for (var i = 0; i < products.length; i++) {
+        var p = products[i];
+        var vs = p.variants || [];
+        for (var j = 0; j < vs.length; j++) {
+            _stocktakeRows.push({
+                productId: p.id, name: p.name, barcode: p.barcode || '',
+                color: vs[j].color || '', size: vs[j].size || '', system: vs[j].stock || 0
+            });
+        }
+    }
+}
+function renderStocktakeRows() {
+    var body = document.getElementById('stocktakeBody');
+    if (!body) return;
+    if (!_stocktakeRows.length) buildStocktakeRows();
+    var q = ((document.getElementById('stocktakeSearch') || {}).value || '').trim().toLowerCase();
+    // Filter first, then paginate (20 per page).
+    var filtered = [];
+    for (var i = 0; i < _stocktakeRows.length; i++) {
+        var r = _stocktakeRows[i];
+        if (q && (r.name || '').toLowerCase().indexOf(q) === -1 && (r.barcode || '').toLowerCase().indexOf(q) === -1) continue;
+        filtered.push(r);
+    }
+    var totalPages = Math.max(1, Math.ceil(filtered.length / STOCKTAKE_PAGE_SIZE));
+    if (_stocktakePage > totalPages) _stocktakePage = totalPages;
+    if (_stocktakePage < 1) _stocktakePage = 1;
+    var startIdx = (_stocktakePage - 1) * STOCKTAKE_PAGE_SIZE;
+    var pageRows = filtered.slice(startIdx, startIdx + STOCKTAKE_PAGE_SIZE);
+    var html = '';
+    for (var k = 0; k < pageRows.length; k++) {
+        var pr = pageRows[k];
+        html += '<tr><td>' + escapeHtml(pr.name) + '</td><td>' + escapeHtml(pr.color) +
+            '</td><td>' + escapeHtml(pr.size) + '</td><td>' + pr.system + '</td></tr>';
+    }
+    body.innerHTML = html || '<tr><td colspan="4" style="text-align:center;padding:16px;">لا توجد نتائج</td></tr>';
+    renderStocktakePager(filtered.length, totalPages);
+}
+function renderStocktakePager(totalItems, totalPages) {
+    var pager = document.getElementById('stocktakePager');
+    if (!pager) return;
+    if (totalItems <= STOCKTAKE_PAGE_SIZE) { pager.innerHTML = ''; return; }
+    var from = (_stocktakePage - 1) * STOCKTAKE_PAGE_SIZE + 1;
+    var to = Math.min(_stocktakePage * STOCKTAKE_PAGE_SIZE, totalItems);
+    pager.innerHTML =
+        '<button class="btn-secondary" id="stkPrevBtn"' + (_stocktakePage <= 1 ? ' disabled' : '') + '>‹ السابق</button>' +
+        '<span class="stk-page-info">' + from + '–' + to + ' من ' + totalItems + ' (صفحة ' + _stocktakePage + '/' + totalPages + ')</span>' +
+        '<button class="btn-secondary" id="stkNextBtn"' + (_stocktakePage >= totalPages ? ' disabled' : '') + '>التالي ›</button>';
+    var prev = document.getElementById('stkPrevBtn');
+    var next = document.getElementById('stkNextBtn');
+    if (prev) prev.addEventListener('click', function () { _stocktakePage--; renderStocktakeRows(); });
+    if (next) next.addEventListener('click', function () { _stocktakePage++; renderStocktakeRows(); });
+}
+function reloadStocktake() {
+    buildStocktakeRows();
+    renderStocktakeRows();
+    showAlert('تم تحميل المخزون الحالي', { icon: '🔄', title: 'تم' });
+}
+// CSV helpers (Excel-friendly: BOM + formula in difference column)
+function csvCell(v) {
+    var s = (v === null || v === undefined) ? '' : String(v);
+    if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+}
+function downloadCSV(filename, text) {
+    var blob = new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+function exportStocktakeCSV() {
+    buildStocktakeRows();
+    if (!_stocktakeRows.length) { showAlert('لا توجد منتجات للجرد', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var header = ['المعرف', 'المنتج', 'اللون', 'المقاس', 'كمية النظام', 'الفعلي', 'الفرق'];
+    var lines = [header.map(csvCell).join(',')];
+    for (var i = 0; i < _stocktakeRows.length; i++) {
+        var r = _stocktakeRows[i];
+        var row = i + 2; // Excel row (header is row 1)
+        // Difference (col G) = Actual (F) - System (E). Comma-free so Excel never
+        // splits the formula across cells, and locale-safe (no argument separators).
+        var diffFormula = '=F' + row + '-E' + row;
+        lines.push([csvCell(r.productId), csvCell(r.name), csvCell(r.color), csvCell(r.size), csvCell(r.system), '', diffFormula].join(','));
+    }
+    var totalRow = _stocktakeRows.length + 2;
+    lines.push([csvCell('الإجمالي'), '', '', '', '', '', '=SUM(G2:G' + (totalRow - 1) + ')'].join(','));
+    downloadCSV('stocktake_' + new Date().toISOString().slice(0, 10) + '.csv', lines.join('\r\n'));
+    showAlert('تم تنزيل ملف الجرد. املأ عمود «الفعلي» في Excel ثم استورده.', { icon: '📥', title: 'تم' });
+}
+// Minimal RFC-4180 CSV parser (handles quotes, commas, newlines).
+function parseCSV(text) {
+    var rows = [], row = [], cur = '', inQ = false;
+    text = text.replace(/^\uFEFF/, '');
+    for (var i = 0; i < text.length; i++) {
+        var ch = text[i];
+        if (inQ) {
+            if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+            else cur += ch;
+        } else {
+            if (ch === '"') inQ = true;
+            else if (ch === ',') { row.push(cur); cur = ''; }
+            else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+            else if (ch === '\r') { /* skip */ }
+            else cur += ch;
+        }
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows;
+}
+function handleStocktakeFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+        try { importStocktakeCSV(e.target.result); }
+        catch (err) { showAlert('تعذّر قراءة الملف: ' + (err && err.message), { icon: '❌', title: 'خطأ' }); }
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+function importStocktakeCSV(text) {
+    var rows = parseCSV(text);
+    if (rows.length < 2) { showAlert('الملف فارغ أو غير صالح', { icon: '⚠️', title: 'تنبيه' }); return; }
+    buildStocktakeRows();
+    var sysMap = {};
+    for (var s = 0; s < _stocktakeRows.length; s++) {
+        var rr = _stocktakeRows[s];
+        sysMap[rr.productId + '|' + rr.color + '|' + rr.size] = rr;
+    }
+    var adjustments = [], counted = 0, varianceTotal = 0;
+    for (var i = 1; i < rows.length; i++) {
+        var c = rows[i];
+        if (!c || c.length < 6) continue;
+        var pid = (c[0] || '').trim();
+        if (!pid || pid === 'الإجمالي') continue;
+        var actualRaw = (c[5] || '').trim();
+        if (actualRaw === '') continue; // not counted
+        var actual = parseInt(actualRaw, 10);
+        if (isNaN(actual)) continue;
+        var color = (c[2] || '').trim(), size = (c[3] || '').trim();
+        var match = sysMap[pid + '|' + color + '|' + size];
+        var system = match ? match.system : (parseInt(c[4], 10) || 0);
+        var name = match ? match.name : (c[1] || '');
+        var diff = actual - system;
+        counted++; varianceTotal += diff;
+        adjustments.push({ productId: pid, name: name, color: color, size: size, system: system, counted: actual, diff: diff, missing: !match });
+    }
+    if (!counted) { showAlert('لم يُعثر على أي كمية فعلية في الملف (عمود «الفعلي»)', { icon: '⚠️', title: 'تنبيه' }); return; }
+    _stocktakeImport = { adjustments: adjustments, counted: counted, varianceTotal: varianceTotal };
+    renderStocktakeReport();
+    showAlert('تم استيراد ' + counted + ' صنف. راجع تقرير الفروقات.', { icon: '✅', title: 'تم' });
+}
+function renderStocktakeReport() {
+    var block = document.getElementById('stocktakeReportBlock');
+    var cont = document.getElementById('stocktakeReport');
+    if (!block || !cont || !_stocktakeImport) return;
+    var a = _stocktakeImport.adjustments;
+    var surplus = 0, shortage = 0, diffLines = 0;
+    var html = '<div class="stats-summary">' +
+        '<div class="stats-kpi"><span>أصناف تم عدّها</span><strong>' + _stocktakeImport.counted + '</strong></div>' +
+        '<div class="stats-kpi"><span>إجمالي الفرق</span><strong>' + _stocktakeImport.varianceTotal + '</strong></div>';
+    for (var k = 0; k < a.length; k++) { if (a[k].diff > 0) surplus += a[k].diff; else if (a[k].diff < 0) shortage += a[k].diff; if (a[k].diff !== 0) diffLines++; }
+    html += '<div class="stats-kpi"><span>زيادة</span><strong style="color:#157a47">+' + surplus + '</strong></div>' +
+        '<div class="stats-kpi"><span>نقص</span><strong style="color:#c0392b">' + shortage + '</strong></div></div>';
+    html += '<table class="data-table"><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>النظام</th><th>الفعلي</th><th>الفرق</th></tr></thead><tbody>';
+    // Show differences first (most relevant), then matched-no-diff.
+    var sorted = a.slice().sort(function (x, y) { return Math.abs(y.diff) - Math.abs(x.diff); });
+    for (var i = 0; i < sorted.length; i++) {
+        var r = sorted[i];
+        var col = r.diff > 0 ? '#157a47' : (r.diff < 0 ? '#c0392b' : '#666');
+        var sign = r.diff > 0 ? '+' : '';
+        html += '<tr><td>' + escapeHtml(r.name) + (r.missing ? ' <span style="color:#c0392b">(غير موجود بالنظام)</span>' : '') +
+            '</td><td>' + escapeHtml(r.color) + '</td><td>' + escapeHtml(r.size) + '</td><td>' + r.system +
+            '</td><td>' + r.counted + '</td><td style="color:' + col + ';font-weight:700">' + sign + r.diff + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    cont.innerHTML = html;
+    block.style.display = '';
+    block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function exportStocktakeReport() {
+    if (!_stocktakeImport) { showAlert('استورد ملف الجرد أولاً', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var a = _stocktakeImport.adjustments;
+    var lines = [['المنتج', 'اللون', 'المقاس', 'كمية النظام', 'الفعلي', 'الفرق'].map(csvCell).join(',')];
+    for (var i = 0; i < a.length; i++) {
+        var r = a[i];
+        lines.push([csvCell(r.name), csvCell(r.color), csvCell(r.size), csvCell(r.system), csvCell(r.counted), csvCell(r.diff)].join(','));
+    }
+    lines.push(['الإجمالي', '', '', '', '', csvCell(_stocktakeImport.varianceTotal)].join(','));
+    downloadCSV('stocktake_report_' + new Date().toISOString().slice(0, 10) + '.csv', lines.join('\r\n'));
+}
+function applyStocktake() {
+    if (!_stocktakeImport || !_stocktakeImport.adjustments.length) { showAlert('استورد ملف الجرد أولاً', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var a = _stocktakeImport.adjustments;
+    var byProduct = {};
+    var applied = 0;
+    for (var i = 0; i < a.length; i++) {
+        var r = a[i];
+        if (r.missing) continue;
+        if (!byProduct[r.productId]) {
+            var prod = products.find(function (p) { return p.id === r.productId; });
+            byProduct[r.productId] = JSON.parse(JSON.stringify((prod && prod.variants) || []));
+        }
+        var vs = byProduct[r.productId];
+        for (var v = 0; v < vs.length; v++) {
+            if (vs[v].color === r.color && vs[v].size === r.size) { vs[v].stock = r.counted; applied++; }
+        }
+    }
+    if (!applied) { showAlert('لا توجد أصناف صالحة للتعديل', { icon: '⚠️', title: 'تنبيه' }); return; }
+    showConfirm('سيتم تعديل مخزون ' + applied + ' صنف ليطابق الجرد الفعلي وتسجيل العملية. متابعة؟', function () {
+        var btn = document.getElementById('applyStocktakeBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'جاري التطبيق...'; }
+        var keys = Object.keys(byProduct);
+        var proms = [];
+        for (var k = 0; k < keys.length; k++) proms.push(updateProductVariantsDoc(keys[k], byProduct[keys[k]]));
+        Promise.all(proms).then(function () {
+            savePosRecord({ recordType: 'stocktake', items: a, countedLines: _stocktakeImport.counted, variance: _stocktakeImport.varianceTotal }, 'stk', function () {
+                logActivity('stocktake', 'جرد ' + _stocktakeImport.counted + ' صنف (فرق إجمالي ' + _stocktakeImport.varianceTotal + ')', { counted: _stocktakeImport.counted, variance: _stocktakeImport.varianceTotal });
+                if (btn) { btn.disabled = false; btn.textContent = '✅ تطبيق التعديلات على المخزون'; }
+                showAlert('تم تطبيق الجرد وتعديل المخزون', { icon: '✅', title: 'تم' });
+                _stocktakeImport = null;
+                _stocktakeRows = [];
+                var block = document.getElementById('stocktakeReportBlock'); if (block) block.style.display = 'none';
+                renderStocktakeRows();
+            });
+        }).catch(function (e) {
+            if (btn) { btn.disabled = false; btn.textContent = '✅ تطبيق التعديلات على المخزون'; }
+            showAlert('فشل تطبيق الجرد: ' + (e && e.message ? e.message : e), { icon: '❌', title: 'خطأ' });
+        });
+    });
+}
+function renderStocktakeHistory() {
+    var body = document.getElementById('stocktakeHistoryBody');
+    if (!body) return;
+    if (!stocktakeRecords.length) { body.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:16px;">لا يوجد سجل جرد</td></tr>'; return; }
+    var html = '';
+    for (var i = 0; i < stocktakeRecords.length; i++) {
+        var s = stocktakeRecords[i];
+        var d = new Date(billTimeMs(s)).toLocaleString('ar-EG');
+        html += '<tr><td>' + d + '</td><td>' + (s.countedLines || 0) + '</td><td>' + (s.variance || 0) + '</td></tr>';
+    }
+    body.innerHTML = html;
+}
+
+// ============ RESTAURANT TABLES (طاولات المطعم) ============
+var currentTableNo = null;
+function tableCountKey() { return 'ada_pos_tablecount_' + (getProjectId() || ''); }
+function getTableCount() { return parseInt(localStorage.getItem(tableCountKey()) || '0') || 0; }
+function saveTableCount() {
+    var n = parseInt((document.getElementById('tableCount') || {}).value) || 0;
+    localStorage.setItem(tableCountKey(), String(n));
+    renderTables();
+    showAlert('تم حفظ عدد الطاولات', { icon: '✅', title: 'تم' });
+}
+function renderTables() {
+    var grid = document.getElementById('tablesGrid');
+    if (!grid) return;
+    var n = getTableCount();
+    var inp = document.getElementById('tableCount');
+    if (inp && !inp.value) inp.value = n || '';
+    if (!n) { grid.innerHTML = '<p style="padding:16px;">حدد عدد الطاولات لعرضها</p>'; return; }
+    var html = '';
+    for (var t = 1; t <= n; t++) {
+        var occupied = heldSales.some(function (h) { return h.table === t; });
+        html += '<button class="table-card ' + (occupied ? 'occupied' : 'free') + '" onclick="openTable(' + t + ')">' +
+            '<span class="table-no">طاولة ' + t + '</span><span class="table-state">' + (occupied ? 'مشغولة' : 'فارغة') + '</span></button>';
+    }
+    grid.innerHTML = html;
+}
+function openTable(t) {
+    var idx = -1;
+    for (var i = 0; i < heldSales.length; i++) { if (heldSales[i].table === t) { idx = i; break; } }
+    if (idx >= 0) { currentTableNo = t; resumeHeld(idx); return; }
+    currentTableNo = t;
+    switchPage('sales');
+    showAlert('طاولة ' + t + ' — أضف الطلبات ثم اضغط تعليق لحفظها للطاولة', { icon: '🍽️', title: 'طاولة ' + t });
+}
+
+// ============ BARCODE LABELS (طباعة ملصقات الباركود) ============
+function productBarcodeDigits(p) {
+    var raw = (p.barcode || p.id || '').toString().replace(/\D/g, '');
+    return raw;
+}
+// Opens the label-printing modal: pick ONE product, set how many labels,
+// choose whether to include the price, and which printer to send them to.
+function printBarcodeLabels() {
+    // Preselect the product currently filtered in the inventory search, if any.
+    var q = ((document.getElementById('inventorySearch') || {}).value || '').trim().toLowerCase();
+    var preferId = '';
+    if (q) {
+        var hit = products.filter(function (p) {
+            return (p.name || '').toLowerCase().indexOf(q) !== -1 || (p.barcode || '').toLowerCase().indexOf(q) !== -1;
+        })[0];
+        if (hit) preferId = hit.id;
+    }
+    openLabelsModal(preferId);
+}
+// Opens the modal pre-selected to a specific product (used by per-row 🏷️ buttons).
+function printProductLabel(productId) {
+    openLabelsModal(productId);
+}
+function openLabelsModal(preferId) {
+    if (!products.length) { showAlert('لا توجد منتجات', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var sel = document.getElementById('labelProduct');
+    if (sel) {
+        var opts = '';
+        for (var i = 0; i < products.length; i++) {
+            var p = products[i];
+            var bc = productBarcodeDigits(p);
+            opts += '<option value="' + escapeHtml(p.id) + '"' + (p.id === preferId ? ' selected' : '') + '>' +
+                escapeHtml(p.name || '') + (bc ? ' — ' + escapeHtml(bc) : '') + '</option>';
+        }
+        sel.innerHTML = opts;
+    }
+    var qtyEl = document.getElementById('labelQty');
+    if (qtyEl) qtyEl.value = '1';
+    var incEl = document.getElementById('labelIncludePrice');
+    if (incEl) { incEl.setAttribute('aria-pressed', 'true'); incEl.classList.add('active'); incEl.textContent = '✔ السعر مُضمَّن'; }
+    loadLabelPrinters();
+    onLabelProductChange();
+    openModal('labelsModal');
+}
+function isLabelPriceIncluded() {
+    var btn = document.getElementById('labelIncludePrice');
+    return btn ? btn.getAttribute('aria-pressed') === 'true' : true;
+}
+function toggleLabelPrice() {
+    var btn = document.getElementById('labelIncludePrice');
+    if (!btn) return;
+    var on = btn.getAttribute('aria-pressed') === 'true';
+    on = !on;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('active', on);
+    btn.textContent = on ? '✔ السعر مُضمَّن' : '✖ بدون سعر';
+    renderLabelPreview();
+}
+function loadLabelPrinters() {
+    var sel = document.getElementById('labelPrinter');
+    if (!sel) return;
+    var saved = getSavedPrinterDevice();
+    if (!(ipcRenderer && ipcRenderer.invoke)) {
+        sel.innerHTML = '<option value="">الطابعة الافتراضية للنظام</option>';
+        return;
+    }
+    ipcRenderer.invoke('list-printers').then(function (printers) {
+        var html = '<option value="">الطابعة الافتراضية للنظام</option>';
+        (printers || []).forEach(function (p) {
+            var label = escapeHtml(p.displayName || p.name) + (p.isDefault ? ' (افتراضية)' : '');
+            var selected = (saved && saved === p.name) ? ' selected' : '';
+            html += '<option value="' + escapeHtml(p.name) + '"' + selected + '>' + label + '</option>';
+        });
+        sel.innerHTML = html;
+    }).catch(function () {
+        sel.innerHTML = '<option value="">الطابعة الافتراضية للنظام</option>';
+    });
+}
+function getLabelSelectedProduct() {
+    var sel = document.getElementById('labelProduct');
+    if (!sel) return null;
+    var id = sel.value;
+    for (var i = 0; i < products.length; i++) { if (products[i].id === id) return products[i]; }
+    return null;
+}
+// Refreshes the variant (price) dropdown + the live preview when the product changes.
+function onLabelProductChange() {
+    var p = getLabelSelectedProduct();
+    var vsel = document.getElementById('labelVariant');
+    if (vsel) {
+        var vs = (p && p.variants) || [];
+        var html = '';
+        if (vs.length <= 1) {
+            var pr0 = vs.length ? (vs[0].price || 0) : 0;
+            html = '<option value="0">السعر: \u20AA' + pr0 + '</option>';
+        } else {
+            for (var j = 0; j < vs.length; j++) {
+                var lbl = [vs[j].color, vs[j].size].filter(Boolean).join(' / ') || ('خيار ' + (j + 1));
+                html += '<option value="' + j + '">' + escapeHtml(lbl) + ' — \u20AA' + (vs[j].price || 0) + '</option>';
+            }
+        }
+        vsel.innerHTML = html;
+    }
+    renderLabelPreview();
+}
+function buildLabelHTMLCard(p, includePrice, variantIdx) {
+    var store = (getStoreConfig().storeName) || (typeof storeName !== 'undefined' ? storeName : '') || '';
+    var vs = p.variants || [];
+    var vi = parseInt(variantIdx, 10) || 0;
+    var price = vs.length ? (vs[Math.min(vi, vs.length - 1)].price || 0) : 0;
+    var digits = productBarcodeDigits(p);
+    var svg = digits ? code128cSVG(digits) : '';
+    return '<div class="label">' +
+        '<div class="l-store">' + escapeHtml(store) + '</div>' +
+        '<div class="l-name">' + escapeHtml(p.name || '') + '</div>' +
+        (includePrice ? '<div class="l-price">\u20AA' + price + '</div>' : '') +
+        (svg ? '<div class="l-bc">' + svg + '</div>' : '') +
+        '<div class="l-code">' + escapeHtml(digits || (p.id || '')) + '</div>' +
+        '</div>';
+}
+function renderLabelPreview() {
+    var box = document.getElementById('labelPreview');
+    if (!box) return;
+    var p = getLabelSelectedProduct();
+    if (!p) { box.innerHTML = '<p style="padding:8px;color:#888;">اختر منتجاً للمعاينة</p>'; return; }
+    var inc = isLabelPriceIncluded();
+    var vi = (document.getElementById('labelVariant') || {}).value || 0;
+    box.innerHTML = buildLabelHTMLCard(p, inc, vi);
+}
+function labelSheetHTML(cards, autoPrint) {
+    return '<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><title>ملصقات الباركود</title><style>' +
+        '*{box-sizing:border-box;font-family:Tahoma,Arial,sans-serif;}' +
+        'body{margin:0;padding:6px;}' +
+        '.sheet{display:flex;flex-wrap:wrap;gap:4px;}' +
+        '.label{width:48mm;height:30mm;border:1px dashed #bbb;padding:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;}' +
+        '.l-store{font-size:9px;color:#555;}' +
+        '.l-name{font-size:11px;font-weight:700;line-height:1.1;max-height:24px;overflow:hidden;}' +
+        '.l-price{font-size:13px;font-weight:700;margin:1px 0;}' +
+        '.l-bc svg{height:34px;width:auto;max-width:44mm;}' +
+        '.l-code{font-size:9px;letter-spacing:1px;}' +
+        '@media print{.label{border:1px dashed #ddd;}}' +
+        '</style></head><body><div class="sheet">' + cards + '</div>' +
+        (autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>' : '') +
+        '</body></html>';
+}
+function doPrintLabels() {
+    var p = getLabelSelectedProduct();
+    if (!p) { showAlert('اختر منتجاً', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var qty = parseInt((document.getElementById('labelQty') || {}).value, 10) || 0;
+    if (qty < 1) { showAlert('أدخل عدد الملصقات', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (qty > 200) { showAlert('الحد الأقصى 200 ملصق في المرة الواحدة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var inc = isLabelPriceIncluded();
+    var vi = (document.getElementById('labelVariant') || {}).value || 0;
+    var device = (document.getElementById('labelPrinter') || {}).value || '';
+    var oneCard = buildLabelHTMLCard(p, inc, vi);
+    var cards = '';
+    for (var i = 0; i < qty; i++) cards += oneCard;
+    closeModal('labelsModal');
+    logActivity('print_labels', 'طباعة ' + qty + ' ملصق للمنتج ' + (p.name || ''), { product: p.id, qty: qty, printer: device });
+    // Prefer silent print to the chosen device via the main process; fall back to a print window.
+    if (device && ipcRenderer && ipcRenderer.invoke) {
+        var html = labelSheetHTML(cards, false);
+        ipcRenderer.invoke('print-html', html, { deviceName: device }).then(function (res) {
+            if (res && res.success) showAlert('تم إرسال ' + qty + ' ملصق إلى الطابعة', { icon: '🖨️', title: 'تم' });
+            else showAlert('تعذّرت الطباعة الصامتة، سيتم فتح نافذة الطباعة', { icon: '⚠️', title: 'تنبيه' }, function () { openLabelPrintWindow(cards); });
+        }).catch(function () { openLabelPrintWindow(cards); });
+    } else {
+        openLabelPrintWindow(cards);
+    }
+}
+function openLabelPrintWindow(cards) {
+    var html = labelSheetHTML(cards, true);
+    var w = window.open('', '_blank');
+    if (!w) { showAlert('تعذّر فتح نافذة الطباعة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+}
+
+// ============ HOOKAH / CUSTOM SERVICE ITEMS (الأركيلة والخدمات) ============
+function addHookahItem() {
+    var name = (document.getElementById('hookahName').value || '').trim();
+    var price = parseFloat(document.getElementById('hookahPrice').value) || 0;
+    if (!name) { showAlert('أدخل اسم الصنف', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (price <= 0) { showAlert('أدخل السعر', { icon: '⚠️', title: 'تنبيه' }); return; }
+    savePosRecord({ recordType: 'hookah-item', name: name, price: price }, 'hk', function () {
+        document.getElementById('hookahName').value = '';
+        document.getElementById('hookahPrice').value = '';
+        showAlert('تم إضافة الصنف', { icon: '✅', title: 'تم' });
+    });
+}
+function renderHookahGrid() {
+    var grid = document.getElementById('hookahGrid');
+    if (!grid) return;
+    if (!hookahItems.length) { grid.innerHTML = '<p style="padding:16px;">لا توجد أصناف. أضف صنفاً جديداً.</p>'; return; }
+    var html = '';
+    for (var i = 0; i < hookahItems.length; i++) {
+        var h = hookahItems[i];
+        html += '<button class="hookah-card" onclick="addHookahToCart(' + i + ')">' +
+            '<span class="hookah-name">' + escapeHtml(h.name) + '</span>' +
+            '<span class="hookah-price">\u20AA' + (h.price || 0) + '</span></button>';
+    }
+    grid.innerHTML = html;
+}
+function addHookahToCart(i) {
+    var h = hookahItems[i];
+    if (!h) return;
+    var key = 'hookah_' + (h.id || i) + '_' + Date.now();
+    cart.push({ key: key, productId: null, custom: true, name: h.name, color: '', size: '', price: h.price || 0, cost: 0, qty: 1, maxStock: 9999 });
+    renderCart();
+    switchPage('sales');
+}
+
+// ============ LOYALTY ENGINE (نظام النقاط والولاء) ============
+var DEFAULT_LOYALTY_CONFIG = {
+    enabled: false,
+    earnPer: 10,      // earn 1 point for every X ₪ spent
+    redeemRate: 100,  // 100 points = 1 ₪ discount
+    minRedeem: 100,   // minimum points required to redeem
+    rewards: [],      // [{id,name,cost,type:'discount'|'prize',value}]
+    raffles: [],      // [{id,prize,winners:[{name,phone}],status,drawnAt}]
+    raffleWinners: 1, // how many winners each draw picks
+    campaignName: '',     // optional campaign label
+    campaignStart: '',    // YYYY-MM-DD
+    campaignEnd: '',      // YYYY-MM-DD — when reached, end action runs + points reset
+    campaignEndAction: 'draw', // 'draw' | 'credit' | 'both' | 'reset'
+    campaignProcessedFor: '' // last campaignEnd already processed (prevents re-runs)
+};
+function getLoyalty() {
+    var c = loyaltyConfig || {};
+    return {
+        enabled: !!c.enabled,
+        earnPer: (c.earnPer > 0) ? c.earnPer : DEFAULT_LOYALTY_CONFIG.earnPer,
+        redeemRate: (c.redeemRate > 0) ? c.redeemRate : DEFAULT_LOYALTY_CONFIG.redeemRate,
+        minRedeem: (c.minRedeem != null) ? c.minRedeem : DEFAULT_LOYALTY_CONFIG.minRedeem,
+        rewards: c.rewards || [],
+        raffles: c.raffles || [],
+        raffleWinners: (c.raffleWinners > 0) ? c.raffleWinners : 1,
+        campaignName: c.campaignName || '',
+        campaignStart: c.campaignStart || '',
+        campaignEnd: c.campaignEnd || '',
+        campaignEndAction: c.campaignEndAction || 'draw',
+        campaignProcessedFor: c.campaignProcessedFor || ''
+    };
+}
+function pointsForAmount(amount) {
+    var L = getLoyalty();
+    if (!L.enabled || L.earnPer <= 0) return 0;
+    return Math.floor((amount || 0) / L.earnPer);
+}
+// Persist a single loyalty point transaction (delta may be + earn or - redeem).
+function recordLoyaltyTxn(customer, delta, reason, billNumber) {
+    if (!customer || !delta) return;
+    savePosRecord({
+        recordType: 'loyalty-txn', customer: { name: customer.name || '', phone: normalizePhone(customer.phone) },
+        delta: delta, reason: reason || '', billNumber: billNumber || '',
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'loyalty'
+    }, 'LP');
+}
+function saveLoyaltyConfig(cfg, onOk) {
+    var rec = {
+        recordType: 'loyalty-config',
+        enabled: !!cfg.enabled, earnPer: cfg.earnPer, redeemRate: cfg.redeemRate,
+        minRedeem: cfg.minRedeem, rewards: cfg.rewards || [], raffles: cfg.raffles || [],
+        raffleWinners: cfg.raffleWinners || 1,
+        campaignName: cfg.campaignName || '', campaignStart: cfg.campaignStart || '',
+        campaignEnd: cfg.campaignEnd || '', campaignEndAction: cfg.campaignEndAction || 'draw',
+        campaignProcessedFor: cfg.campaignProcessedFor || '',
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'loyalty-config'
+    };
+    savePosRecord(rec, 'LC', function () { if (onOk) onOk(); });
+}
+
+// ============ STORE CREDIT (رصيد العميل) ============
+// Ledger of per-customer credit (delta may be + add or - spend). Customer keyed by phone.
+function customerKeyOf(customer) {
+    if (!customer) return '';
+    var ph = normalizePhone(customer.phone);
+    return ph || ('name:' + (customer.name || '').trim().toLowerCase());
+}
+function addStoreCredit(customer, delta, reason) {
+    if (!customer || !delta) return;
+    savePosRecord({
+        recordType: 'store-credit', customer: { name: customer.name || '', phone: normalizePhone(customer.phone) },
+        delta: delta, reason: reason || '',
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'store-credit'
+    }, 'SCR');
+}
+function getCustomerCredit(customer) {
+    var key = customerKeyOf(customer);
+    if (!key) return 0;
+    var sum = 0;
+    for (var i = 0; i < storeCredits.length; i++) {
+        var r = storeCredits[i];
+        if (customerKeyOf(r.customer) === key) sum += (r.delta || 0);
+    }
+    return Math.round(sum * 100) / 100;
+}
+
+// ============ LOYALTY: resets, campaign, multi-winner draw ============
+// Reset one customer's points to zero (records a compensating negative txn).
+function resetCustomerPointsFor(c, reason) {
+    if (!c) return;
+    var pts = c.points || 0;
+    if (pts === 0) return;
+    recordLoyaltyTxn({ name: c.name, phone: c.phone }, -pts, reason || 'تصفير نقاط', '');
+}
+function resetCustomerPoints() {
+    var c = findCustomerByKey(_profileKey);
+    if (!c) return;
+    if (!(c.points > 0)) { showAlert('لا توجد نقاط لتصفيرها', { icon: 'ℹ️', title: 'تنبيه' }); return; }
+    showConfirm('تصفير نقاط العميل «' + (c.name || c.phone) + '» (' + c.points + ' نقطة)؟', function () {
+        resetCustomerPointsFor(c, 'تصفير يدوي');
+        showAlert('تم تصفير نقاط العميل', { icon: '✅', title: 'تم' });
+        closeModal('customerProfileModal');
+    }, { title: 'تأكيد', icon: '⚠️' });
+}
+// Reset ALL customers' points (e.g. end of a loyalty campaign).
+function resetAllLoyaltyPoints(silent, doneCb) {
+    var list = customerProfileList('').filter(function (c) { return (c.points || 0) > 0; });
+    function run() {
+        for (var i = 0; i < list.length; i++) resetCustomerPointsFor(list[i], 'تصفير شامل');
+        logActivity('loyalty-reset', 'تصفير نقاط جميع العملاء (' + list.length + ' عميل)', { count: list.length });
+        if (!silent) showAlert('تم تصفير نقاط ' + list.length + ' عميل', { icon: '✅', title: 'تم' });
+        if (doneCb) doneCb(list.length);
+    }
+    if (silent) { run(); return; }
+    if (!list.length) { showAlert('لا يوجد عملاء لديهم نقاط', { icon: 'ℹ️', title: 'تنبيه' }); return; }
+    showConfirm('تصفير نقاط جميع العملاء؟ سيتم تصفير نقاط ' + list.length + ' عميل. لا يمكن التراجع.', run, { title: 'تأكيد التصفير الشامل', icon: '⚠️' });
+}
+// Draw N distinct random winners from customers who have points.
+function drawRaffle() {
+    var prize = (document.getElementById('rafflePrize').value || '').trim();
+    if (!prize) { showAlert('أدخل اسم الجائزة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    var nWinners = parseInt((document.getElementById('raffleWinners') || {}).value, 10) || _loyaltyEdit.raffleWinners || 1;
+    var winners = pickRaffleWinners(nWinners);
+    if (!winners.length) { showAlert('لا يوجد عملاء لديهم نقاط', { icon: '⚠️', title: 'تنبيه' }); return; }
+    renderRaffleResult(prize, winners);
+    _loyaltyEdit.raffleWinners = nWinners;
+    _loyaltyEdit.raffles.push({ id: 'RF' + Date.now(), prize: prize, winners: winners, status: 'drawn', drawnAt: new Date().toISOString() });
+    saveLoyaltyConfig(_loyaltyEdit);
+    logActivity('raffle', 'سحب عشوائي (' + winners.length + ' فائز): ' + prize, { winners: winners, prize: prize });
+}
+function pickRaffleWinners(n) {
+    var pool = customerProfileList('').filter(function (c) { return (c.points || 0) > 0; });
+    var winners = [];
+    n = Math.max(1, Math.min(n || 1, pool.length));
+    for (var k = 0; k < n && pool.length; k++) {
+        var idx = Math.floor(Math.random() * pool.length);
+        var w = pool.splice(idx, 1)[0];
+        winners.push({ name: w.name || '', phone: w.phone || '', points: w.points || 0 });
+    }
+    return winners;
+}
+function renderRaffleResult(prize, winners) {
+    var res = document.getElementById('raffleResult');
+    if (!res) return;
+    var html = '🎉 الفائزون بجائزة «' + escapeHtml(prize) + '»:<ul class="raffle-winners">';
+    for (var i = 0; i < winners.length; i++) {
+        html += '<li><b>' + escapeHtml(winners[i].name || winners[i].phone || 'عميل') + '</b> (' + escapeHtml(winners[i].phone || '') + ')</li>';
+    }
+    html += '</ul>';
+    res.innerHTML = html;
+}
+// Auto-process a campaign once its end date passes: run the end action, then
+// reset all points. Guarded by campaignProcessedFor + admin-only to avoid races.
+function checkCampaignEnd() {
+    var L = getLoyalty();
+    if (!L.enabled || !L.campaignEnd) return;
+    if (L.campaignProcessedFor === L.campaignEnd) return; // already done
+    if (!isAdmin()) return; // only manager device processes
+    var end = new Date(L.campaignEnd + 'T23:59:59');
+    if (isNaN(end.getTime()) || Date.now() <= end.getTime()) return; // not ended yet
+    var action = L.campaignEndAction || 'draw';
+    var summary = [];
+    // 1) Draw winners
+    if (action === 'draw' || action === 'both') {
+        var winners = pickRaffleWinners(L.raffleWinners || 1);
+        if (winners.length) {
+            var cfg = getLoyalty();
+            cfg.raffles = (cfg.raffles || []).concat([{ id: 'RF' + Date.now(), prize: (L.campaignName || 'حملة الولاء'), winners: winners, status: 'campaign-end', drawnAt: new Date().toISOString() }]);
+            loyaltyConfig = Object.assign({}, loyaltyConfig || {}, cfg);
+            summary.push('الفائزون: ' + winners.map(function (w) { return w.name || w.phone; }).join('، '));
+        }
+    }
+    // 2) Convert remaining points to store credit
+    if (action === 'credit' || action === 'both') {
+        var rate = L.redeemRate || 100;
+        var list = customerProfileList('').filter(function (c) { return (c.points || 0) > 0; });
+        for (var i = 0; i < list.length; i++) {
+            var credit = Math.floor((list[i].points || 0) / rate * 100) / 100;
+            if (credit > 0) addStoreCredit({ name: list[i].name, phone: list[i].phone }, credit, 'تحويل نقاط حملة الولاء');
+        }
+        summary.push('تم تحويل النقاط إلى رصيد لـ ' + list.length + ' عميل');
+    }
+    // 3) Reset all points
+    resetAllLoyaltyPoints(true);
+    // 4) Mark processed
+    var newCfg = getLoyalty();
+    newCfg.campaignProcessedFor = L.campaignEnd;
+    saveLoyaltyConfig(newCfg, function () {
+        logActivity('campaign-end', 'انتهت حملة الولاء «' + (L.campaignName || '') + '». ' + summary.join(' | '), { campaign: L.campaignName });
+        showAlert('انتهت حملة الولاء وتمت معالجتها:\n' + summary.join('\n') + '\nتم تصفير جميع النقاط.', { icon: '🏁', title: 'انتهاء الحملة' });
+    });
+}
+// Switch between settings sub-tabs (shortcuts / cashstock / loyalty / printer / notes)
+function switchSettingsTab(tab) {
+    if (!tab) return;
+    var root = document.getElementById('page-settings');
+    if (!root) return;
+    var btns = root.querySelectorAll('.settings-subnav-btn');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('active', btns[i].getAttribute('data-settings-tab') === tab);
+    }
+    var panels = root.querySelectorAll('.settings-panel');
+    for (var j = 0; j < panels.length; j++) {
+        panels[j].classList.toggle('active', panels[j].getAttribute('data-settings-panel') === tab);
+    }
+}
+function switchReportsTab(tab) {
+    if (!tab) return;
+    var root = document.getElementById('page-reports');
+    if (!root) return;
+    var btns = root.querySelectorAll('.settings-subnav-btn');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('active', btns[i].getAttribute('data-reports-tab') === tab);
+    }
+    var panels = root.querySelectorAll('.settings-panel');
+    for (var j = 0; j < panels.length; j++) {
+        panels[j].classList.toggle('active', panels[j].getAttribute('data-reports-panel') === tab);
+    }
+}
+function loadLoyaltyEditor() {
+    var L = getLoyalty();
+    _loyaltyEdit = { enabled: L.enabled, earnPer: L.earnPer, redeemRate: L.redeemRate, minRedeem: L.minRedeem, rewards: JSON.parse(JSON.stringify(L.rewards)), raffles: JSON.parse(JSON.stringify(L.raffles)), raffleWinners: L.raffleWinners, campaignName: L.campaignName, campaignStart: L.campaignStart, campaignEnd: L.campaignEnd, campaignEndAction: L.campaignEndAction, campaignProcessedFor: L.campaignProcessedFor };
+    var ep = document.getElementById('loyaltyEarnPer'); if (ep) ep.value = _loyaltyEdit.earnPer;
+    var rr = document.getElementById('loyaltyRedeemRate'); if (rr) rr.value = _loyaltyEdit.redeemRate;
+    var mr = document.getElementById('loyaltyMinRedeem'); if (mr) mr.value = _loyaltyEdit.minRedeem;
+    var rw = document.getElementById('raffleWinners'); if (rw) rw.value = _loyaltyEdit.raffleWinners;
+    var cn = document.getElementById('campaignName'); if (cn) cn.value = _loyaltyEdit.campaignName;
+    var cs = document.getElementById('campaignStart'); if (cs) cs.value = _loyaltyEdit.campaignStart;
+    var ce = document.getElementById('campaignEnd'); if (ce) ce.value = _loyaltyEdit.campaignEnd;
+    var ca = document.getElementById('campaignEndAction'); if (ca) ca.value = _loyaltyEdit.campaignEndAction;
+    syncCampaignActionButtons();
+    renderLoyaltyToggleState();
+    renderRewardsEditor();
+}
+// Campaign end action presented as toggle buttons: draw and credit can combine,
+// reset is exclusive. The hidden #campaignEndAction holds the canonical value
+// ('draw' | 'credit' | 'both' | 'reset') consumed by checkCampaignEnd().
+function syncCampaignActionButtons() {
+    var hidden = document.getElementById('campaignEndAction');
+    var wrap = document.getElementById('campaignActionBtns');
+    if (!hidden || !wrap) return;
+    var val = hidden.value || 'draw';
+    var on = { draw: false, credit: false, reset: false };
+    if (val === 'both') { on.draw = true; on.credit = true; }
+    else if (val === 'draw') on.draw = true;
+    else if (val === 'credit') on.credit = true;
+    else if (val === 'reset') on.reset = true;
+    var btns = wrap.querySelectorAll('.campaign-action-btn');
+    for (var i = 0; i < btns.length; i++) {
+        var a = btns[i].getAttribute('data-action');
+        btns[i].classList.toggle('active', !!on[a]);
+    }
+}
+function toggleCampaignAction(action) {
+    var hidden = document.getElementById('campaignEndAction');
+    if (!hidden) return;
+    var val = hidden.value || 'draw';
+    var on = { draw: false, credit: false, reset: false };
+    if (val === 'both') { on.draw = true; on.credit = true; }
+    else if (val === 'draw') on.draw = true;
+    else if (val === 'credit') on.credit = true;
+    else if (val === 'reset') on.reset = true;
+    if (action === 'reset') {
+        on.reset = !on.reset;
+        if (on.reset) { on.draw = false; on.credit = false; }
+    } else {
+        on[action] = !on[action];
+        if (on[action]) on.reset = false;
+    }
+    var newVal;
+    if (on.reset) newVal = 'reset';
+    else if (on.draw && on.credit) newVal = 'both';
+    else if (on.draw) newVal = 'draw';
+    else if (on.credit) newVal = 'credit';
+    else newVal = 'reset'; // nothing selected → treat as reset-only
+    hidden.value = newVal;
+    if (_loyaltyEdit) _loyaltyEdit.campaignEndAction = newVal;
+    syncCampaignActionButtons();
+}
+// Reflect enabled/disabled state: button label, status badge, and hide the whole
+// config body (and everything related) when the program is off.
+function renderLoyaltyToggleState() {
+    if (!_loyaltyEdit) return;
+    var on = !!_loyaltyEdit.enabled;
+    var btn = document.getElementById('loyaltyToggleBtn');
+    var badge = document.getElementById('loyaltyStatusBadge');
+    var body = document.getElementById('loyaltyBody');
+    if (btn) {
+        btn.textContent = on ? 'تعطيل برنامج الولاء' : 'تفعيل برنامج الولاء';
+        btn.classList.toggle('btn-danger', on);
+    }
+    if (badge) {
+        badge.textContent = on ? 'مُفعّل' : 'غير مُفعّل';
+        badge.classList.toggle('on', on);
+    }
+    if (body) body.style.display = on ? '' : 'none';
+}
+// Toggle button: flip enabled, persist immediately so all related sections
+// (POS customers points column, attach/redeem buttons, admin tab) update everywhere.
+function toggleLoyalty() {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    _loyaltyEdit.enabled = !_loyaltyEdit.enabled;
+    // capture current numeric fields so they aren't lost when re-enabling
+    var ep = document.getElementById('loyaltyEarnPer'); if (ep && ep.value) _loyaltyEdit.earnPer = parseInt(ep.value, 10) || _loyaltyEdit.earnPer;
+    var rr = document.getElementById('loyaltyRedeemRate'); if (rr && rr.value) _loyaltyEdit.redeemRate = parseInt(rr.value, 10) || _loyaltyEdit.redeemRate;
+    var mr = document.getElementById('loyaltyMinRedeem'); if (mr && mr.value) _loyaltyEdit.minRedeem = parseInt(mr.value, 10) || 0;
+    renderLoyaltyToggleState();
+    saveLoyaltyConfig(_loyaltyEdit, function () {
+        renderCustomers();
+        if (typeof updateAttachedCustomerLabel === 'function') updateAttachedCustomerLabel();
+    });
+}
+function renderRewardsEditor() {
+    var body = document.getElementById('loyaltyRewardsBody');
+    if (!body || !_loyaltyEdit) return;
+    var html = '';
+    for (var i = 0; i < _loyaltyEdit.rewards.length; i++) {
+        var r = _loyaltyEdit.rewards[i];
+        html += '<tr><td>' + escapeHtml(r.name) + '</td><td>' + (r.type === 'prize' ? 'هدية' : 'خصم') + '</td><td>' + r.cost + '</td><td>' + escapeHtml(String(r.value || '')) + '</td>' +
+            '<td><button class="btn-small" style="background:#e74c3c;" onclick="removeReward(' + i + ')">حذف</button></td></tr>';
+    }
+    body.innerHTML = html || '<tr><td colspan="5" style="text-align:center;padding:10px;">لا توجد جوائز</td></tr>';
+}
+function addReward() {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    var name = (document.getElementById('rewardName').value || '').trim();
+    var type = document.getElementById('rewardType').value;
+    var cost = parseInt(document.getElementById('rewardCost').value, 10) || 0;
+    var value = (document.getElementById('rewardValue').value || '').trim();
+    if (!name || cost <= 0) { showAlert('أدخل اسم الجائزة وعدد النقاط', { icon: '⚠️', title: 'تنبيه' }); return; }
+    _loyaltyEdit.rewards.push({ id: 'R' + Date.now(), name: name, type: type, cost: cost, value: value });
+    document.getElementById('rewardName').value = '';
+    document.getElementById('rewardCost').value = '';
+    document.getElementById('rewardValue').value = '';
+    renderRewardsEditor();
+}
+function removeReward(i) {
+    if (!_loyaltyEdit) return;
+    _loyaltyEdit.rewards.splice(i, 1);
+    renderRewardsEditor();
+}
+function saveLoyaltySettings() {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    // enabled is controlled by the toggle button (_loyaltyEdit.enabled), not a checkbox
+    _loyaltyEdit.earnPer = parseInt(document.getElementById('loyaltyEarnPer').value, 10) || DEFAULT_LOYALTY_CONFIG.earnPer;
+    _loyaltyEdit.redeemRate = parseInt(document.getElementById('loyaltyRedeemRate').value, 10) || DEFAULT_LOYALTY_CONFIG.redeemRate;
+    _loyaltyEdit.minRedeem = parseInt(document.getElementById('loyaltyMinRedeem').value, 10) || 0;
+    var rw = document.getElementById('raffleWinners'); if (rw) _loyaltyEdit.raffleWinners = parseInt(rw.value, 10) || 1;
+    var cn = document.getElementById('campaignName'); if (cn) _loyaltyEdit.campaignName = cn.value.trim();
+    var cs = document.getElementById('campaignStart'); if (cs) _loyaltyEdit.campaignStart = cs.value;
+    var ce = document.getElementById('campaignEnd'); if (ce) _loyaltyEdit.campaignEnd = ce.value;
+    var ca = document.getElementById('campaignEndAction'); if (ca) _loyaltyEdit.campaignEndAction = ca.value;
+    // If the end date changed, allow the new campaign to be processed again.
+    if (_loyaltyEdit.campaignEnd && _loyaltyEdit.campaignProcessedFor !== _loyaltyEdit.campaignEnd) {
+        _loyaltyEdit.campaignProcessedFor = '';
+    }
+    var hint = document.getElementById('loyaltySavedHint');
+    saveLoyaltyConfig(_loyaltyEdit, function () {
+        if (hint) { hint.textContent = '✅ تم حفظ إعدادات الولاء'; setTimeout(function () { hint.textContent = ''; }, 3000); }
+        renderCustomers();
+    });
+}
+
+// ============ CUSTOMERS / CRM TAB (العملاء) ============
+function customerProfileList(term) {
+    var arr = customerList();
+    for (var i = 0; i < arr.length; i++) { arr[i].balance = (arr[i].debt || 0) - (arr[i].paid || 0); }
+    if (term) {
+        var t = term.toString().trim().toLowerCase();
+        var tp = normalizePhone(t);
+        arr = arr.filter(function (c) {
+            return (c.name && c.name.toLowerCase().indexOf(t) !== -1) ||
+                (tp && c.phone && c.phone.indexOf(tp) !== -1);
+        });
+    }
+    arr.sort(function (a, b) { return (b.spent || 0) - (a.spent || 0); });
+    return arr;
+}
+function renderCustomers() {
+    var body = document.getElementById('customersBody');
+    if (!body) return;
+    var term = (document.getElementById('customerSearchInput') || {}).value || '';
+    var list = customerProfileList(term);
+    var L = getLoyalty();
+    var totalEl = document.getElementById('customersCount');
+    if (totalEl) totalEl.textContent = list.length;
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        var bal = c.balance || 0;
+        var balTxt = bal > 0.001 ? '<span style="color:#e74c3c;">\u20AA' + bal.toFixed(2) + '</span>' : '<span style="color:#27ae60;">0</span>';
+        html += '<tr>' +
+            '<td>' + escapeHtml(c.name || '-') + '</td>' +
+            '<td>' + escapeHtml(c.phone || '-') + '</td>' +
+            (L.enabled ? '<td><b>' + (c.points || 0) + '</b></td>' : '') +
+            '<td>\u20AA' + (c.spent || 0).toFixed(2) + '</td>' +
+            '<td>' + (c.visits || 0) + '</td>' +
+            '<td>' + balTxt + '</td>' +
+            '<td><button class="btn-small" onclick="openCustomerProfile(\'' + encodeURIComponent(c.key) + '\')">عرض الملف</button></td>' +
+            '</tr>';
+    }
+    body.innerHTML = html || '<tr><td colspan="' + (L.enabled ? 7 : 6) + '" style="text-align:center;padding:18px;">لا يوجد عملاء</td></tr>';
+    // toggle points column header
+    var ph = document.getElementById('custPointsHead');
+    if (ph) ph.style.display = L.enabled ? '' : 'none';
+}
+function findCustomerByKey(key) {
+    var idx = buildCustomerIndex();
+    var c = idx[key];
+    if (c) c.balance = (c.debt || 0) - (c.paid || 0);
+    return c;
+}
+function openCustomerProfile(encKey) {
+    var key = decodeURIComponent(encKey);
+    var c = findCustomerByKey(key);
+    if (!c) { showAlert('العميل غير موجود', { icon: '⚠️', title: 'تنبيه' }); return; }
+    _profileKey = key;
+    document.getElementById('profileName').textContent = c.name || 'بدون اسم';
+    document.getElementById('profilePhone').textContent = c.phone || '-';
+    var L = getLoyalty();
+    document.getElementById('profilePoints').textContent = L.enabled ? (c.points || 0) + ' نقطة' : 'غير مفعّل';
+    document.getElementById('profileSpent').textContent = '\u20AA' + (c.spent || 0).toFixed(2);
+    document.getElementById('profileVisits').textContent = (c.visits || 0);
+    var bal = c.balance || 0;
+    document.getElementById('profileBalance').textContent = '\u20AA' + bal.toFixed(2);
+    document.getElementById('profileBalance').style.color = bal > 0.001 ? '#e74c3c' : '#27ae60';
+    var creditRow = document.getElementById('profileCreditRow');
+    if (creditRow) {
+        if (isFeatureOn('storeCredit')) {
+            creditRow.style.display = '';
+            document.getElementById('profileCredit').textContent = '\u20AA' + getCustomerCredit({ name: c.name, phone: c.phone }).toFixed(2);
+        } else {
+            creditRow.style.display = 'none';
+        }
+    }
+    document.getElementById('profileNotesInput').value = c.notes || '';
+    document.getElementById('profileBirthdayInput').value = c.birthday || '';
+    document.getElementById('profilePointsRow').style.display = L.enabled ? '' : 'none';
+    // purchase history
+    var ph = normalizePhone(c.phone);
+    var hist = bills.filter(function (b) {
+        return b.source === 'pos' && b.customer && (
+            (ph && normalizePhone(b.customer.phone) === ph) ||
+            (!ph && (b.customer.name || '') === c.name));
+    });
+    hist.sort(billSortDesc);
+    var hb = document.getElementById('profileHistoryBody');
+    var hh = '';
+    for (var i = 0; i < hist.length && i < 100; i++) {
+        var b = hist[i];
+        var t = billTimeMs(b) ? new Date(billTimeMs(b)).toLocaleString('ar-EG') : '';
+        var nItems = (b.items || []).reduce(function (s, it) { return s + (it.qty || it.quantity || 1); }, 0);
+        hh += '<tr><td>' + t + '</td><td>' + (b.billNumber || b.id || '-') + '</td><td>' + nItems + '</td><td>\u20AA' + (b.total || 0).toFixed(2) + '</td>' +
+            '<td><button class="btn-small" onclick="reprintBill(\'' + (b.billNumber || b.id) + '\')">🖨️</button></td></tr>';
+    }
+    hb.innerHTML = hh || '<tr><td colspan="5" style="text-align:center;padding:12px;">لا توجد مشتريات</td></tr>';
+    openModal('customerProfileModal');
+}
+var _profileKey = null;
+function saveCustomerProfile() {
+    var c = findCustomerByKey(_profileKey);
+    if (!c) return;
+    var notes = document.getElementById('profileNotesInput').value.trim();
+    var birthday = document.getElementById('profileBirthdayInput').value.trim();
+    savePosRecord({
+        recordType: 'customer', name: c.name || '', phone: normalizePhone(c.phone),
+        notes: notes, birthday: birthday,
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'customer'
+    }, 'CU', function () {
+        showAlert('تم حفظ بيانات العميل', { icon: '✅', title: 'تم' });
+        closeModal('customerProfileModal');
+    });
+}
+function adjustProfilePoints(sign) {
+    var c = findCustomerByKey(_profileKey);
+    if (!c) return;
+    var amount = parseInt(prompt(sign > 0 ? 'كم نقطة تريد إضافتها؟' : 'كم نقطة تريد خصمها؟', '10'), 10);
+    if (!amount || amount <= 0) return;
+    recordLoyaltyTxn({ name: c.name, phone: c.phone }, sign * amount, sign > 0 ? 'إضافة يدوية' : 'خصم يدوي', '');
+    showAlert('تم تعديل النقاط', { icon: '✅', title: 'تم' });
+    closeModal('customerProfileModal');
+}
+function adjustCustomerCredit() {
+    var c = findCustomerByKey(_profileKey);
+    if (!c) return;
+    var cur = getCustomerCredit({ name: c.name, phone: c.phone });
+    var ans = prompt('الرصيد الحالي: ₪' + cur.toFixed(2) + '\nأدخل المبلغ للإضافة (موجب) أو الخصم (سالب):', '0');
+    if (ans === null) return;
+    var delta = parseFloat(ans) || 0;
+    if (delta === 0) return;
+    if (delta < 0 && Math.abs(delta) > cur) { showAlert('لا يمكن خصم أكثر من الرصيد المتاح', { icon: '⚠️', title: 'تنبيه' }); return; }
+    addStoreCredit({ name: c.name, phone: c.phone }, delta, delta > 0 ? 'إضافة رصيد يدوي' : 'خصم رصيد يدوي');
+    showAlert('تم تعديل الرصيد', { icon: '✅', title: 'تم' });
+    closeModal('customerProfileModal');
+}
+function openNewCustomer() {
+    var phone = prompt('رقم هاتف العميل:');
+    if (phone === null) return;
+    var name = prompt('اسم العميل:');
+    if (name === null) return;
+    savePosRecord({
+        recordType: 'customer', name: (name || '').trim(), phone: normalizePhone(phone),
+        notes: '', birthday: '',
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'customer'
+    }, 'CU', function () { showAlert('تمت إضافة العميل', { icon: '✅', title: 'تم' }); });
+}
 var _customerCb = null;
 function openCustomerModal(title, onConfirm) {
     _customerCb = onConfirm || null;
@@ -3473,6 +5151,127 @@ function renderWithdrawals(since) {
             (w.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(w.reason || '-') + '</td></tr>';
     }
     body.innerHTML = html || '<tr><td colspan="4" style="text-align:center;padding:16px;">لا توجد سحوبات في الوردية الحالية</td></tr>';
+}
+
+// ============ CASH-IN / DEPOSITS (إيداع) ============
+function openDepositModal() {
+    document.getElementById('depositAmount').value = '';
+    document.getElementById('depositReason').value = '';
+    document.getElementById('depositWho').value = currentUser ? (currentUser.displayName || currentUser.username || '') : '';
+    openModal('depositModal');
+}
+function saveDeposit() {
+    var amount = parseFloat(document.getElementById('depositAmount').value) || 0;
+    if (amount <= 0) { showAlert('أدخل مبلغاً صحيحاً', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var who = document.getElementById('depositWho').value.trim() || (currentUser ? currentUser.username : '');
+    var reason = document.getElementById('depositReason').value.trim();
+    var btn = document.getElementById('saveDepositBtn');
+    btn.disabled = true; btn.textContent = 'جاري الحفظ...';
+    savePosRecord({
+        recordType: 'deposit', amount: amount, who: who, reason: reason,
+        cashier: currentUser ? currentUser.username : '', total: 0, status: 'deposit'
+    }, 'DP', function () {
+        btn.disabled = false; btn.textContent = 'تأكيد الإيداع';
+        closeModal('depositModal');
+        logActivity('deposit', 'إيداع في الصندوق \u20AA' + amount.toFixed(2) + ' - ' + who, { amount: amount, who: who, reason: reason });
+        showAlert('تم تسجيل الإيداع \u20AA' + amount.toFixed(2), { icon: '✅', title: 'تم' });
+    }, function (e) {
+        btn.disabled = false; btn.textContent = 'تأكيد الإيداع';
+        showAlert('تعذر حفظ الإيداع: ' + (e && e.message), { icon: '⚠️', title: 'خطأ' });
+    });
+}
+function renderDeposits(since) {
+    var body = document.getElementById('depositsBody');
+    if (!body) return;
+    var html = '';
+    for (var i = 0; i < deposits.length; i++) {
+        var w = deposits[i];
+        if (since && billTimeMs(w) < since) continue;
+        var t = billTimeMs(w) ? new Date(billTimeMs(w)).toLocaleString('ar-EG') : '';
+        html += '<tr><td>' + t + '</td><td>' + escapeHtml(w.who || w.cashier || '-') + '</td><td>\u20AA' +
+            (w.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(w.reason || '-') + '</td></tr>';
+    }
+    body.innerHTML = html || '<tr><td colspan="4" style="text-align:center;padding:16px;">لا توجد إيداعات في الوردية الحالية</td></tr>';
+}
+
+// ============ REPRINT RECEIPT (إعادة طباعة) ============
+function findBillByRef(ref) {
+    ref = String(ref);
+    for (var i = 0; i < bills.length; i++) {
+        var b = bills[i];
+        if (String(b.billNumber) === ref || String(b.orderNumber) === ref || String(b.id) === ref) return b;
+    }
+    return null;
+}
+function reprintBill(ref) {
+    var b = findBillByRef(decodeURIComponent(ref));
+    if (!b) { showAlert('تعذر العثور على الفاتورة', { icon: '⚠️', title: 'إعادة طباعة' }); return; }
+    printReceipt(b, false);
+}
+function reprintLastBill() {
+    var last = null;
+    for (var i = 0; i < bills.length; i++) {
+        if (bills[i].source === 'pos') { last = bills[i]; break; }
+    }
+    if (!last) { showAlert('لا توجد فاتورة لإعادة طباعتها', { icon: 'ℹ️', title: 'إعادة طباعة' }); return; }
+    printReceipt(last, false);
+}
+
+// ============ LOW-STOCK ALERTS (تنبيه نقص المخزون) ============
+function lowStockThresholdKey() { return 'ada_pos_lowstock_' + (getProjectId() || ''); }
+function getLowStockThreshold() {
+    var v = parseInt(localStorage.getItem(lowStockThresholdKey()), 10);
+    return (isNaN(v) || v < 0) ? 3 : v;
+}
+function setLowStockThreshold(n) {
+    try { localStorage.setItem(lowStockThresholdKey(), String(n)); } catch (e) {}
+}
+function computeLowStock() {
+    var threshold = getLowStockThreshold();
+    var low = [], out = [];
+    for (var i = 0; i < products.length; i++) {
+        var p = products[i];
+        var variants = p.variants || [];
+        for (var j = 0; j < variants.length; j++) {
+            var v = variants[j];
+            var stock = (typeof v.stock === 'number') ? v.stock : 0;
+            var row = { name: p.name || '', color: v.color || '', size: v.size || '', stock: stock };
+            if (stock <= 0) out.push(row);
+            else if (stock <= threshold) low.push(row);
+        }
+    }
+    low.sort(function (a, b) { return a.stock - b.stock; });
+    out.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    return { low: low, out: out };
+}
+function renderLowStock() {
+    var res = computeLowStock();
+    var low = res.low, out = res.out;
+    var badge = document.getElementById('lowStockCount');
+    if (badge) badge.textContent = low.length + ' عنصر';
+    var outBadge = document.getElementById('outStockCount');
+    if (outBadge) outBadge.textContent = out.length + ' عنصر';
+    var body = document.getElementById('lowStockBody');
+    if (body) {
+        var html = '';
+        for (var i = 0; i < low.length && i < 300; i++) {
+            var l = low[i];
+            var cls = l.stock <= 1 ? ' style="color:var(--danger);font-weight:700"' : '';
+            html += '<tr><td>' + escapeHtml(l.name) + '</td><td>' + escapeHtml(l.color || '-') + '</td><td>' +
+                escapeHtml(l.size || '-') + '</td><td' + cls + '>' + l.stock + '</td></tr>';
+        }
+        body.innerHTML = html || '<tr><td colspan="4" style="text-align:center;padding:16px;">لا توجد عناصر منخفضة المخزون 👍</td></tr>';
+    }
+    var outBody = document.getElementById('outStockBody');
+    if (outBody) {
+        var oh = '';
+        for (var k = 0; k < out.length && k < 300; k++) {
+            var o = out[k];
+            oh += '<tr><td>' + escapeHtml(o.name) + '</td><td>' + escapeHtml(o.color || '-') + '</td><td>' +
+                escapeHtml(o.size || '-') + '</td></tr>';
+        }
+        outBody.innerHTML = oh || '<tr><td colspan="3" style="text-align:center;padding:16px;">لا توجد عناصر نافدة 👍</td></tr>';
+    }
 }
 
 // ============ DEBTS (ذمم) ============
@@ -3855,11 +5654,13 @@ function updateHeldUI() {
 function holdSale() {
     if (cart.length === 0) { showAlert('السلة فارغة', { icon: '⚠️', title: 'تنبيه' }); return; }
     var note = (document.getElementById('billNote') || {}).value || '';
-    heldSales.push({ at: Date.now(), cart: JSON.parse(JSON.stringify(cart)), note: note });
+    heldSales.push({ at: Date.now(), cart: JSON.parse(JSON.stringify(cart)), note: note, table: currentTableNo });
     saveHeldSales();
     cart = []; renderCart();
     var bn = document.getElementById('billNote'); if (bn) bn.value = '';
-    showAlert('تم تعليق الفاتورة', { icon: '⏸️', title: 'تم' });
+    var tmsg = currentTableNo ? ('تم حفظ طلب طاولة ' + currentTableNo) : 'تم تعليق الفاتورة';
+    currentTableNo = null;
+    showAlert(tmsg, { icon: '⏸️', title: 'تم' });
 }
 function openHeldModal() {
     var body = document.getElementById('heldBody');
@@ -3903,6 +5704,9 @@ window.openSettleDebt = openSettleDebt;
 window.removeReplacement = removeReplacement;
 window.resumeHeld = resumeHeld;
 window.deleteHeld = deleteHeld;
+window.openTable = openTable;
+window.addHookahToCart = addHookahToCart;
+window.printProductLabel = printProductLabel;
 
 // ============ START ============
 document.addEventListener('DOMContentLoaded', function () {

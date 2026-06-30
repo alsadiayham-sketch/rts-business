@@ -99,6 +99,10 @@
                     <span class="nav-icon">📒</span>
                     <span class="nav-label">الذمم</span>
                 </button>
+                <button class="nav-btn" data-page="customers">
+                    <span class="nav-icon">👥</span>
+                    <span class="nav-label">العملاء</span>
+                </button>
                 <button class="nav-btn" data-page="reports">
                     <span class="nav-icon">📊</span>
                     <span class="nav-label">التقارير</span>
@@ -106,6 +110,22 @@
                 <button class="nav-btn" data-page="stats">
                     <span class="nav-icon">📈</span>
                     <span class="nav-label">الإحصائيات</span>
+                </button>
+                <button class="nav-btn feature-suppliers" data-page="suppliers" style="display:none;">
+                    <span class="nav-icon">🚚</span>
+                    <span class="nav-label">الموردون</span>
+                </button>
+                <button class="nav-btn feature-stocktake" data-page="stocktake" style="display:none;">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-label">الجرد</span>
+                </button>
+                <button class="nav-btn feature-restaurant" data-page="restaurant" style="display:none;">
+                    <span class="nav-icon">🍽️</span>
+                    <span class="nav-label">الطاولات</span>
+                </button>
+                <button class="nav-btn feature-hookah" data-page="hookah" style="display:none;">
+                    <span class="nav-icon">💨</span>
+                    <span class="nav-label">الأرجيلة</span>
                 </button>
                 <button class="nav-btn" data-page="settings">
                     <span class="nav-icon">⚙️</span>
@@ -187,6 +207,14 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="summary-row feature-tax" id="taxRow" style="display:none;">
+                                <span id="taxLabel">الضريبة</span>
+                                <span id="taxAmount">₪0</span>
+                            </div>
+                            <div class="summary-row feature-storecredit" id="creditRow" style="display:none;">
+                                <span>رصيد مستخدم</span>
+                                <span id="creditAmount">₪0</span>
+                            </div>
                             <div class="summary-row total">
                                 <span>الإجمالي</span>
                                 <span id="totalAmount">₪0</span>
@@ -195,6 +223,12 @@
                         <div class="cart-actions">
                             <div class="bill-note-row">
                                 <input type="text" id="billNote" placeholder="📝 ملاحظة على الفاتورة (اختياري)...">
+                            </div>
+                            <div class="customer-attach-row">
+                                <button class="btn-secondary" id="attachCustomerBtn" title="ربط عميل لكسب نقاط الولاء">👤 ربط عميل</button>
+                                <button class="btn-secondary" id="redeemPointsBtn" title="استبدال نقاط العميل كخصم" style="display:none;">⭐ استبدال نقاط</button>
+                                <button class="btn-secondary feature-storecredit" id="useCreditBtn" title="استخدام رصيد العميل" style="display:none;">💳 استخدام الرصيد</button>
+                                <span id="attachedCustomerLabel" class="attached-customer" style="display:none;"></span>
                             </div>
                             <div class="tender-row" id="tenderRow">
                                 <label>المبلغ المدفوع</label>
@@ -224,6 +258,7 @@
                     <div class="header-actions">
                         <input type="text" id="inventorySearch" placeholder="بحث في المخزون..." aria-label="بحث في المخزون">
                         <button class="btn-primary" id="addStockBtn">+ إضافة كمية</button>
+                        <button class="btn-secondary feature-barcode" id="printLabelsBtn" style="display:none;">🏷️ طباعة ملصقات الباركود</button>
                         <button class="btn-secondary" id="exportInventoryBtn">تصدير CSV</button>
                     </div>
                 </div>
@@ -267,6 +302,7 @@
                                 <th>إجمالي الكمية</th>
                                 <th>السعر</th>
                                 <th>الحالة</th>
+                                <th>ملصق</th>
                             </tr>
                         </thead>
                         <tbody id="inventoryBody"></tbody>
@@ -359,10 +395,18 @@
                 <div class="page-header">
                     <h2>التقارير</h2>
                     <div class="header-actions">
+                        <button class="btn-secondary" id="depositBtn">💵 إيداع نقدي</button>
                         <button class="btn-secondary" id="withdrawBtn">💸 سحب شخصي</button>
                         <button class="btn-primary" id="closeDayBtn" style="display:none;">🔒 إغلاق اليوم</button>
                     </div>
                 </div>
+                <div class="settings-subnav" id="reportsSubnav">
+                    <button class="settings-subnav-btn active" data-reports-tab="overview">📊 نظرة عامة</button>
+                    <button class="settings-subnav-btn" data-reports-tab="sales">🛒 المبيعات</button>
+                    <button class="settings-subnav-btn" data-reports-tab="inventory">📦 المخزون</button>
+                    <button class="settings-subnav-btn" data-reports-tab="cash">💵 الصندوق</button>
+                </div>
+                <div class="settings-panel active" data-reports-panel="overview">
                 <div class="reports-grid">
                     <div class="report-card report-shift">
                         <h3>إجمالي الوردية (منذ آخر إغلاق)</h3>
@@ -381,6 +425,16 @@
                         <div class="report-value" id="monthSales">₪0</div>
                         <div class="report-sub" id="monthCount">0 فاتورة</div>
                     </div>
+                    <div class="report-card report-profit">
+                        <h3>💰 ربح اليوم</h3>
+                        <div class="report-value" id="todayProfit">₪0</div>
+                        <div class="report-sub" id="todayProfitSub">هامش 0%</div>
+                    </div>
+                    <div class="report-card report-profit">
+                        <h3>💰 ربح الشهر</h3>
+                        <div class="report-value" id="monthProfit">₪0</div>
+                        <div class="report-sub" id="monthProfitSub">هامش 0%</div>
+                    </div>
                     <div class="report-card">
                         <h3>إجمالي المنتجات</h3>
                         <div class="report-value" id="totalProducts">0</div>
@@ -391,7 +445,64 @@
                         <div class="report-value" id="monthDamage">0</div>
                         <div class="report-sub" id="monthDamageValue">₪0 قيمة</div>
                     </div>
+                    <div class="report-card report-lowstock">
+                        <h3>⚠️ نقص المخزون</h3>
+                        <div class="report-value" id="lowStockCount">0 عنصر</div>
+                        <div class="report-sub">عناصر متبقّية قليلة (أكثر من صفر)</div>
+                    </div>
+                    <div class="report-card report-outstock">
+                        <h3>🚫 نفد المخزون</h3>
+                        <div class="report-value" id="outStockCount">0 عنصر</div>
+                        <div class="report-sub">عناصر نافدة تماماً (صفر)</div>
+                    </div>
                 </div>
+                <div class="reports-detail reports-2col">
+                    <div>
+                        <h3>👤 المبيعات حسب الكاشير (اليوم)</h3>
+                        <table class="data-table">
+                            <thead><tr><th>الكاشير</th><th>عدد الفواتير</th><th>الإجمالي</th></tr></thead>
+                            <tbody id="cashierReportBody"></tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <h3>🕐 المبيعات حسب الساعة (اليوم)</h3>
+                        <table class="data-table">
+                            <thead><tr><th>الساعة</th><th>فواتير</th><th>الإجمالي</th><th>الذروة</th></tr></thead>
+                            <tbody id="hourReportBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                </div><!-- /overview panel -->
+                <div class="settings-panel" data-reports-panel="inventory">
+                <div class="reports-detail">
+                    <h3>⚠️ عناصر منخفضة المخزون</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>المنتج</th>
+                                <th>اللون</th>
+                                <th>المقاس</th>
+                                <th>المتبقي</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lowStockBody"></tbody>
+                    </table>
+                </div>
+                <div class="reports-detail">
+                    <h3>🚫 عناصر نافدة المخزون</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>المنتج</th>
+                                <th>اللون</th>
+                                <th>المقاس</th>
+                            </tr>
+                        </thead>
+                        <tbody id="outStockBody"></tbody>
+                    </table>
+                </div>
+                </div><!-- /inventory panel -->
+                <div class="settings-panel" data-reports-panel="sales">
                 <div class="reports-detail">
                     <h3>أكثر المنتجات مبيعاً</h3>
                     <table class="data-table">
@@ -400,11 +511,14 @@
                                 <th>المنتج</th>
                                 <th>الكمية المباعة</th>
                                 <th>الإيرادات</th>
+                                <th>الربح</th>
                             </tr>
                         </thead>
                         <tbody id="topProductsBody"></tbody>
                     </table>
                 </div>
+                </div><!-- /sales panel -->
+                <div class="settings-panel" data-reports-panel="cash">
                 <div class="reports-detail">
                     <h3>💸 السحوبات الشخصية (الوردية الحالية)</h3>
                     <table class="data-table">
@@ -419,6 +533,21 @@
                         <tbody id="withdrawalsBody"></tbody>
                     </table>
                 </div>
+                <div class="reports-detail">
+                    <h3>💵 الإيداعات النقدية (الوردية الحالية)</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>الوقت</th>
+                                <th>الموظف</th>
+                                <th>المبلغ</th>
+                                <th>السبب</th>
+                            </tr>
+                        </thead>
+                        <tbody id="depositsBody"></tbody>
+                    </table>
+                </div>
+                </div><!-- /cash panel -->
             </section>
 
             <!-- RETURNS PAGE -->
@@ -488,6 +617,42 @@
                 </div>
             </section>
 
+            <!-- CUSTOMERS / CRM PAGE -->
+            <section class="page" id="page-customers">
+                <div class="page-header">
+                    <h2>العملاء</h2>
+                    <div class="header-actions">
+                        <button class="btn-primary" id="addCustomerBtn">+ عميل جديد</button>
+                    </div>
+                </div>
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>عدد العملاء</h3>
+                        <div class="report-value" id="customersCount">0</div>
+                        <div class="report-sub">عميل مسجّل</div>
+                    </div>
+                </div>
+                <div class="stats-block">
+                    <div class="code-add-row">
+                        <input type="text" id="customerSearchInput" placeholder="🔍 بحث باسم العميل أو رقم الهاتف..." aria-label="بحث في العملاء">
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>الاسم</th>
+                                <th>الهاتف</th>
+                                <th id="custPointsHead">النقاط</th>
+                                <th>إجمالي الشراء</th>
+                                <th>الزيارات</th>
+                                <th>الرصيد المستحق</th>
+                                <th>إجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customersBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
             <!-- STATISTICS PAGE -->
             <section class="page" id="page-stats">
                 <div class="page-header">
@@ -530,6 +695,18 @@
                     <h2>الإعدادات</h2>
                 </div>
 
+                <!-- Settings sub-navigation -->
+                <div class="settings-subnav" id="settingsSubnav">
+                    <button class="settings-subnav-btn active" data-settings-tab="shortcuts">⌨️ الاختصارات</button>
+                    <button class="settings-subnav-btn" data-settings-tab="addons">🧩 الإضافات</button>
+                    <button class="settings-subnav-btn" data-settings-tab="cashstock">🏦 الصندوق والمخزون</button>
+                    <button class="settings-subnav-btn" data-settings-tab="loyalty">⭐ الولاء</button>
+                    <button class="settings-subnav-btn" data-settings-tab="printer">🖨️ الطابعة</button>
+                    <button class="settings-subnav-btn" data-settings-tab="notes">🗒️ ملاحظات</button>
+                </div>
+
+                <!-- ===== Shortcuts panel ===== -->
+                <div class="settings-panel active" data-settings-panel="shortcuts">
                 <!-- Keyboard shortcuts -->
                 <div class="stats-block">
                     <h3>⌨️ اختصارات لوحة المفاتيح (F1 – F12)</h3>
@@ -546,7 +723,76 @@
                         <button class="btn-secondary" id="resetShortcutsBtn">↺ استعادة الافتراضي</button>
                     </div>
                 </div>
+                </div><!-- /shortcuts panel -->
 
+                <!-- ===== Add-ons panel ===== -->
+                <div class="settings-panel" data-settings-panel="addons">
+                <div class="stats-block">
+                    <h3>🧩 الإضافات والميزات الاختيارية</h3>
+                    <p class="stats-hint">فعّل فقط ما يحتاجه متجرك. الميزات المُعطّلة تختفي من الواجهة لتبقى البرنامج بسيطاً. تُشارَك هذه الإعدادات بين جميع أجهزة المتجر.</p>
+                    <div class="addons-grid" id="addonsGrid">
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">🧾</span><input type="checkbox" id="feat-tax" data-feature="tax"></div>
+                            <div class="addon-title">ضريبة القيمة المضافة</div>
+                            <div class="addon-desc">إضافة ضريبة على الفواتير بنسبة يحددها المدير، وعرضها في الفاتورة والتقارير.</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">💳</span><input type="checkbox" id="feat-storeCredit" data-feature="storeCredit"></div>
+                            <div class="addon-title">رصيد العميل (Store Credit)</div>
+                            <div class="addon-desc">رصيد نقدي للعميل يمكن استخدامه في المشتريات لاحقاً (مفيد للمرتجعات والحملات).</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">🏷️</span><input type="checkbox" id="feat-barcodeLabels" data-feature="barcodeLabels"></div>
+                            <div class="addon-title">طباعة ملصقات الباركود</div>
+                            <div class="addon-desc">طباعة ملصقات أسعار وباركود للمنتجات من صفحة المخزون.</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">🚚</span><input type="checkbox" id="feat-suppliers" data-feature="suppliers"></div>
+                            <div class="addon-title">الموردون وأوامر الشراء</div>
+                            <div class="addon-desc">إدارة الموردين وتسجيل أوامر الشراء (المشتريات) لتتبع التكاليف والمخزون.</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">📋</span><input type="checkbox" id="feat-stocktake" data-feature="stocktake"></div>
+                            <div class="addon-title">الجرد (Stock-take)</div>
+                            <div class="addon-desc">جرد المخزون الفعلي ومطابقته مع النظام وتسجيل الفروقات.</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">🍽️</span><input type="checkbox" id="feat-restaurant" data-feature="restaurant"></div>
+                            <div class="addon-title">وضع المطاعم</div>
+                            <div class="addon-desc">طاولات وطلبات (محلي/سفري) وتقسيم الفاتورة — للمطاعم والكافيهات.</div>
+                        </label>
+                        <label class="addon-card">
+                            <div class="addon-head"><span class="addon-ico">💨</span><input type="checkbox" id="feat-hookah" data-feature="hookah"></div>
+                            <div class="addon-title">الأرجيلة / التبغ</div>
+                            <div class="addon-desc">أصناف الأرجيلة والنكهات وإدارة طلبات الأرجيلة للكافيهات.</div>
+                        </label>
+                    </div>
+
+                    <!-- Tax config (visible only when tax feature is on) -->
+                    <div class="addon-config feature-tax" id="taxConfigBlock" style="display:none;">
+                        <h4>🧾 إعدادات الضريبة</h4>
+                        <div class="loyalty-grid">
+                            <div class="form-group">
+                                <label>نسبة الضريبة (%)</label>
+                                <input type="number" id="taxPercentInput" min="0" max="100" step="0.1" placeholder="16">
+                            </div>
+                            <div class="form-group">
+                                <label>طريقة الاحتساب</label>
+                                <select id="taxIncludedSelect">
+                                    <option value="false">تُضاف الضريبة على السعر</option>
+                                    <option value="true">السعر شامل الضريبة</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary" id="addonsSaveBtn" style="margin-top:14px;">💾 حفظ الإضافات</button>
+                    <div class="notes-saved-hint" id="addonsSavedHint"></div>
+                </div>
+                </div><!-- /addons panel -->
+
+                <!-- ===== Cash & stock panel ===== -->
+                <div class="settings-panel" data-settings-panel="cashstock">
                 <!-- Register opening balance -->
                 <div class="stats-block">
                     <h3>🏦 رصيد الصندوق النقدي (مشترك للمتجر)</h3>
@@ -559,6 +805,108 @@
                     <div class="notes-saved-hint" id="regSavedHint"></div>
                 </div>
 
+                <!-- Low-stock alert threshold -->
+                <div class="stats-block">
+                    <h3>⚠️ حد تنبيه نقص المخزون</h3>
+                    <p class="stats-hint">عند وصول كمية أي لون/مقاس إلى هذا الحد أو أقل، يظهر تنبيه في صفحة التقارير. تُحفظ على هذا الجهاز.</p>
+                    <div class="register-balance-row">
+                        <span class="reg-current">الحد الحالي: <strong id="lowStockCurrent">3</strong></span>
+                        <input type="number" id="lowStockInput" min="0" step="1" placeholder="مثال: 3">
+                        <button class="btn-primary" id="lowStockSaveBtn">حفظ الحد</button>
+                    </div>
+                    <div class="notes-saved-hint" id="lowStockSavedHint"></div>
+                </div>
+                </div><!-- /cashstock panel -->
+
+                <!-- ===== Loyalty panel ===== -->
+                <div class="settings-panel" data-settings-panel="loyalty">
+                <!-- Loyalty / rewards program -->
+                <div class="stats-block">
+                    <h3>⭐ برنامج الولاء والنقاط</h3>
+                    <p class="stats-hint">نظام نقاط للعملاء يُشارَك بين جميع أجهزة المتجر. يكسب العميل نقاطاً عند الشراء ويمكنه استبدالها كخصم.</p>
+                    <div class="loyalty-toggle-row">
+                        <button class="btn-primary" id="loyaltyToggleBtn">تفعيل برنامج الولاء</button>
+                        <span id="loyaltyStatusBadge" class="loyalty-status-badge">غير مُفعّل</span>
+                    </div>
+                    <div id="loyaltyBody" style="display:none;">
+                        <div class="loyalty-grid">
+                            <div class="form-group">
+                                <label>اكسب نقطة لكل (₪)</label>
+                                <input type="number" id="loyaltyEarnPer" min="1" step="1" placeholder="10">
+                            </div>
+                            <div class="form-group">
+                                <label>عدد النقاط = 1 ₪ خصم</label>
+                                <input type="number" id="loyaltyRedeemRate" min="1" step="1" placeholder="100">
+                            </div>
+                            <div class="form-group">
+                                <label>أقل نقاط للاستبدال</label>
+                                <input type="number" id="loyaltyMinRedeem" min="0" step="1" placeholder="100">
+                            </div>
+                        </div>
+                        <div class="loyalty-rewards-block">
+                            <h4>🎁 الجوائز / المكافآت</h4>
+                            <p class="stats-hint">جوائز يستبدلها العميل بنقاطه (خصم أو هدية).</p>
+                            <table class="data-table"><thead><tr><th>الجائزة</th><th>النوع</th><th>التكلفة (نقاط)</th><th>القيمة</th><th></th></tr></thead>
+                                <tbody id="loyaltyRewardsBody"></tbody></table>
+                            <div class="reward-add-row">
+                                <input type="text" id="rewardName" placeholder="اسم الجائزة">
+                                <select id="rewardType"><option value="discount">خصم (₪)</option><option value="prize">هدية</option></select>
+                                <input type="number" id="rewardCost" min="1" placeholder="نقاط">
+                                <input type="text" id="rewardValue" placeholder="القيمة / الوصف">
+                                <button class="btn-secondary" id="addRewardBtn">+ إضافة جائزة</button>
+                            </div>
+                        </div>
+                        <div class="loyalty-raffle-block">
+                            <h4>🎲 السحب العشوائي</h4>
+                            <p class="stats-hint">اسحب فائزاً أو أكثر عشوائياً للفوز بجائزة (من بين العملاء الذين لديهم نقاط).</p>
+                            <div class="reward-add-row">
+                                <input type="text" id="rafflePrize" placeholder="الجائزة (مثال: قسيمة 100₪)">
+                                <input type="number" id="raffleWinners" min="1" step="1" value="1" title="عدد الفائزين" style="width:90px;" placeholder="عدد الفائزين">
+                                <button class="btn-primary" id="drawRaffleBtn">🎲 اسحب الفائزين</button>
+                            </div>
+                            <div id="raffleResult" class="raffle-result"></div>
+                        </div>
+                        <div class="loyalty-campaign-block">
+                            <h4>📅 حملة الولاء (تاريخ بداية ونهاية)</h4>
+                            <p class="stats-hint">حدّد فترة للحملة. عند انتهائها تلقائياً: يتم تنفيذ الإجراء المختار (سحب فائزين و/أو تحويل النقاط إلى رصيد للعملاء) ثم تصفير جميع النقاط.</p>
+                            <div class="loyalty-grid">
+                                <div class="form-group">
+                                    <label>اسم الحملة</label>
+                                    <input type="text" id="campaignName" placeholder="مثال: حملة الصيف">
+                                </div>
+                                <div class="form-group">
+                                    <label>تاريخ البداية</label>
+                                    <input type="date" id="campaignStart">
+                                </div>
+                                <div class="form-group">
+                                    <label>تاريخ النهاية</label>
+                                    <input type="date" id="campaignEnd">
+                                </div>
+                                <div class="form-group full-width">
+                                    <label>الإجراء عند الانتهاء</label>
+                                    <div class="campaign-action-btns" id="campaignActionBtns">
+                                        <button type="button" class="campaign-action-btn" data-action="draw">🎁 سحب فائزين</button>
+                                        <button type="button" class="campaign-action-btn" data-action="credit">💰 تحويل النقاط إلى رصيد</button>
+                                        <button type="button" class="campaign-action-btn" data-action="reset">♻️ تصفير فقط (بدون مكافأة)</button>
+                                    </div>
+                                    <input type="hidden" id="campaignEndAction" value="draw">
+                                    <p class="stats-hint">اختر «سحب فائزين» و/أو «تحويل رصيد» معاً، أو «تصفير فقط» وحده. تُصفَّر النقاط تلقائياً بعد التنفيذ في كل الحالات.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="loyalty-reset-block">
+                            <h4>♻️ تصفير النقاط</h4>
+                            <p class="stats-hint">تصفير نقاط جميع العملاء يدوياً (يمكن أيضاً تصفير نقاط عميل واحد من ملفه الشخصي).</p>
+                            <button class="btn-danger" id="resetAllPointsBtn">♻️ تصفير نقاط جميع العملاء</button>
+                        </div>
+                        <button class="btn-primary" id="loyaltySaveBtn" style="margin-top:10px;">💾 حفظ إعدادات الولاء</button>
+                        <div class="notes-saved-hint" id="loyaltySavedHint"></div>
+                    </div>
+                </div>
+                </div><!-- /loyalty panel -->
+
+                <!-- ===== Notes panel ===== -->
+                <div class="settings-panel" data-settings-panel="notes">
                 <!-- General notes -->
                 <div class="stats-block">
                     <h3>🗒️ ملاحظات عامة</h3>
@@ -566,7 +914,10 @@
                     <textarea id="generalNotes" class="general-notes" placeholder="اكتب ملاحظاتك هنا..."></textarea>
                     <div class="notes-saved-hint" id="notesSavedHint"></div>
                 </div>
+                </div><!-- /notes panel -->
 
+                <!-- ===== Printer panel ===== -->
+                <div class="settings-panel" data-settings-panel="printer">
                 <!-- Printer settings & test -->
                 <div class="stats-block">
                     <h3>🖨️ إعدادات الطابعة واختبارها</h3>
@@ -629,6 +980,103 @@
                         </div>
                     </div>
                     <div class="notes-saved-hint" id="printerSavedHint"></div>
+                </div>
+                </div><!-- /printer panel -->
+            </section>
+
+            <!-- ===== Suppliers & Purchase Orders ===== -->
+            <section class="page feature-suppliers" id="page-suppliers">
+                <div class="page-header"><h2>🚚 الموردون وأوامر الشراء</h2></div>
+                <div class="stats-block">
+                    <h3>الموردون</h3>
+                    <div class="reward-add-row">
+                        <input type="text" id="supplierName" placeholder="اسم المورد">
+                        <input type="text" id="supplierPhone" placeholder="الهاتف">
+                        <input type="text" id="supplierNote" placeholder="ملاحظة (اختياري)">
+                        <button class="btn-primary" id="addSupplierBtn">+ إضافة مورد</button>
+                    </div>
+                    <table class="data-table"><thead><tr><th>المورد</th><th>الهاتف</th><th>ملاحظة</th><th>إجمالي المشتريات</th></tr></thead>
+                        <tbody id="suppliersBody"></tbody></table>
+                </div>
+                <div class="stats-block">
+                    <h3>أمر شراء جديد</h3>
+                    <div class="loyalty-grid">
+                        <div class="form-group"><label>المورد</label><select id="poSupplier"></select></div>
+                        <div class="form-group"><label>رقم الفاتورة (اختياري)</label><input type="text" id="poInvoice" placeholder="#"></div>
+                        <div class="form-group"><label>الإجمالي (₪)</label><input type="number" id="poTotal" min="0" step="0.01" placeholder="0"></div>
+                    </div>
+                    <div class="form-group full-width"><label>الأصناف / ملاحظات</label><textarea id="poItems" class="general-notes" placeholder="وصف البضاعة المشتراة..."></textarea></div>
+                    <button class="btn-primary" id="addPoBtn">💾 حفظ أمر الشراء</button>
+                    <div class="notes-saved-hint" id="poSavedHint"></div>
+                </div>
+                <div class="stats-block">
+                    <h3>سجل أوامر الشراء</h3>
+                    <table class="data-table"><thead><tr><th>التاريخ</th><th>المورد</th><th>رقم الفاتورة</th><th>الإجمالي</th><th>الأصناف</th></tr></thead>
+                        <tbody id="poBody"></tbody></table>
+                </div>
+            </section>
+
+            <!-- ===== Stock-take / Jard ===== -->
+            <section class="page feature-stocktake" id="page-stocktake">
+                <div class="page-header"><h2>📋 الجرد (Stock-take)</h2></div>
+                <div class="stats-block">
+                    <h3>جرد المخزون عبر ملف Excel</h3>
+                    <p class="stats-hint">١) نزّل ملف الجرد (يحتوي كمية النظام وعمود «الفعلي» فارغ ومعادلة الفرق). ٢) عُدّ البضاعة واملأ عمود «الفعلي» في Excel واحفظ الملف. ٣) استورد الملف المعبّأ ليظهر تقرير الفروقات، ثم طبّق التعديلات على المخزون.</p>
+                    <div class="cat-search-row">
+                        <input type="text" id="stocktakeSearch" placeholder="🔍 بحث عن منتج بالاسم أو الرقم أو الباركود...">
+                    </div>
+                    <div class="form-actions" style="margin-top:6px;margin-bottom:10px;">
+                        <button class="btn-primary" id="stocktakeExportBtn">📥 تنزيل ملف الجرد (Excel)</button>
+                        <button class="btn-secondary" id="stocktakeImportBtn">📤 استيراد ملف الجرد المعبّأ</button>
+                        <button class="btn-secondary" id="stocktakeLoadBtn">↺ تحميل المنتجات</button>
+                        <input type="file" id="stocktakeFileInput" accept=".csv,text/csv,application/vnd.ms-excel" style="display:none;">
+                    </div>
+                    <table class="data-table"><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>كمية النظام</th></tr></thead>
+                        <tbody id="stocktakeBody"></tbody></table>
+                    <div class="stk-pager" id="stocktakePager"></div>
+                    <div class="notes-saved-hint" id="stocktakeSavedHint"></div>
+                </div>
+                <div class="stats-block" id="stocktakeReportBlock" style="display:none;">
+                    <h3>📊 تقرير فروقات الجرد</h3>
+                    <div id="stocktakeReport"></div>
+                    <div class="form-actions" style="margin-top:12px;">
+                        <button class="btn-primary" id="applyStocktakeBtn">✅ تطبيق التعديلات على المخزون</button>
+                        <button class="btn-secondary" id="stocktakeReportExportBtn">📥 تنزيل تقرير الفروقات</button>
+                    </div>
+                </div>
+                <div class="stats-block">
+                    <h3>سجل عمليات الجرد</h3>
+                    <table class="data-table"><thead><tr><th>التاريخ</th><th>عدد الأصناف</th><th>إجمالي الفروقات</th><th>الموظف</th></tr></thead>
+                        <tbody id="stocktakeHistoryBody"></tbody></table>
+                </div>
+            </section>
+
+            <!-- ===== Restaurant tables ===== -->
+            <section class="page feature-restaurant" id="page-restaurant">
+                <div class="page-header"><h2>🍽️ الطاولات والطلبات</h2></div>
+                <div class="stats-block">
+                    <div class="reward-add-row">
+                        <label>عدد الطاولات:</label>
+                        <input type="number" id="tableCount" min="1" max="60" step="1" value="12" style="width:90px;">
+                        <button class="btn-secondary" id="saveTableCountBtn">حفظ</button>
+                        <span class="stats-hint">اضغط على طاولة لبدء/متابعة طلبها. الطاولة المشغولة تظهر بلون مختلف.</span>
+                    </div>
+                    <div class="tables-grid" id="tablesGrid"></div>
+                </div>
+            </section>
+
+            <!-- ===== Hookah menu ===== -->
+            <section class="page feature-hookah" id="page-hookah">
+                <div class="page-header"><h2>💨 الأرجيلة والنكهات</h2></div>
+                <div class="stats-block">
+                    <h3>قائمة الأرجيلة</h3>
+                    <p class="stats-hint">أصناف الأرجيلة والنكهات للإضافة السريعة إلى الفاتورة.</p>
+                    <div class="reward-add-row">
+                        <input type="text" id="hookahName" placeholder="اسم الصنف / النكهة">
+                        <input type="number" id="hookahPrice" min="0" step="0.5" placeholder="السعر ₪">
+                        <button class="btn-primary" id="addHookahBtn">+ إضافة صنف</button>
+                    </div>
+                    <div class="hookah-grid" id="hookahGrid"></div>
                 </div>
             </section>
         </main>
@@ -750,6 +1198,78 @@
         </div>
     </div>
 
+    <!-- Cash-In / Deposit Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="depositModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>💵 إيداع نقدي في الصندوق</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="depositModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group full-width">
+                    <label>المبلغ المودع (₪)</label>
+                    <input type="number" id="depositAmount" min="0" placeholder="0">
+                </div>
+                <div class="form-group full-width">
+                    <label>الموظف</label>
+                    <input type="text" id="depositWho" placeholder="اسم الموظف">
+                </div>
+                <div class="form-group full-width">
+                    <label>السبب / المصدر</label>
+                    <input type="text" id="depositReason" placeholder="مثال: فكة، إيداع المالك (اختياري)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="saveDepositBtn">تأكيد الإيداع</button>
+                <button class="btn-secondary" data-close="depositModal">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Customer Profile Modal (CRM) -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="customerProfileModal" style="display:none;">
+        <div class="modal-content" style="max-width:640px;">
+            <div class="modal-header">
+                <h3>👤 ملف العميل</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="customerProfileModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="profile-summary">
+                    <div><span class="profile-k">الاسم:</span> <b id="profileName">-</b></div>
+                    <div><span class="profile-k">الهاتف:</span> <span id="profilePhone">-</span></div>
+                    <div id="profilePointsRow"><span class="profile-k">النقاط:</span> <b id="profilePoints">-</b>
+                        <button class="btn-small" onclick="adjustProfilePoints(1)">+ نقاط</button>
+                        <button class="btn-small" onclick="adjustProfilePoints(-1)">- نقاط</button>
+                        <button class="btn-small" style="background:#e74c3c;" onclick="resetCustomerPoints()" title="تصفير نقاط هذا العميل">♻️ تصفير</button>
+                    </div>
+                    <div><span class="profile-k">إجمالي الشراء:</span> <b id="profileSpent">₪0</b></div>
+                    <div><span class="profile-k">عدد الزيارات:</span> <span id="profileVisits">0</span></div>
+                    <div><span class="profile-k">الرصيد المستحق:</span> <b id="profileBalance">₪0</b></div>
+                    <div class="feature-storecredit" id="profileCreditRow"><span class="profile-k">رصيد العميل:</span> <b id="profileCredit">₪0</b>
+                        <button class="btn-small" onclick="adjustCustomerCredit()" title="إضافة أو خصم رصيد">± رصيد</button>
+                    </div>
+                </div>
+                <div class="form-group full-width">
+                    <label>ملاحظات</label>
+                    <input type="text" id="profileNotesInput" placeholder="ملاحظات عن العميل (اختياري)">
+                </div>
+                <div class="form-group full-width">
+                    <label>تاريخ الميلاد</label>
+                    <input type="date" id="profileBirthdayInput">
+                </div>
+                <h4 style="margin:12px 0 6px;">سجل المشتريات</h4>
+                <table class="data-table">
+                    <thead><tr><th>التاريخ</th><th>رقم الفاتورة</th><th>القطع</th><th>المبلغ</th><th></th></tr></thead>
+                    <tbody id="profileHistoryBody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveCustomerProfile()">حفظ البيانات</button>
+                <button class="btn-secondary" data-close="customerProfileModal">إغلاق</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Customer Picker Modal (for debt sales) -->
     <div class="modal-overlay" role="dialog" aria-modal="true" id="customerModal" style="display:none;">
         <div class="modal-content">
@@ -831,6 +1351,49 @@
                 <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="heldModal">&times;</button>
             </div>
             <div class="modal-body" id="heldBody"></div>
+        </div>
+    </div>
+
+    <!-- Barcode / Price Label Printing Modal -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="labelsModal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🏷️ طباعة ملصقات الباركود / الأسعار</h3>
+                <button class="modal-close" aria-label="إغلاق" title="إغلاق" data-close="labelsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group full-width">
+                    <label>المنتج</label>
+                    <select id="labelProduct"></select>
+                </div>
+                <div class="form-group full-width">
+                    <label>السعر (الخيار / المقاس)</label>
+                    <select id="labelVariant"></select>
+                </div>
+                <div class="form-group">
+                    <label>عدد الملصقات</label>
+                    <input type="number" id="labelQty" min="1" max="200" value="1">
+                </div>
+                <div class="form-group">
+                    <label>السعر</label>
+                    <button type="button" id="labelIncludePrice" class="toggle-btn active" aria-pressed="true" style="width:100%;">✔ السعر مُضمَّن</button>
+                </div>
+                <div class="form-group full-width">
+                    <label>الطابعة</label>
+                    <div style="display:flex;gap:6px;">
+                        <select id="labelPrinter" style="flex:1;"></select>
+                        <button type="button" class="btn-secondary" id="labelRefreshPrintersBtn" title="تحديث قائمة الطابعات">🔄</button>
+                    </div>
+                </div>
+                <div class="form-group full-width">
+                    <label>معاينة الملصق</label>
+                    <div id="labelPreview" class="label-preview"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="doPrintLabelsBtn">🖨️ طباعة</button>
+                <button class="btn-secondary" data-close="labelsModal">إلغاء</button>
+            </div>
         </div>
     </div>
 
