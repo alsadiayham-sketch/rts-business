@@ -6,3 +6,6 @@ elog.txt
 eout.txt
 epid.txt
 dist_release/
+
+boot_err.txt
+boot_out.txt

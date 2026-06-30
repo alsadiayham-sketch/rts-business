@@ -13,7 +13,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '3.0.0';
+var APP_VERSION = '3.0.1';
 
 // ============ STATE ============
 var products = [];
@@ -1970,6 +1970,9 @@ function renderInventory() {
     var body = document.getElementById('inventoryBody');
     var searchVal = (document.getElementById('inventorySearch') ? document.getElementById('inventorySearch').value : '').toLowerCase();
     var html = '';
+    // Hoisted out of the row loop: the label feature flag is the same for every
+    // row, so resolving the store config once avoids thousands of lookups.
+    var labelsOn = !!(getStoreConfig().features && getStoreConfig().features.barcodeLabels);
 
     for (var i = 0; i < products.length; i++) {
         var p = products[i];
@@ -2001,7 +2004,6 @@ function renderInventory() {
 
         var rowId = 'inv_' + p.id;
         var isOpen = !!openInvRows[rowId];
-        var labelsOn = !!(getStoreConfig().features && getStoreConfig().features.barcodeLabels);
         html += '<tr class="inv-master' + (isOpen ? ' open' : '') + '" onclick="toggleInvRow(\'' + escapeHtml(rowId) + '\')">';
         html += '<td><span class="inv-caret" id="caret_' + escapeHtml(rowId) + '">' + (isOpen ? '\u25BE' : '\u25B8') + '</span> ' + escapeHtml(p.id) + '</td>';
         html += '<td>' + escapeHtml(p.name || '') + '</td>';
@@ -2010,7 +2012,7 @@ function renderInventory() {
         html += '<td>' + priceLabel + '</td>';
         html += '<td>' + statusBadge + '</td>';
         html += '<td>' + (labelsOn
-            ? '<button class="inv-label-btn" title="طباعة ملصق باركود" onclick="event.stopPropagation();printProductLabel(\'' + escapeHtml(p.id) + '\')">🏷️</button>'
+            ? '<button class="inv-label-btn" aria-label="طباعة ملصق باركود للمنتج" title="طباعة ملصق باركود" onclick="event.stopPropagation();printProductLabel(\'' + escapeHtml(p.id) + '\')">🏷️</button>'
             : '') + '</td>';
         html += '</tr>';
 
