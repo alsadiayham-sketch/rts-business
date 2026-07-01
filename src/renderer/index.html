@@ -227,6 +227,7 @@
                             <div class="customer-attach-row">
                                 <button class="btn-secondary" id="attachCustomerBtn" title="ربط عميل لكسب نقاط الولاء">👤 ربط عميل</button>
                                 <button class="btn-secondary" id="redeemPointsBtn" title="استبدال نقاط العميل كخصم" style="display:none;">⭐ استبدال نقاط</button>
+                                <button class="btn-secondary" id="redeemRewardBtn" title="جوائز الولاء المتاحة لهذا العميل" style="display:none;">🎁 جوائز متاحة</button>
                                 <button class="btn-secondary feature-storecredit" id="useCreditBtn" title="استخدام رصيد العميل" style="display:none;">💳 استخدام الرصيد</button>
                                 <span id="attachedCustomerLabel" class="attached-customer" style="display:none;"></span>
                             </div>
@@ -699,6 +700,7 @@
                 <div class="settings-subnav" id="settingsSubnav">
                     <button class="settings-subnav-btn active" data-settings-tab="shortcuts">⌨️ الاختصارات</button>
                     <button class="settings-subnav-btn" data-settings-tab="addons">🧩 الإضافات</button>
+                    <button class="settings-subnav-btn feature-tax" data-settings-tab="tax" style="display:none;">🧾 الضريبة</button>
                     <button class="settings-subnav-btn" data-settings-tab="cashstock">🏦 الصندوق والمخزون</button>
                     <button class="settings-subnav-btn" data-settings-tab="loyalty">⭐ الولاء</button>
                     <button class="settings-subnav-btn" data-settings-tab="printer">🖨️ الطابعة</button>
@@ -768,28 +770,35 @@
                         </label>
                     </div>
 
-                    <!-- Tax config (visible only when tax feature is on) -->
-                    <div class="addon-config feature-tax" id="taxConfigBlock" style="display:none;">
-                        <h4>🧾 إعدادات الضريبة</h4>
-                        <div class="loyalty-grid">
-                            <div class="form-group">
-                                <label>نسبة الضريبة (%)</label>
-                                <input type="number" id="taxPercentInput" min="0" max="100" step="0.1" placeholder="16">
-                            </div>
-                            <div class="form-group">
-                                <label>طريقة الاحتساب</label>
-                                <select id="taxIncludedSelect">
-                                    <option value="false">تُضاف الضريبة على السعر</option>
-                                    <option value="true">السعر شامل الضريبة</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Tax settings live in their own tab (appears after enabling + saving tax) -->
 
                     <button class="btn-primary" id="addonsSaveBtn" style="margin-top:14px;">💾 حفظ الإضافات</button>
                     <div class="notes-saved-hint" id="addonsSavedHint"></div>
                 </div>
                 </div><!-- /addons panel -->
+
+                <!-- ===== Tax panel (only when tax feature is enabled + saved) ===== -->
+                <div class="settings-panel" data-settings-panel="tax">
+                <div class="stats-block">
+                    <h3>🧾 إعدادات الضريبة (ضريبة القيمة المضافة)</h3>
+                    <p class="stats-hint">تُضاف الضريبة على الفواتير بالنسبة المحددة وتظهر في الفاتورة والتقارير. تُشارَك هذه الإعدادات بين جميع أجهزة المتجر.</p>
+                    <div class="loyalty-grid">
+                        <div class="form-group">
+                            <label>نسبة الضريبة (%)</label>
+                            <input type="number" id="taxPercentInput" min="0" max="100" step="0.1" placeholder="16">
+                        </div>
+                        <div class="form-group">
+                            <label>طريقة الاحتساب</label>
+                            <select id="taxIncludedSelect">
+                                <option value="false">تُضاف الضريبة على السعر</option>
+                                <option value="true">السعر شامل الضريبة</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-primary" id="taxSaveBtn" style="margin-top:14px;">💾 حفظ إعدادات الضريبة</button>
+                    <div class="notes-saved-hint" id="taxSavedHint"></div>
+                </div>
+                </div><!-- /tax panel -->
 
                 <!-- ===== Cash & stock panel ===== -->
                 <div class="settings-panel" data-settings-panel="cashstock">
@@ -829,46 +838,99 @@
                         <span id="loyaltyStatusBadge" class="loyalty-status-badge">غير مُفعّل</span>
                     </div>
                     <div id="loyaltyBody" style="display:none;">
-                        <div class="loyalty-grid">
-                            <div class="form-group">
-                                <label>اكسب نقطة لكل (₪)</label>
-                                <input type="number" id="loyaltyEarnPer" min="1" step="1" placeholder="10">
-                            </div>
-                            <div class="form-group">
-                                <label>عدد النقاط = 1 ₪ خصم</label>
-                                <input type="number" id="loyaltyRedeemRate" min="1" step="1" placeholder="100">
-                            </div>
-                            <div class="form-group">
-                                <label>أقل نقاط للاستبدال</label>
-                                <input type="number" id="loyaltyMinRedeem" min="0" step="1" placeholder="100">
+                        <!-- Step 1: program type -->
+                        <div class="loyalty-step">
+                            <h4>1️⃣ نوع البرنامج</h4>
+                            <div class="loyalty-mode-btns" id="loyaltyModeBtns">
+                                <button type="button" class="loyalty-mode-btn active" data-mode="longterm">♾️ برنامج دائم</button>
+                                <button type="button" class="loyalty-mode-btn" data-mode="campaign">📅 حملة محدّدة بمدة</button>
                             </div>
                         </div>
-                        <div class="loyalty-rewards-block">
-                            <h4>🎁 الجوائز / المكافآت</h4>
-                            <p class="stats-hint">جوائز يستبدلها العميل بنقاطه (خصم أو هدية).</p>
-                            <table class="data-table"><thead><tr><th>الجائزة</th><th>النوع</th><th>التكلفة (نقاط)</th><th>القيمة</th><th></th></tr></thead>
-                                <tbody id="loyaltyRewardsBody"></tbody></table>
-                            <div class="reward-add-row">
-                                <input type="text" id="rewardName" placeholder="اسم الجائزة">
-                                <select id="rewardType"><option value="discount">خصم (₪)</option><option value="prize">هدية</option></select>
-                                <input type="number" id="rewardCost" min="1" placeholder="نقاط">
-                                <input type="text" id="rewardValue" placeholder="القيمة / الوصف">
-                                <button class="btn-secondary" id="addRewardBtn">+ إضافة جائزة</button>
+                        <!-- Step 2: earn rate -->
+                        <div class="loyalty-step">
+                            <h4>2️⃣ اكتساب النقاط</h4>
+                            <div class="loyalty-grid">
+                                <div class="form-group">
+                                    <label>اكسب نقطة لكل (₪) صرف</label>
+                                    <input type="number" id="loyaltyEarnPer" min="1" step="1" placeholder="10">
+                                </div>
                             </div>
                         </div>
-                        <div class="loyalty-raffle-block">
-                            <h4>🎲 السحب العشوائي</h4>
-                            <p class="stats-hint">اسحب فائزاً أو أكثر عشوائياً للفوز بجائزة (من بين العملاء الذين لديهم نقاط).</p>
-                            <div class="reward-add-row">
-                                <input type="text" id="rafflePrize" placeholder="الجائزة (مثال: قسيمة 100₪)">
-                                <input type="number" id="raffleWinners" min="1" step="1" value="1" title="عدد الفائزين" style="width:90px;" placeholder="عدد الفائزين">
-                                <button class="btn-primary" id="drawRaffleBtn">🎲 اسحب الفائزين</button>
+                        <!-- Step 3: what points do (mechanism) -->
+                        <div class="loyalty-step">
+                            <h4>3️⃣ ماذا تفعل النقاط؟</h4>
+                            <div class="loyalty-mech-btns" id="loyaltyMechanismBtns">
+                                <button type="button" class="loyalty-mech-btn" data-mech="none">🚫 لا شيء (عرض فقط)</button>
+                                <button type="button" class="loyalty-mech-btn active" data-mech="purchase">🛒 استبدال عند الشراء</button>
+                                <button type="button" class="loyalty-mech-btn" data-mech="prizes">🎁 جوائز</button>
+                                <button type="button" class="loyalty-mech-btn" data-mech="draw">🎲 سحب عشوائي</button>
                             </div>
-                            <div id="raffleResult" class="raffle-result"></div>
+
+                            <!-- Purchase sub-config -->
+                            <div class="mech-box" id="mechPurchaseBox">
+                                <p class="stats-hint">يستبدل العميل نقاطه كخصم مباشر على الفاتورة عند الدفع.</p>
+                                <div class="loyalty-grid">
+                                    <div class="form-group">
+                                        <label>عدد النقاط = 1 ₪ خصم</label>
+                                        <input type="number" id="loyaltyRedeemRate" min="1" step="1" placeholder="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>أقل نقاط للاستبدال</label>
+                                        <input type="number" id="loyaltyMinRedeem" min="0" step="1" placeholder="100">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Prizes sub-config -->
+                            <div class="mech-box" id="mechPrizesBox" style="display:none;">
+                                <p class="stats-hint">جوائز يستبدلها العميل بنقاطه (خصم أو هدية)، بالإضافة إلى جائزة كبرى لصاحب أعلى نقاط.</p>
+                                <table class="data-table"><thead><tr><th>الجائزة</th><th>النوع</th><th>التكلفة (نقاط)</th><th>القيمة</th><th></th></tr></thead>
+                                    <tbody id="loyaltyRewardsBody"></tbody></table>
+                                <div class="reward-add-row">
+                                    <input type="text" id="rewardName" placeholder="اسم الجائزة">
+                                    <select id="rewardType"><option value="discount-pct">خصم (%)</option><option value="discount">خصم (₪)</option><option value="prize">هدية</option></select>
+                                    <input type="number" id="rewardCost" min="1" placeholder="نقاط">
+                                    <input type="text" id="rewardValue" placeholder="القيمة (مثال: 20 لـ 20٪ أو ₪ أو وصف الهدية)">
+                                    <button class="btn-secondary" id="addRewardBtn">+ إضافة جائزة</button>
+                                </div>
+                                <div class="form-group" style="margin-top:10px;">
+                                    <label>🏆 الجائزة الكبرى (صاحب أعلى نقاط يفوز بها)</label>
+                                    <input type="text" id="loyaltyGrandPrize" placeholder="مثال: سيارة / هاتف / قسيمة كبرى">
+                                </div>
+                            </div>
+
+                            <!-- Draw sub-config -->
+                            <div class="mech-box" id="mechDrawBox" style="display:none;">
+                                <p class="stats-hint">اسحب فائزاً أو أكثر — عشوائياً أو الأعلى نقاطاً — من العملاء المؤهّلين.</p>
+                                <div class="loyalty-grid">
+                                    <div class="form-group">
+                                        <label>أقل نقاط للتأهّل للدخول</label>
+                                        <input type="number" id="loyaltyMinEntry" min="0" step="1" placeholder="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>عدد الفائزين</label>
+                                        <input type="number" id="raffleWinners" min="1" step="1" value="1" placeholder="1">
+                                    </div>
+                                    <div class="form-group full-width">
+                                        <label>طريقة الاختيار</label>
+                                        <div class="draw-by-btns" id="drawByBtns">
+                                            <button type="button" class="draw-by-btn active" data-drawby="random">🎲 عشوائي</button>
+                                            <button type="button" class="draw-by-btn" data-drawby="top">🏆 الأعلى نقاطاً</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="reward-add-row">
+                                    <input type="text" id="rafflePrize" placeholder="الجائزة (مثال: قسيمة 100₪)">
+                                    <button class="btn-primary" id="drawRaffleBtn">🎲 اسحب الفائزين الآن</button>
+                                </div>
+                                <div id="raffleResult" class="raffle-result"></div>
+                            </div>
                         </div>
-                        <div class="loyalty-campaign-block">
-                            <h4>📅 حملة الولاء (تاريخ بداية ونهاية)</h4>
-                            <p class="stats-hint">حدّد فترة للحملة. عند انتهائها تلقائياً: يتم تنفيذ الإجراء المختار (سحب فائزين و/أو تحويل النقاط إلى رصيد للعملاء) ثم تصفير جميع النقاط.</p>
+
+                        <!-- Step 4: campaign period (only for campaign mode) -->
+                        <div class="loyalty-step" id="loyaltyCampaignSection" style="display:none;">
+                            <h4>4️⃣ مدة الحملة والإجراء عند الانتهاء</h4>
+                            <p class="stats-hint">عند انتهاء الحملة تلقائياً: يُنفَّذ الإجراء المختار (سحب فائزين و/أو تحويل النقاط إلى رصيد للعملاء) ثم تُصفَّر جميع النقاط.</p>
                             <div class="loyalty-grid">
                                 <div class="form-group">
                                     <label>اسم الحملة</label>
@@ -890,10 +952,11 @@
                                         <button type="button" class="campaign-action-btn" data-action="reset">♻️ تصفير فقط (بدون مكافأة)</button>
                                     </div>
                                     <input type="hidden" id="campaignEndAction" value="draw">
-                                    <p class="stats-hint">اختر «سحب فائزين» و/أو «تحويل رصيد» معاً، أو «تصفير فقط» وحده. تُصفَّر النقاط تلقائياً بعد التنفيذ في كل الحالات.</p>
+                                    <p class="stats-hint">اختر «سحب فائزين» و/أو «تحويل رصيد» معاً، أو «تصفير فقط» وحده.</p>
                                 </div>
                             </div>
                         </div>
+
                         <div class="loyalty-reset-block">
                             <h4>♻️ تصفير النقاط</h4>
                             <p class="stats-hint">تصفير نقاط جميع العملاء يدوياً (يمكن أيضاً تصفير نقاط عميل واحد من ملفه الشخصي).</p>
@@ -1166,6 +1229,35 @@
             <div class="confirm-actions">
                 <button class="btn-primary" id="confirmYesBtn">نعم</button>
                 <button class="btn-secondary" id="confirmNoBtn">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loyalty reward picker (multi-select) -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="rewardModal" style="display:none;">
+        <div class="modal-content">
+            <div class="confirm-icon">🎁</div>
+            <h3 id="rewardModalTitle">جوائز الولاء المتاحة</h3>
+            <p id="rewardModalSub" style="color:#667;margin:0 0 10px;"></p>
+            <div id="rewardModalList" class="reward-picker-list"></div>
+            <div id="rewardModalSummary" class="reward-picker-summary"></div>
+            <div class="confirm-actions">
+                <button class="btn-primary" id="rewardModalConfirm">تأكيد الاختيار</button>
+                <button class="btn-secondary" id="rewardModalClose">إلغاء</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic input prompt (Electron blocks native prompt()) -->
+    <div class="modal-overlay" role="dialog" aria-modal="true" id="promptModal" style="display:none;">
+        <div class="modal-content confirm-modal">
+            <div class="confirm-icon" id="promptIcon">✏️</div>
+            <h3 id="promptTitle">إدخال</h3>
+            <p id="promptMessage" style="white-space:pre-line;"></p>
+            <input type="text" id="promptInput" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin:4px 0 12px;font-size:15px;">
+            <div class="confirm-actions">
+                <button class="btn-primary" id="promptOkBtn">تأكيد</button>
+                <button class="btn-secondary" id="promptCancelBtn">إلغاء</button>
             </div>
         </div>
     </div>

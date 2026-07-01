@@ -14,7 +14,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '3.1.0';
+var APP_VERSION = '3.1.1';
 
 // ============ STATE ============
 var products = [];
@@ -42,6 +42,8 @@ var selectedPayment = 'cash';
 var pendingCustomer = null;
 var pendingRedeem = null; // {points, value} loyalty redemption applied to current sale
 var pendingCreditUse = 0; // store-credit (₪) applied to current sale
+var pendingPrizes = []; // [{id, name, cost, value}] loyalty gifts to hand over; points deducted on checkout
+var appliedRewardIds = []; // reward ids currently selected for this sale (prizes + discounts)
 var currentPage = 'sales';
 var currentUser = null;
 var licenseValid = false;
@@ -466,6 +468,29 @@ function showAlert(message, opts) {
     showConfirm(message, null, opts);
 }
 function _closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; _confirmCb = null; }
+
+// In-app text prompt (Electron blocks window.prompt). cb(value) fires only on confirm.
+var _promptCb = null;
+function showPrompt(message, opts, cb) {
+    opts = opts || {};
+    _promptCb = cb || null;
+    document.getElementById('promptIcon').textContent = opts.icon || '✏️';
+    document.getElementById('promptTitle').textContent = opts.title || 'إدخال';
+    document.getElementById('promptMessage').textContent = message || '';
+    var input = document.getElementById('promptInput');
+    input.type = opts.inputType || 'text';
+    input.value = (opts.default != null ? String(opts.default) : '');
+    input.placeholder = opts.placeholder || '';
+    document.getElementById('promptModal').style.display = 'flex';
+    setTimeout(function () { try { input.focus(); input.select(); } catch (e) {} }, 50);
+}
+function _closePrompt() { document.getElementById('promptModal').style.display = 'none'; _promptCb = null; }
+function _promptConfirm() {
+    var v = document.getElementById('promptInput').value;
+    var cb = _promptCb;
+    _closePrompt();
+    if (cb) cb(v);
+}
 
 // ============ ROLE-BASED VISIBILITY ============
 function isAdmin() {
@@ -1207,7 +1232,7 @@ function renderCart() {
     var container = document.getElementById('cartItems');
     var checkoutBtn = document.getElementById('checkoutBtn');
 
-    if (cart.length === 0) {
+    if (cart.length === 0 && pendingPrizes.length === 0) {
         container.innerHTML = '<div class="cart-empty"><span>\uD83D\uDED2</span><p>السلة فارغة</p></div>';
         checkoutBtn.disabled = true;
         updateTotals();
@@ -1232,10 +1257,32 @@ function renderCart() {
         html += '<button class="cart-item-remove" aria-label="حذف" onclick="removeCartItem(\'' + ek + '\')">\u2715</button>';
         html += '</div>';
     }
+    // Loyalty gifts: shown as documented 0.00 lines; points are deducted at checkout.
+    for (var p = 0; p < pendingPrizes.length; p++) {
+        var pr = pendingPrizes[p];
+        html += '<div class="cart-item cart-item-prize">';
+        html += '<div class="cart-item-info">';
+        html += '<div class="cart-item-name">🎁 ' + escapeHtml(pr.name) + '</div>';
+        html += '<div class="cart-item-variant">جائزة ولاء (' + (pr.cost || 0) + ' نقطة)</div>';
+        html += '<div class="cart-item-price">\u20AA0.00</div>';
+        html += '</div>';
+        html += '<button class="cart-item-remove" aria-label="حذف" onclick="removePendingPrize(' + p + ')">\u2715</button>';
+        html += '</div>';
+    }
 
     container.innerHTML = html;
     checkoutBtn.disabled = false;
     updateTotals();
+}
+
+function removePendingPrize(index) {
+    var removed = pendingPrizes[index];
+    pendingPrizes.splice(index, 1);
+    if (removed && removed.id != null) {
+        appliedRewardIds = appliedRewardIds.filter(function (x) { return x !== removed.id; });
+    }
+    updateAttachedCustomerLabel();
+    renderCart();
 }
 
 function changeCartQty(key, delta) {
@@ -1309,7 +1356,7 @@ function updateTotals() {
 // ============ CHECKOUT (ATOMIC BATCH) ============
 // Entry point: show a themed confirmation with the total before finishing the sale.
 function checkout() {
-    if (cart.length === 0) return;
+    if (cart.length === 0 && pendingPrizes.length === 0) return;
     if (!licenseValid) { showAlert('الترخيص منتهي', { icon: '⛔', title: 'تنبيه' }); return; }
 
     var st = computeSaleTotals();
@@ -1354,7 +1401,7 @@ function checkout() {
 }
 
 function doCheckout() {
-    if (cart.length === 0) return;
+    if (cart.length === 0 && pendingPrizes.length === 0) return;
     if (!licenseValid) { alert('الترخيص منتهي'); return; }
 
     var st = computeSaleTotals();
@@ -1379,6 +1426,14 @@ function doCheckout() {
             cost: cart[i].cost || 0,
             qty: cart[i].qty,
             total: cart[i].price * cart[i].qty
+        });
+    }
+    // Loyalty gifts documented on the bill as 0.00 lines (points deducted on success).
+    for (var pz = 0; pz < pendingPrizes.length; pz++) {
+        items.push({
+            name: '🎁 ' + pendingPrizes[pz].name,
+            color: '', size: '', price: 0, cost: 0, qty: 1, total: 0,
+            isReward: true, rewardCost: pendingPrizes[pz].cost || 0
         });
     }
 
@@ -1448,7 +1503,12 @@ function doCheckout() {
                 recordLoyaltyTxn(billData.customer, earned, 'شراء فاتورة ' + billNumber, billNumber);
                 showAlert('تم منح ' + earned + ' نقطة للعميل', { icon: '⭐', title: 'نقاط الولاء' });
             }
+            for (var pz2 = 0; pz2 < pendingPrizes.length; pz2++) {
+                recordLoyaltyTxn(billData.customer, -(pendingPrizes[pz2].cost || 0), 'جائزة ولاء: ' + pendingPrizes[pz2].name + ' (فاتورة ' + billNumber + ')', billNumber);
+            }
         }
+        pendingPrizes = [];
+        appliedRewardIds = [];
         cart = [];
         renderCart();
         document.getElementById('discountInput').value = 0;
@@ -3093,6 +3153,19 @@ function setupEventListeners() {
     if (confirmModal) confirmModal.addEventListener('click', function (e) {
         if (e.target === this) _closeConfirm();
     });
+    var promptOkBtn = document.getElementById('promptOkBtn');
+    if (promptOkBtn) promptOkBtn.addEventListener('click', _promptConfirm);
+    var promptCancelBtn = document.getElementById('promptCancelBtn');
+    if (promptCancelBtn) promptCancelBtn.addEventListener('click', _closePrompt);
+    var promptInput = document.getElementById('promptInput');
+    if (promptInput) promptInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); _promptConfirm(); }
+        else if (e.key === 'Escape') { e.preventDefault(); _closePrompt(); }
+    });
+    var promptModal = document.getElementById('promptModal');
+    if (promptModal) promptModal.addEventListener('click', function (e) {
+        if (e.target === this) _closePrompt();
+    });
 
     // Statistics page
     var statsRunBtn = document.getElementById('statsRunBtn');
@@ -3266,6 +3339,21 @@ function setupEventListeners() {
         var b = e.target.closest('.campaign-action-btn');
         if (b) toggleCampaignAction(b.getAttribute('data-action'));
     });
+    var loyaltyModeBtns = document.getElementById('loyaltyModeBtns');
+    if (loyaltyModeBtns) loyaltyModeBtns.addEventListener('click', function (e) {
+        var b = e.target.closest('.loyalty-mode-btn');
+        if (b) setLoyaltyMode(b.getAttribute('data-mode'));
+    });
+    var loyaltyMechanismBtns = document.getElementById('loyaltyMechanismBtns');
+    if (loyaltyMechanismBtns) loyaltyMechanismBtns.addEventListener('click', function (e) {
+        var b = e.target.closest('.loyalty-mech-btn');
+        if (b) setMechanism(b.getAttribute('data-mech'));
+    });
+    var drawByBtns = document.getElementById('drawByBtns');
+    if (drawByBtns) drawByBtns.addEventListener('click', function (e) {
+        var b = e.target.closest('.draw-by-btn');
+        if (b) setDrawBy(b.getAttribute('data-drawby'));
+    });
     loadLoyaltyEditor();
 
     // Settings sub-navigation
@@ -3282,14 +3370,12 @@ function setupEventListeners() {
         if (b) switchReportsTab(b.getAttribute('data-reports-tab'));
     });
 
-    // Add-ons (optional features) wiring
+    // Add-ons (optional features) wiring. Tax has its own dedicated settings tab
+    // that only appears once the feature is enabled AND saved (no inline flicker).
     var addonsSaveBtn = document.getElementById('addonsSaveBtn');
     if (addonsSaveBtn) addonsSaveBtn.addEventListener('click', saveAddons);
-    var featTaxCb = document.getElementById('feat-tax');
-    if (featTaxCb) featTaxCb.addEventListener('change', function () {
-        var tb = document.getElementById('taxConfigBlock');
-        if (tb) tb.style.display = featTaxCb.checked ? '' : 'none';
-    });
+    var taxSaveBtn = document.getElementById('taxSaveBtn');
+    if (taxSaveBtn) taxSaveBtn.addEventListener('click', saveTaxSettings);
     loadAddonsEditor();
 
     // Suppliers / Purchase orders
@@ -3401,6 +3487,12 @@ function setupEventListeners() {
     });
     var redeemPointsBtn = document.getElementById('redeemPointsBtn');
     if (redeemPointsBtn) redeemPointsBtn.addEventListener('click', redeemPoints);
+    var redeemRewardBtn = document.getElementById('redeemRewardBtn');
+    if (redeemRewardBtn) redeemRewardBtn.addEventListener('click', redeemReward);
+    var rewardModalClose = document.getElementById('rewardModalClose');
+    if (rewardModalClose) rewardModalClose.addEventListener('click', closeRewardModal);
+    var rewardModalConfirm = document.getElementById('rewardModalConfirm');
+    if (rewardModalConfirm) rewardModalConfirm.addEventListener('click', applySelectedRewards);
     var useCreditBtn = document.getElementById('useCreditBtn');
     if (useCreditBtn) useCreditBtn.addEventListener('click', useStoreCredit);
 }
@@ -3408,26 +3500,44 @@ function updateAttachedCustomerLabel() {
     var lbl = document.getElementById('attachedCustomerLabel');
     var redeemBtn = document.getElementById('redeemPointsBtn');
     var creditBtn = document.getElementById('useCreditBtn');
+    var attachBtn = document.getElementById('attachCustomerBtn');
     var L = getLoyalty();
     if (!lbl) return;
     if (pendingCustomer) {
+        if (attachBtn) attachBtn.style.display = 'none'; // hide "ربط عميل" once a client is attached
         lbl.style.display = '';
         var cust = findCustomerByKey(customerKey(pendingCustomer));
         var pts = cust ? (cust.points || 0) : 0;
-        var ptsTxt = L.enabled ? ' — ' + pts + ' نقطة' : '';
+        var name = pendingCustomer.name || pendingCustomer.phone || 'عميل';
+        var ptsTxt = L.enabled ? (' - ' + pts + ' نقطة') : '';
         var credit = (typeof getCustomerCredit === 'function') ? getCustomerCredit(pendingCustomer) : 0;
         var creditOn = isFeatureOn('storeCredit');
-        var creditTxt = (creditOn && credit > 0) ? ' — رصيد ₪' + credit.toFixed(2) : '';
-        var redeemTxt = pendingRedeem ? ' <span style="color:#27ae60;">(خصم نقاط ₪' + pendingRedeem.value.toFixed(2) + ')</span>' : '';
+        var creditTxt = (creditOn && credit > 0) ? ' • رصيد ₪' + credit.toFixed(2) : '';
+        var redeemTxt = pendingRedeem ? ' <span style="color:#27ae60;">(خصم ₪' + pendingRedeem.value.toFixed(2) + ')</span>' : '';
         var creditUseTxt = pendingCreditUse > 0 ? ' <span style="color:#27ae60;">(رصيد ₪' + pendingCreditUse.toFixed(2) + ')</span>' : '';
-        lbl.innerHTML = '👤 ' + escapeHtml(pendingCustomer.name || pendingCustomer.phone || 'عميل') + ptsTxt + creditTxt + redeemTxt + creditUseTxt +
-            ' <a href="#" onclick="clearAttachedCustomer();return false;" style="color:#e74c3c;">✕</a>';
-        if (redeemBtn) redeemBtn.style.display = (L.enabled && pts >= L.minRedeem && pts > 0) ? '' : 'none';
+        // Render the attached customer as a button-styled chip: "👤 <name> - <points>"
+        lbl.innerHTML = '<span class="attached-customer-chip">👤 ' + escapeHtml(name) + ptsTxt + creditTxt + redeemTxt + creditUseTxt +
+            ' <a href="#" onclick="clearAttachedCustomer();return false;" class="attached-customer-remove" title="إزالة العميل">✕</a></span>';
+        if (redeemBtn) redeemBtn.style.display = (L.enabled && L.mechanism === 'purchase' && pts >= L.minRedeem && pts > 0) ? '' : 'none';
+        var rewardBtn = document.getElementById('redeemRewardBtn');
+        if (rewardBtn) {
+            // Button stays active whenever the prizes mechanism has any rewards, so the cashier can always
+            // open the list to add/remove/change selections (per-reward affordability is enforced inside).
+            var hasRewards = (L.enabled && L.mechanism === 'prizes' && (L.rewards || []).length > 0);
+            rewardBtn.style.display = hasRewards ? '' : 'none';
+            if (hasRewards) {
+                var selCount = appliedRewardIds.length;
+                rewardBtn.textContent = selCount ? ('🎁 الجوائز (' + selCount + ' محدد)') : '🎁 الجوائز والعروض';
+            }
+        }
         if (creditBtn) creditBtn.style.display = (creditOn && credit > 0 && pendingCreditUse <= 0) ? '' : 'none';
     } else {
+        if (attachBtn) attachBtn.style.display = ''; // show "ربط عميل" again when no client attached
         lbl.style.display = 'none';
         lbl.innerHTML = '';
         if (redeemBtn) redeemBtn.style.display = 'none';
+        var rwb = document.getElementById('redeemRewardBtn');
+        if (rwb) rwb.style.display = 'none';
         if (creditBtn) creditBtn.style.display = 'none';
     }
 }
@@ -3438,39 +3548,160 @@ function useStoreCredit() {
     var t = computeSaleTotals();
     var beforeCredit = t.total + (t.creditUse || 0);
     var apply = Math.min(credit, beforeCredit);
-    var ans = prompt('رصيد العميل: ₪' + credit.toFixed(2) + '\nالمطلوب: ₪' + beforeCredit.toFixed(2) + '\nكم تريد استخدام من الرصيد؟', apply.toFixed(2));
-    if (ans === null) return;
-    var v = parseFloat(ans) || 0;
-    if (v <= 0) { pendingCreditUse = 0; }
-    else { pendingCreditUse = Math.min(v, credit, beforeCredit); }
-    updateAttachedCustomerLabel();
-    updateTotals();
-    renderCart();
+    showPrompt('رصيد العميل: ₪' + credit.toFixed(2) + '\nالمطلوب: ₪' + beforeCredit.toFixed(2) + '\nكم تريد استخدام من الرصيد؟', { title: 'استخدام الرصيد', icon: '💳', inputType: 'number', default: apply.toFixed(2) }, function (ans) {
+        var v = parseFloat(ans) || 0;
+        if (v <= 0) { pendingCreditUse = 0; }
+        else { pendingCreditUse = Math.min(v, credit, beforeCredit); }
+        updateAttachedCustomerLabel();
+        updateTotals();
+        renderCart();
+    });
 }
 function redeemPoints() {
     if (!pendingCustomer) return;
     var L = getLoyalty();
     var cust = findCustomerByKey(customerKey(pendingCustomer));
-    var pts = cust ? (cust.points || 0) : 0;
-    if (pts < L.minRedeem || pts <= 0) { showAlert('لا توجد نقاط كافية للاستبدال', { icon: '⚠️', title: 'تنبيه' }); return; }
+    var pts = availableLoyaltyPoints('discount');
+    if (pts < L.minRedeem || pts <= 0) { showAlert('لا توجد نقاط كافية للاستبدال (المتبقي ' + pts + ')', { icon: '⚠️', title: 'تنبيه' }); return; }
     var maxValue = pts / L.redeemRate;
-    var ans = prompt('للعميل ' + pts + ' نقطة = خصم حتى ₪' + maxValue.toFixed(2) + '\nكم نقطة تريد استبدالها؟ (مضاعفات ' + L.redeemRate + ')', String(pts));
-    if (ans === null) return;
-    var usePts = parseInt(ans, 10) || 0;
-    if (usePts <= 0 || usePts > pts) { showAlert('عدد نقاط غير صالح', { icon: '⚠️', title: 'تنبيه' }); return; }
-    var value = Math.floor(usePts / L.redeemRate * 100) / 100;
-    if (value <= 0) { showAlert('النقاط أقل من اللازم لخصم ₪1', { icon: '⚠️', title: 'تنبيه' }); return; }
-    var usedPts = Math.round(value * L.redeemRate);
-    pendingRedeem = { points: usedPts, value: value };
+    showPrompt('للعميل ' + pts + ' نقطة = خصم حتى ₪' + maxValue.toFixed(2) + '\nكم نقطة تريد استبدالها؟ (مضاعفات ' + L.redeemRate + ')', { title: 'استبدال النقاط', icon: '⭐', inputType: 'number', default: String(pts) }, function (ans) {
+        var usePts = parseInt(ans, 10) || 0;
+        if (usePts <= 0 || usePts > pts) { showAlert('عدد نقاط غير صالح', { icon: '⚠️', title: 'تنبيه' }); return; }
+        var value = Math.floor(usePts / L.redeemRate * 100) / 100;
+        if (value <= 0) { showAlert('النقاط أقل من اللازم لخصم ₪1', { icon: '⚠️', title: 'تنبيه' }); return; }
+        var usedPts = Math.round(value * L.redeemRate);
+        pendingRedeem = { points: usedPts, value: value };
+        updateAttachedCustomerLabel();
+        renderCart();
+        showAlert('تم تطبيق خصم نقاط ₪' + value.toFixed(2), { icon: '⭐', title: 'استبدال النقاط' });
+    });
+}
+function rewardKey(r, index) { return (r && r.id != null) ? r.id : ('idx' + index); }
+function rewardTail(r) {
+    return r.type === 'prize'
+        ? ('🎉 ' + (r.value || 'هدية'))
+        : (r.type === 'discount-pct' ? ('💸 خصم ' + (r.value || '') + '٪') : ('💸 خصم ₪' + (r.value || '')));
+}
+function redeemReward() {
+    if (!pendingCustomer) return;
+    var L = getLoyalty();
+    var cust = findCustomerByKey(customerKey(pendingCustomer));
+    var pts = cust ? (cust.points || 0) : 0;
+    var rewards = L.rewards || [];
+    var modal = document.getElementById('rewardModal');
+    var list = document.getElementById('rewardModalList');
+    var sub = document.getElementById('rewardModalSub');
+    if (!modal || !list) return;
+    if (sub) sub.textContent = (pendingCustomer.name || pendingCustomer.phone || 'عميل') + ' — رصيد النقاط: ' + pts;
+    if (!rewards.length) {
+        list.innerHTML = '<p style="text-align:center;color:#999;">لا توجد جوائز أو عروض مُعرّفة</p>';
+    } else {
+        list.innerHTML = '';
+        rewards.forEach(function (r, i) {
+            var key = rewardKey(r, i);
+            var checked = appliedRewardIds.indexOf(key) >= 0;
+            var row = document.createElement('label');
+            row.className = 'reward-check-row';
+            row.innerHTML =
+                '<input type="checkbox" class="reward-check" data-key="' + escapeHtml(String(key)) + '" data-cost="' + (r.cost || 0) + '"' + (checked ? ' checked' : '') + '>' +
+                '<span class="reward-check-body"><strong>' + escapeHtml(r.name) + '</strong>' +
+                '<span class="reward-check-meta">' + escapeHtml(rewardTail(r)) + ' • ' + (r.cost || 0) + ' نقطة</span></span>';
+            list.appendChild(row);
+        });
+        list.querySelectorAll('.reward-check').forEach(function (cb) {
+            cb.addEventListener('change', _recalcRewardSelection);
+        });
+    }
+    modal.style.display = 'flex';
+    _recalcRewardSelection();
+}
+// Live-validate the checklist against the customer's point balance; disable confirm when over budget.
+function _recalcRewardSelection() {
+    var cust = pendingCustomer ? findCustomerByKey(customerKey(pendingCustomer)) : null;
+    var pts = cust ? (cust.points || 0) : 0;
+    var summary = document.getElementById('rewardModalSummary');
+    var confirmBtn = document.getElementById('rewardModalConfirm');
+    var boxes = document.querySelectorAll('#rewardModalList .reward-check');
+    var sum = 0, count = 0;
+    boxes.forEach(function (cb) { if (cb.checked) { sum += parseInt(cb.getAttribute('data-cost'), 10) || 0; count++; } });
+    var over = sum > pts;
+    if (summary) {
+        summary.innerHTML = 'المحدد: <strong>' + count + '</strong> عرض — <strong>' + sum + '</strong> / ' + pts + ' نقطة' +
+            (over ? ' <span style="color:#e74c3c;">(تجاوز الرصيد)</span>' : '');
+        summary.style.color = over ? '#e74c3c' : '#333';
+    }
+    if (confirmBtn) { confirmBtn.disabled = over; confirmBtn.style.opacity = over ? '0.5' : '1'; }
+}
+function closeRewardModal() { var m = document.getElementById('rewardModal'); if (m) m.style.display = 'none'; }
+// Points already committed on the current sale (gifts always accumulate; the discount slot holds at most one reward/redeem).
+function committedPrizePoints() {
+    var c = 0;
+    (pendingPrizes || []).forEach(function (p) { c += (p.cost || 0); });
+    return c;
+}
+function committedRedeemPoints() {
+    return pendingRedeem ? (pendingRedeem.points || 0) : 0;
+}
+// Points still spendable right now. A new discount replaces the existing discount slot, so exclude it when type==='discount'.
+function availableLoyaltyPoints(forType) {
+    var cust = pendingCustomer ? findCustomerByKey(customerKey(pendingCustomer)) : null;
+    var pts = cust ? (cust.points || 0) : 0;
+    var used = committedPrizePoints();
+    if (forType !== 'discount') used += committedRedeemPoints();
+    return pts - used;
+}
+// Rebuild pendingPrizes + pendingRedeem entirely from the checklist selection (idempotent, re-openable).
+function applySelectedRewards() {
+    if (!pendingCustomer) { closeRewardModal(); return; }
+    var L = getLoyalty();
+    var rewards = L.rewards || [];
+    var cust = findCustomerByKey(customerKey(pendingCustomer));
+    var pts = cust ? (cust.points || 0) : 0;
+    var checkedKeys = [];
+    document.querySelectorAll('#rewardModalList .reward-check').forEach(function (cb) {
+        if (cb.checked) checkedKeys.push(cb.getAttribute('data-key'));
+    });
+    // Map checked keys back to reward objects.
+    var chosen = [];
+    rewards.forEach(function (r, i) { if (checkedKeys.indexOf(String(rewardKey(r, i))) >= 0) chosen.push({ r: r, key: rewardKey(r, i) }); });
+    var totalCost = chosen.reduce(function (s, c) { return s + (c.r.cost || 0); }, 0);
+    if (totalCost > pts) { showAlert('مجموع النقاط المطلوبة (' + totalCost + ') يتجاوز رصيد العميل (' + pts + ')', { icon: '⚠️', title: 'تنبيه' }); return; }
+    // Rebuild prize list and aggregate the discount slot.
+    pendingPrizes = [];
+    appliedRewardIds = [];
+    var t = computeSaleTotals();
+    var base = t.total + (t.redeemValue || 0);
+    var discPoints = 0, discValue = 0, discNames = [];
+    chosen.forEach(function (c) {
+        var r = c.r;
+        appliedRewardIds.push(c.key);
+        if (r.type === 'prize') {
+            pendingPrizes.push({ id: c.key, name: r.name, cost: (r.cost || 0), value: r.value || '' });
+        } else {
+            var raw = String(r.value || '').trim();
+            var isPct = (r.type === 'discount-pct') || raw.indexOf('%') >= 0;
+            var val = isPct ? Math.round(base * (parseFloat(raw) || 0)) / 100 : (parseFloat(raw) || 0);
+            if (val > 0) { discPoints += (r.cost || 0); discValue += val; discNames.push(r.name); }
+        }
+    });
+    discValue = Math.min(discValue, base);
+    pendingRedeem = discValue > 0 ? { points: discPoints, value: Math.round(discValue * 100) / 100, reward: discNames.join(' + ') } : null;
+    closeRewardModal();
     updateAttachedCustomerLabel();
     renderCart();
-    showAlert('تم تطبيق خصم نقاط ₪' + value.toFixed(2), { icon: '⭐', title: 'استبدال النقاط' });
+    if (typeof updateTotals === 'function') updateTotals();
+    var msg = [];
+    if (pendingPrizes.length) msg.push('🎁 ' + pendingPrizes.length + ' جائزة');
+    if (pendingRedeem) msg.push('💸 خصم ₪' + pendingRedeem.value.toFixed(2));
+    showAlert(msg.length ? ('تم تطبيق: ' + msg.join(' • ') + ' — تُخصم النقاط عند إتمام البيع') : 'تم إلغاء جميع العروض', { icon: '🎁', title: 'جوائز الولاء' });
 }
 function clearAttachedCustomer() {
     if (selectedPayment === 'debt') return; // debt requires a customer
     pendingCustomer = null;
     pendingRedeem = null;
     pendingCreditUse = 0;
+    appliedRewardIds = [];
+    if (pendingPrizes.length) { pendingPrizes = []; renderCart(); } // gifts belong to the attached customer
     updateAttachedCustomerLabel();
     renderCart();
 }
@@ -3976,9 +4207,15 @@ function applyFeatureFlags() {
             }
         }
     }
-    // Tax config block visibility within add-ons panel
-    var taxBlock = document.getElementById('taxConfigBlock');
-    if (taxBlock) taxBlock.style.display = s.features.tax ? '' : 'none';
+    // Tax settings now live in a dedicated settings tab governed by the
+    // `feature-tax` class above (shown/hidden by saved state — no flicker).
+    // If tax was just turned off while its tab is open, fall back to add-ons.
+    if (!s.features.tax) {
+        var taxPanel = document.querySelector('[data-settings-panel="tax"]');
+        if (taxPanel && taxPanel.classList.contains('active') && typeof switchSettingsTab === 'function') {
+            switchSettingsTab('addons');
+        }
+    }
 }
 var _addonsEdit = null;
 function loadAddonsEditor() {
@@ -3991,8 +4228,6 @@ function loadAddonsEditor() {
     }
     var tp = document.getElementById('taxPercentInput'); if (tp) tp.value = s.taxPercent;
     var ti = document.getElementById('taxIncludedSelect'); if (ti) ti.value = s.taxIncluded ? 'true' : 'false';
-    var taxBlock = document.getElementById('taxConfigBlock');
-    if (taxBlock) taxBlock.style.display = s.features.tax ? '' : 'none';
 }
 function saveAddons() {
     var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah'];
@@ -4001,9 +4236,10 @@ function saveAddons() {
         var cb = document.getElementById('feat-' + keys[i]);
         features[keys[i]] = cb ? cb.checked : false;
     }
+    var s0 = getStoreConfig();
     var cfg = {
         features: features,
-        taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || 0,
+        taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || s0.taxPercent || 0,
         taxIncluded: (document.getElementById('taxIncludedSelect') || {}).value === 'true',
         businessType: features.restaurant ? 'restaurant' : 'retail'
     };
@@ -4011,7 +4247,28 @@ function saveAddons() {
     saveStoreConfig(cfg, function () {
         storeConfig = Object.assign({ recordType: 'store-config' }, cfg);
         applyFeatureFlags();
-        if (hint) { hint.textContent = '✅ تم حفظ الإضافات'; setTimeout(function () { hint.textContent = ''; }, 3000); }
+        if (hint) {
+            hint.textContent = features.tax ? '✅ تم حفظ الإضافات — تبويب «الضريبة» متاح الآن بالأعلى' : '✅ تم حفظ الإضافات';
+            setTimeout(function () { hint.textContent = ''; }, 3500);
+        }
+        if (typeof renderProducts === 'function') renderProducts();
+        if (typeof updateTotals === 'function') updateTotals();
+    });
+}
+// Dedicated save for the Tax tab (percent + inclusion method), independent of add-ons.
+function saveTaxSettings() {
+    var s = getStoreConfig();
+    var cfg = {
+        features: Object.assign({}, s.features, { tax: true }),
+        taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || 0,
+        taxIncluded: (document.getElementById('taxIncludedSelect') || {}).value === 'true',
+        businessType: s.businessType
+    };
+    var hint = document.getElementById('taxSavedHint');
+    saveStoreConfig(cfg, function () {
+        storeConfig = Object.assign({ recordType: 'store-config' }, cfg);
+        applyFeatureFlags();
+        if (hint) { hint.textContent = '✅ تم حفظ إعدادات الضريبة'; setTimeout(function () { hint.textContent = ''; }, 3000); }
         if (typeof renderProducts === 'function') renderProducts();
         if (typeof updateTotals === 'function') updateTotals();
     });
@@ -4594,10 +4851,15 @@ function addHookahToCart(i) {
 // ============ LOYALTY ENGINE (نظام النقاط والولاء) ============
 var DEFAULT_LOYALTY_CONFIG = {
     enabled: false,
+    mode: 'longterm',    // 'longterm' (permanent program) | 'campaign' (time-boxed)
     earnPer: 10,      // earn 1 point for every X ₪ spent
-    redeemRate: 100,  // 100 points = 1 ₪ discount
-    minRedeem: 100,   // minimum points required to redeem
-    rewards: [],      // [{id,name,cost,type:'discount'|'prize',value}]
+    mechanism: 'purchase', // 'none' (display only) | 'purchase' (redeem as discount) | 'prizes' (rewards catalog) | 'draw' (random/top draw)
+    redeemRate: 100,  // 100 points = 1 ₪ discount (purchase/prizes)
+    minRedeem: 100,   // minimum points required to redeem (purchase)
+    rewards: [],      // [{id,name,cost,type:'discount'|'prize',value}] (prizes)
+    grandPrize: '',   // prizes: "most points wins" grand prize name ('' = none)
+    minEntryPoints: 0,// draw: minimum points a customer needs to be eligible
+    drawBy: 'random', // draw: 'random' | 'top' (highest points win)
     raffles: [],      // [{id,prize,winners:[{name,phone}],status,drawnAt}]
     raffleWinners: 1, // how many winners each draw picks
     campaignName: '',     // optional campaign label
@@ -4608,12 +4870,18 @@ var DEFAULT_LOYALTY_CONFIG = {
 };
 function getLoyalty() {
     var c = loyaltyConfig || {};
+    var rewards = c.rewards || [];
     return {
         enabled: !!c.enabled,
+        mode: (c.mode === 'campaign' || c.mode === 'longterm') ? c.mode : (c.campaignEnd ? 'campaign' : 'longterm'),
         earnPer: (c.earnPer > 0) ? c.earnPer : DEFAULT_LOYALTY_CONFIG.earnPer,
+        mechanism: (['none', 'purchase', 'prizes', 'draw'].indexOf(c.mechanism) !== -1) ? c.mechanism : (rewards.length ? 'prizes' : 'purchase'),
         redeemRate: (c.redeemRate > 0) ? c.redeemRate : DEFAULT_LOYALTY_CONFIG.redeemRate,
         minRedeem: (c.minRedeem != null) ? c.minRedeem : DEFAULT_LOYALTY_CONFIG.minRedeem,
-        rewards: c.rewards || [],
+        rewards: rewards,
+        grandPrize: c.grandPrize || '',
+        minEntryPoints: (c.minEntryPoints > 0) ? c.minEntryPoints : 0,
+        drawBy: (c.drawBy === 'top') ? 'top' : 'random',
         raffles: c.raffles || [],
         raffleWinners: (c.raffleWinners > 0) ? c.raffleWinners : 1,
         campaignName: c.campaignName || '',
@@ -4640,9 +4908,12 @@ function recordLoyaltyTxn(customer, delta, reason, billNumber) {
 function saveLoyaltyConfig(cfg, onOk) {
     var rec = {
         recordType: 'loyalty-config',
-        enabled: !!cfg.enabled, earnPer: cfg.earnPer, redeemRate: cfg.redeemRate,
-        minRedeem: cfg.minRedeem, rewards: cfg.rewards || [], raffles: cfg.raffles || [],
-        raffleWinners: cfg.raffleWinners || 1,
+        enabled: !!cfg.enabled, mode: cfg.mode || 'longterm', earnPer: cfg.earnPer,
+        mechanism: cfg.mechanism || 'purchase',
+        redeemRate: cfg.redeemRate, minRedeem: cfg.minRedeem,
+        rewards: cfg.rewards || [], grandPrize: cfg.grandPrize || '',
+        minEntryPoints: cfg.minEntryPoints || 0, drawBy: cfg.drawBy || 'random',
+        raffles: cfg.raffles || [], raffleWinners: cfg.raffleWinners || 1,
         campaignName: cfg.campaignName || '', campaignStart: cfg.campaignStart || '',
         campaignEnd: cfg.campaignEnd || '', campaignEndAction: cfg.campaignEndAction || 'draw',
         campaignProcessedFor: cfg.campaignProcessedFor || '',
@@ -4723,9 +4994,20 @@ function drawRaffle() {
     logActivity('raffle', 'سحب عشوائي (' + winners.length + ' فائز): ' + prize, { winners: winners, prize: prize });
 }
 function pickRaffleWinners(n) {
-    var pool = customerProfileList('').filter(function (c) { return (c.points || 0) > 0; });
+    var L = getLoyalty();
+    var minEntry = (_loyaltyEdit && _loyaltyEdit.minEntryPoints != null) ? _loyaltyEdit.minEntryPoints : L.minEntryPoints;
+    var drawBy = (_loyaltyEdit && _loyaltyEdit.drawBy) ? _loyaltyEdit.drawBy : L.drawBy;
+    var pool = customerProfileList('').filter(function (c) { return (c.points || 0) > 0 && (c.points || 0) >= (minEntry || 0); });
     var winners = [];
     n = Math.max(1, Math.min(n || 1, pool.length));
+    if (drawBy === 'top') {
+        // Highest-points customers win (deterministic ranking).
+        pool.sort(function (a, b) { return (b.points || 0) - (a.points || 0); });
+        for (var t = 0; t < n && t < pool.length; t++) {
+            winners.push({ name: pool[t].name || '', phone: pool[t].phone || '', points: pool[t].points || 0 });
+        }
+        return winners;
+    }
     for (var k = 0; k < n && pool.length; k++) {
         var idx = Math.floor(Math.random() * pool.length);
         var w = pool.splice(idx, 1)[0];
@@ -4762,6 +5044,16 @@ function checkCampaignEnd() {
             cfg.raffles = (cfg.raffles || []).concat([{ id: 'RF' + Date.now(), prize: (L.campaignName || 'حملة الولاء'), winners: winners, status: 'campaign-end', drawnAt: new Date().toISOString() }]);
             loyaltyConfig = Object.assign({}, loyaltyConfig || {}, cfg);
             summary.push('الفائزون: ' + winners.map(function (w) { return w.name || w.phone; }).join('، '));
+        }
+    }
+    // 1b) Grand prize — the customer with the most points wins (e.g. "a car").
+    if (L.grandPrize) {
+        var topList = customerProfileList('').filter(function (c) { return (c.points || 0) > 0; });
+        topList.sort(function (a, b) { return (b.points || 0) - (a.points || 0); });
+        if (topList.length) {
+            var champ = topList[0];
+            summary.push('الجائزة الكبرى «' + L.grandPrize + '»: ' + (champ.name || champ.phone) + ' (' + (champ.points || 0) + ' نقطة)');
+            logActivity('grand-prize', 'الجائزة الكبرى «' + L.grandPrize + '» للعميل ' + (champ.name || champ.phone), { prize: L.grandPrize, winner: champ });
         }
     }
     // 2) Convert remaining points to store credit
@@ -4813,18 +5105,81 @@ function switchReportsTab(tab) {
 }
 function loadLoyaltyEditor() {
     var L = getLoyalty();
-    _loyaltyEdit = { enabled: L.enabled, earnPer: L.earnPer, redeemRate: L.redeemRate, minRedeem: L.minRedeem, rewards: JSON.parse(JSON.stringify(L.rewards)), raffles: JSON.parse(JSON.stringify(L.raffles)), raffleWinners: L.raffleWinners, campaignName: L.campaignName, campaignStart: L.campaignStart, campaignEnd: L.campaignEnd, campaignEndAction: L.campaignEndAction, campaignProcessedFor: L.campaignProcessedFor };
+    _loyaltyEdit = { enabled: L.enabled, mode: L.mode, earnPer: L.earnPer, mechanism: L.mechanism, redeemRate: L.redeemRate, minRedeem: L.minRedeem, rewards: JSON.parse(JSON.stringify(L.rewards)), grandPrize: L.grandPrize, minEntryPoints: L.minEntryPoints, drawBy: L.drawBy, raffles: JSON.parse(JSON.stringify(L.raffles)), raffleWinners: L.raffleWinners, campaignName: L.campaignName, campaignStart: L.campaignStart, campaignEnd: L.campaignEnd, campaignEndAction: L.campaignEndAction, campaignProcessedFor: L.campaignProcessedFor };
     var ep = document.getElementById('loyaltyEarnPer'); if (ep) ep.value = _loyaltyEdit.earnPer;
     var rr = document.getElementById('loyaltyRedeemRate'); if (rr) rr.value = _loyaltyEdit.redeemRate;
     var mr = document.getElementById('loyaltyMinRedeem'); if (mr) mr.value = _loyaltyEdit.minRedeem;
+    var gp = document.getElementById('loyaltyGrandPrize'); if (gp) gp.value = _loyaltyEdit.grandPrize;
+    var me = document.getElementById('loyaltyMinEntry'); if (me) me.value = _loyaltyEdit.minEntryPoints;
     var rw = document.getElementById('raffleWinners'); if (rw) rw.value = _loyaltyEdit.raffleWinners;
     var cn = document.getElementById('campaignName'); if (cn) cn.value = _loyaltyEdit.campaignName;
     var cs = document.getElementById('campaignStart'); if (cs) cs.value = _loyaltyEdit.campaignStart;
     var ce = document.getElementById('campaignEnd'); if (ce) ce.value = _loyaltyEdit.campaignEnd;
     var ca = document.getElementById('campaignEndAction'); if (ca) ca.value = _loyaltyEdit.campaignEndAction;
+    syncLoyaltyModeButtons();
+    syncMechanismButtons();
+    syncDrawByButtons();
     syncCampaignActionButtons();
     renderLoyaltyToggleState();
     renderRewardsEditor();
+}
+// Program type: campaign (time-boxed) vs long-term (permanent). Toggles the
+// campaign date/action block visibility. Hidden state on _loyaltyEdit.mode.
+function syncLoyaltyModeButtons() {
+    if (!_loyaltyEdit) return;
+    var wrap = document.getElementById('loyaltyModeBtns');
+    if (wrap) {
+        var btns = wrap.querySelectorAll('.loyalty-mode-btn');
+        for (var i = 0; i < btns.length; i++) {
+            btns[i].classList.toggle('active', btns[i].getAttribute('data-mode') === _loyaltyEdit.mode);
+        }
+    }
+    var camp = document.getElementById('loyaltyCampaignSection');
+    if (camp) camp.style.display = (_loyaltyEdit.mode === 'campaign') ? '' : 'none';
+}
+function setLoyaltyMode(mode) {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    _loyaltyEdit.mode = (mode === 'campaign') ? 'campaign' : 'longterm';
+    syncLoyaltyModeButtons();
+}
+// Reward mechanism: none | purchase | prizes | draw. Reveals the matching
+// sub-config and hides the others. Hidden state on _loyaltyEdit.mechanism.
+function syncMechanismButtons() {
+    if (!_loyaltyEdit) return;
+    var m = _loyaltyEdit.mechanism || 'purchase';
+    var wrap = document.getElementById('loyaltyMechanismBtns');
+    if (wrap) {
+        var btns = wrap.querySelectorAll('.loyalty-mech-btn');
+        for (var i = 0; i < btns.length; i++) {
+            btns[i].classList.toggle('active', btns[i].getAttribute('data-mech') === m);
+        }
+    }
+    var show = { purchase: 'mechPurchaseBox', prizes: 'mechPrizesBox', draw: 'mechDrawBox' };
+    for (var key in show) {
+        if (!show.hasOwnProperty(key)) continue;
+        var box = document.getElementById(show[key]);
+        if (box) box.style.display = (m === key) ? '' : 'none';
+    }
+}
+function setMechanism(mech) {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    if (['none', 'purchase', 'prizes', 'draw'].indexOf(mech) === -1) mech = 'purchase';
+    _loyaltyEdit.mechanism = mech;
+    syncMechanismButtons();
+}
+function syncDrawByButtons() {
+    if (!_loyaltyEdit) return;
+    var wrap = document.getElementById('drawByBtns');
+    if (!wrap) return;
+    var btns = wrap.querySelectorAll('.draw-by-btn');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('active', btns[i].getAttribute('data-drawby') === (_loyaltyEdit.drawBy || 'random'));
+    }
+}
+function setDrawBy(mode) {
+    if (!_loyaltyEdit) loadLoyaltyEditor();
+    _loyaltyEdit.drawBy = (mode === 'top') ? 'top' : 'random';
+    syncDrawByButtons();
 }
 // Campaign end action presented as toggle buttons: draw and credit can combine,
 // reset is exclusive. The hidden #campaignEndAction holds the canonical value
@@ -4910,7 +5265,7 @@ function renderRewardsEditor() {
     var html = '';
     for (var i = 0; i < _loyaltyEdit.rewards.length; i++) {
         var r = _loyaltyEdit.rewards[i];
-        html += '<tr><td>' + escapeHtml(r.name) + '</td><td>' + (r.type === 'prize' ? 'هدية' : 'خصم') + '</td><td>' + r.cost + '</td><td>' + escapeHtml(String(r.value || '')) + '</td>' +
+        html += '<tr><td>' + escapeHtml(r.name) + '</td><td>' + (r.type === 'prize' ? 'هدية' : (r.type === 'discount-pct' ? 'خصم %' : 'خصم ₪')) + '</td><td>' + r.cost + '</td><td>' + escapeHtml(String(r.value || '')) + '</td>' +
             '<td><button class="btn-small" style="background:#e74c3c;" onclick="removeReward(' + i + ')">حذف</button></td></tr>';
     }
     body.innerHTML = html || '<tr><td colspan="5" style="text-align:center;padding:10px;">لا توجد جوائز</td></tr>';
@@ -4935,15 +5290,19 @@ function removeReward(i) {
 }
 function saveLoyaltySettings() {
     if (!_loyaltyEdit) loadLoyaltyEditor();
-    // enabled is controlled by the toggle button (_loyaltyEdit.enabled), not a checkbox
+    // enabled/mode/mechanism/drawBy are controlled by toggle buttons (_loyaltyEdit.*)
     _loyaltyEdit.earnPer = parseInt(document.getElementById('loyaltyEarnPer').value, 10) || DEFAULT_LOYALTY_CONFIG.earnPer;
     _loyaltyEdit.redeemRate = parseInt(document.getElementById('loyaltyRedeemRate').value, 10) || DEFAULT_LOYALTY_CONFIG.redeemRate;
     _loyaltyEdit.minRedeem = parseInt(document.getElementById('loyaltyMinRedeem').value, 10) || 0;
+    var gp = document.getElementById('loyaltyGrandPrize'); if (gp) _loyaltyEdit.grandPrize = gp.value.trim();
+    var me = document.getElementById('loyaltyMinEntry'); if (me) _loyaltyEdit.minEntryPoints = parseInt(me.value, 10) || 0;
     var rw = document.getElementById('raffleWinners'); if (rw) _loyaltyEdit.raffleWinners = parseInt(rw.value, 10) || 1;
     var cn = document.getElementById('campaignName'); if (cn) _loyaltyEdit.campaignName = cn.value.trim();
     var cs = document.getElementById('campaignStart'); if (cs) _loyaltyEdit.campaignStart = cs.value;
     var ce = document.getElementById('campaignEnd'); if (ce) _loyaltyEdit.campaignEnd = ce.value;
     var ca = document.getElementById('campaignEndAction'); if (ca) _loyaltyEdit.campaignEndAction = ca.value;
+    // Long-term programs have no end date/processing.
+    if (_loyaltyEdit.mode !== 'campaign') { _loyaltyEdit.campaignEnd = ''; }
     // If the end date changed, allow the new campaign to be processed again.
     if (_loyaltyEdit.campaignEnd && _loyaltyEdit.campaignProcessedFor !== _loyaltyEdit.campaignEnd) {
         _loyaltyEdit.campaignProcessedFor = '';
@@ -4952,6 +5311,7 @@ function saveLoyaltySettings() {
     saveLoyaltyConfig(_loyaltyEdit, function () {
         if (hint) { hint.textContent = '✅ تم حفظ إعدادات الولاء'; setTimeout(function () { hint.textContent = ''; }, 3000); }
         renderCustomers();
+        if (typeof updateAttachedCustomerLabel === 'function') updateAttachedCustomerLabel();
     });
 }
 
@@ -5068,35 +5428,37 @@ function saveCustomerProfile() {
 function adjustProfilePoints(sign) {
     var c = findCustomerByKey(_profileKey);
     if (!c) return;
-    var amount = parseInt(prompt(sign > 0 ? 'كم نقطة تريد إضافتها؟' : 'كم نقطة تريد خصمها؟', '10'), 10);
-    if (!amount || amount <= 0) return;
-    recordLoyaltyTxn({ name: c.name, phone: c.phone }, sign * amount, sign > 0 ? 'إضافة يدوية' : 'خصم يدوي', '');
-    showAlert('تم تعديل النقاط', { icon: '✅', title: 'تم' });
-    closeModal('customerProfileModal');
+    showPrompt(sign > 0 ? 'كم نقطة تريد إضافتها؟' : 'كم نقطة تريد خصمها؟', { title: 'تعديل النقاط', icon: '⭐', inputType: 'number', default: '10' }, function (ans) {
+        var amount = parseInt(ans, 10);
+        if (!amount || amount <= 0) return;
+        recordLoyaltyTxn({ name: c.name, phone: c.phone }, sign * amount, sign > 0 ? 'إضافة يدوية' : 'خصم يدوي', '');
+        showAlert('تم تعديل النقاط', { icon: '✅', title: 'تم' });
+        closeModal('customerProfileModal');
+    });
 }
 function adjustCustomerCredit() {
     var c = findCustomerByKey(_profileKey);
     if (!c) return;
     var cur = getCustomerCredit({ name: c.name, phone: c.phone });
-    var ans = prompt('الرصيد الحالي: ₪' + cur.toFixed(2) + '\nأدخل المبلغ للإضافة (موجب) أو الخصم (سالب):', '0');
-    if (ans === null) return;
-    var delta = parseFloat(ans) || 0;
-    if (delta === 0) return;
-    if (delta < 0 && Math.abs(delta) > cur) { showAlert('لا يمكن خصم أكثر من الرصيد المتاح', { icon: '⚠️', title: 'تنبيه' }); return; }
-    addStoreCredit({ name: c.name, phone: c.phone }, delta, delta > 0 ? 'إضافة رصيد يدوي' : 'خصم رصيد يدوي');
-    showAlert('تم تعديل الرصيد', { icon: '✅', title: 'تم' });
-    closeModal('customerProfileModal');
+    showPrompt('الرصيد الحالي: ₪' + cur.toFixed(2) + '\nأدخل المبلغ للإضافة (موجب) أو الخصم (سالب):', { title: 'تعديل الرصيد', icon: '💳', inputType: 'number', default: '0' }, function (ans) {
+        var delta = parseFloat(ans) || 0;
+        if (delta === 0) return;
+        if (delta < 0 && Math.abs(delta) > cur) { showAlert('لا يمكن خصم أكثر من الرصيد المتاح', { icon: '⚠️', title: 'تنبيه' }); return; }
+        addStoreCredit({ name: c.name, phone: c.phone }, delta, delta > 0 ? 'إضافة رصيد يدوي' : 'خصم رصيد يدوي');
+        showAlert('تم تعديل الرصيد', { icon: '✅', title: 'تم' });
+        closeModal('customerProfileModal');
+    });
 }
 function openNewCustomer() {
-    var phone = prompt('رقم هاتف العميل:');
-    if (phone === null) return;
-    var name = prompt('اسم العميل:');
-    if (name === null) return;
-    savePosRecord({
-        recordType: 'customer', name: (name || '').trim(), phone: normalizePhone(phone),
-        notes: '', birthday: '',
-        cashier: currentUser ? currentUser.username : '', total: 0, status: 'customer'
-    }, 'CU', function () { showAlert('تمت إضافة العميل', { icon: '✅', title: 'تم' }); });
+    showPrompt('رقم هاتف العميل:', { title: 'عميل جديد', icon: '👤', inputType: 'tel' }, function (phone) {
+        showPrompt('اسم العميل:', { title: 'عميل جديد', icon: '👤' }, function (name) {
+            savePosRecord({
+                recordType: 'customer', name: (name || '').trim(), phone: normalizePhone(phone),
+                notes: '', birthday: '',
+                cashier: currentUser ? currentUser.username : '', total: 0, status: 'customer'
+            }, 'CU', function () { showAlert('تمت إضافة العميل', { icon: '✅', title: 'تم' }); });
+        });
+    });
 }
 var _customerCb = null;
 function openCustomerModal(title, onConfirm) {

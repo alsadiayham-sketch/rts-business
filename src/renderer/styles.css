@@ -1261,6 +1261,11 @@ body {
     backdrop-filter: blur(4px);
 }
 
+/* Confirmation / reward / prompt modals must render above other open modals (e.g. customer profile) */
+#confirmModal, #rewardModal, #promptModal {
+    z-index: 100000;
+}
+
 .modal-content {
     background: var(--bg-light);
     border-radius: var(--radius);
@@ -1904,6 +1909,38 @@ body {
 .campaign-action-btn.active { background:#4a6cf7; color:#fff; border-color:#4a6cf7; box-shadow:0 2px 8px rgba(74,108,247,.3); }
 .raffle-winners { margin:8px 0 0; padding-inline-start:20px; }
 .raffle-winners li { margin:3px 0; }
+
+/* Loyalty guided-flow steps & choice buttons */
+.loyalty-step { margin-top:16px; padding-top:12px; border-top:1px dashed #e3e8ef; }
+.loyalty-step:first-child { border-top:0; padding-top:0; margin-top:8px; }
+.loyalty-step > h4 { margin:0 0 8px; font-size:15px; color:#2b3550; }
+.loyalty-mode-btns, .loyalty-mech-btns, .draw-by-btns { display:flex; flex-wrap:wrap; gap:10px; margin:6px 0; }
+.loyalty-mode-btn, .loyalty-mech-btn, .draw-by-btn { padding:11px 18px; border:1.5px solid #d7dee8; background:#f4f6fa; color:#33405a; border-radius:12px; cursor:pointer; font-size:14px; font-weight:600; transition:all .15s; }
+.loyalty-mode-btn:hover, .loyalty-mech-btn:hover, .draw-by-btn:hover { background:#e9edf5; }
+.loyalty-mode-btn.active, .loyalty-mech-btn.active, .draw-by-btn.active { background:#4a6cf7; color:#fff; border-color:#4a6cf7; box-shadow:0 2px 8px rgba(74,108,247,.3); }
+.mech-box { margin-top:10px; padding:12px; background:#f8fafc; border:1px solid #e8edf4; border-radius:12px; }
+
+/* Loyalty reward picker modal */
+.reward-picker-list { display:flex; flex-direction:column; gap:10px; margin:6px 0 14px; max-height:340px; overflow-y:auto; }
+.reward-pick-btn { display:flex; flex-direction:column; gap:3px; text-align:start; padding:12px 16px; border:1.5px solid #e3e8ef; background:#fff; border-radius:12px; cursor:pointer; transition:all .15s; }
+.reward-pick-btn:hover { border-color:#4a6cf7; background:#f4f7ff; box-shadow:0 2px 8px rgba(74,108,247,.15); }
+.reward-pick-btn strong { font-size:15px; color:#2b3550; }
+.reward-pick-btn span { font-size:13px; color:#667; }
+/* Multi-select reward checklist */
+.reward-check-row { display:flex; align-items:center; gap:12px; text-align:start; padding:11px 14px; border:1.5px solid #e3e8ef; background:#fff; border-radius:12px; cursor:pointer; transition:all .15s; }
+.reward-check-row:hover { border-color:#4a6cf7; background:#f4f7ff; }
+.reward-check-row input[type="checkbox"] { width:20px; height:20px; accent-color:#4a6cf7; cursor:pointer; flex:0 0 auto; }
+.reward-check-body { display:flex; flex-direction:column; gap:3px; }
+.reward-check-body strong { font-size:15px; color:#2b3550; }
+.reward-check-meta { font-size:13px; color:#667; }
+.reward-picker-summary { text-align:center; font-size:14px; margin:4px 0 12px; font-weight:600; }
+
+/* Attached-customer chip (name - loyalty points) */
+.attached-customer-chip { display:inline-flex; align-items:center; gap:8px; padding:7px 14px; background:#eef2ff; border:1.5px solid #c7d2fe; color:#33405a; border-radius:20px; font-weight:600; font-size:14px; }
+.attached-customer-remove { color:#e74c3c; text-decoration:none; font-weight:700; }
+.attached-customer-remove:hover { color:#c0392b; }
+.cart-item-prize { background:#fff8e6; border-inline-start:3px solid #f0b429; }
+
 
 /* Add-ons grid */
 .addons-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; margin:10px 0; }
