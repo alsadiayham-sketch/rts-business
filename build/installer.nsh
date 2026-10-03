@@ -4,6 +4,7 @@
 
 !macro customHeader
   !system "echo 'RTS POS Installer'"
+  BrandingText "R.T.S POS Setup"
 !macroend
 
 !macro preInit
