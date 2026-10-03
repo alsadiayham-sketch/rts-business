@@ -43,7 +43,7 @@ app.on('window-all-closed', function () {
 });
 
 ipcMain.handle('get-default-path', function () {
-  return path.join(process.env.LOCALAPPDATA || 'C:\\Program Files', 'ADA POS');
+  return path.join(process.env.LOCALAPPDATA || 'C:\\Program Files', 'RTS POS');
 });
 
 ipcMain.handle('browse-folder', async function () {
@@ -77,21 +77,21 @@ ipcMain.handle('install', async function (event, options) {
 
     if (options.desktopShortcut) {
       createShortcut(
-        path.join(process.env.USERPROFILE || '', 'Desktop', 'ADA POS.lnk'),
-        path.join(installPath, 'ADA POS.exe'),
+        path.join(process.env.USERPROFILE || '', 'Desktop', 'RTS POS.lnk'),
+        path.join(installPath, 'RTS POS.exe'),
         installPath
       );
     }
 
     if (options.startMenuShortcut) {
-      var startMenu = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'ADA POS');
+      var startMenu = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'RTS POS');
       if (!fs.existsSync(startMenu)) {
         fs.mkdirSync(startMenu, { recursive: true });
       }
 
       createShortcut(
-        path.join(startMenu, 'ADA POS.lnk'),
-        path.join(installPath, 'ADA POS.exe'),
+        path.join(startMenu, 'RTS POS.lnk'),
+        path.join(installPath, 'RTS POS.exe'),
         installPath
       );
     }
@@ -100,7 +100,7 @@ ipcMain.handle('install', async function (event, options) {
       addFolderToUserPath(installPath);
     }
 
-    sendStage('Registering ADA POS...');
+    sendStage('Registering RTS POS...');
     writeUninstaller(installPath);
     registerUninstaller(installPath);
     await wait(300);
@@ -119,7 +119,7 @@ ipcMain.handle('install', async function (event, options) {
 });
 
 ipcMain.handle('launch-app', function (event, installPath) {
-  var exe = path.join(installPath, 'ADA POS.exe');
+  var exe = path.join(installPath, 'RTS POS.exe');
   if (fs.existsSync(exe)) {
     shell.openPath(exe);
   }
@@ -191,7 +191,7 @@ function copyDirSync(src, dest, totalFiles) {
 
 async function simulateInstall(installPath) {
   var demoFiles = [
-    'ADA POS.exe',
+    'RTS POS.exe',
     'resources\\app.asar',
     'resources\\assets\\logo.png',
     'resources\\data\\bootstrap.json',
@@ -221,28 +221,28 @@ function ensureDemoFile(installPath, relativeFile, isExecutable) {
   if (isExecutable) {
     fs.writeFileSync(
       targetFile,
-      'This is a placeholder ADA POS executable for installer UI testing.\r\n'
+      'This is a placeholder RTS POS executable for installer UI testing.\r\n'
     );
     return;
   }
 
   fs.writeFileSync(
     targetFile,
-    'Placeholder file created by ADA POS installer UI.\r\n'
+    'Placeholder file created by RTS POS installer UI.\r\n'
   );
 }
 
 function writeUninstaller(installPath) {
-  var scriptPath = path.join(installPath, 'Uninstall ADA POS.cmd');
+  var scriptPath = path.join(installPath, 'Uninstall RTS POS.cmd');
   var scriptContent = [
     '@echo off',
     'setlocal',
     'set "INSTALL_DIR=%~dp0"',
-    'set "APPDATA_DIR=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\ADA POS"',
-    'if exist "%USERPROFILE%\\Desktop\\ADA POS.lnk" del /f /q "%USERPROFILE%\\Desktop\\ADA POS.lnk"',
-    'if exist "%APPDATA_DIR%\\ADA POS.lnk" del /f /q "%APPDATA_DIR%\\ADA POS.lnk"',
+    'set "APPDATA_DIR=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\RTS POS"',
+    'if exist "%USERPROFILE%\\Desktop\\RTS POS.lnk" del /f /q "%USERPROFILE%\\Desktop\\RTS POS.lnk"',
+    'if exist "%APPDATA_DIR%\\RTS POS.lnk" del /f /q "%APPDATA_DIR%\\RTS POS.lnk"',
     'if exist "%APPDATA_DIR%" rd /s /q "%APPDATA_DIR%"',
-    'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ADAPOS" /f >nul 2>nul',
+    'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\RTSPOS" /f >nul 2>nul',
     "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-Sleep -Milliseconds 400; Remove-Item -LiteralPath '%INSTALL_DIR%' -Recurse -Force\"",
     'endlocal'
   ].join('\r\n');
@@ -251,20 +251,20 @@ function writeUninstaller(installPath) {
 }
 
 function registerUninstaller(installPath) {
-  var exePath = path.join(installPath, 'ADA POS.exe');
-  var uninstallPath = path.join(installPath, 'Uninstall ADA POS.cmd');
-  var key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ADAPOS';
+  var exePath = path.join(installPath, 'RTS POS.exe');
+  var uninstallPath = path.join(installPath, 'Uninstall RTS POS.cmd');
+  var key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\RTSPOS';
 
   execSync(
-    'reg add "' + key + '" /v DisplayName /t REG_SZ /d "ADA POS" /f',
+    'reg add "' + key + '" /v DisplayName /t REG_SZ /d "RTS POS" /f',
     { windowsHide: true }
   );
   execSync(
-    'reg add "' + key + '" /v DisplayVersion /t REG_SZ /d "2.1.0" /f',
+    'reg add "' + key + '" /v DisplayVersion /t REG_SZ /d "4.0.0" /f',
     { windowsHide: true }
   );
   execSync(
-    'reg add "' + key + '" /v Publisher /t REG_SZ /d "ADA" /f',
+    'reg add "' + key + '" /v Publisher /t REG_SZ /d "Royal Technology Solutions" /f',
     { windowsHide: true }
   );
   execSync(

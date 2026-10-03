@@ -1,4 +1,4 @@
-// Firebase config for ADA POS
+// Firebase config for RTS POS
 var firebaseConfig = {
     apiKey: "AIzaSyAp3mDn6c5D3GKIV7BZ2aKIsm7MxYP0vG0",
     authDomain: "dimaboutique-b4f16.firebaseapp.com",

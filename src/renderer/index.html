@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ADA POS</title>
+    <title>RTS POS</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -50,8 +50,9 @@
     <!-- Login Screen -->
     <div id="loginScreen" class="login-screen" style="display:none;">
         <div class="login-box">
-            <img src="../assets/icon.png" class="login-logo" alt="ADA POS">
-            <h2>ADA POS</h2>
+            <img src="../assets/rts-pos-logo.svg" class="login-logo" alt="RTS POS - Royal Technology Solutions">
+            <h2>نظام نقطة البيع المصمم للعمل الحقيقي</h2>
+            <p class="login-intro">المبيعات والمخزون والعملاء والتقارير في مساحة واحدة واضحة.</p>
             <div class="login-form">
                 <input type="text" id="loginStoreName" placeholder="اسم المتجر (Store ID)" autocomplete="off">
                 <input type="text" id="loginUsername" placeholder="اسم المستخدم" autocomplete="off">
@@ -71,64 +72,64 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <h1>ADA POS</h1>
+                <img src="../assets/rts-pos-logo.svg" alt="RTS POS">
                 <span class="brand-sub" id="sidebarStoreName">نقطة البيع</span>
             </div>
             <nav class="sidebar-nav">
                 <button class="nav-btn active" data-page="sales">
-                    <span class="nav-icon">🛒</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h2l2 11h10l2-7H7M9 20h.01M17 20h.01"/></svg></span>
                     <span class="nav-label">المبيعات</span>
                 </button>
                 <button class="nav-btn" data-page="inventory">
-                    <span class="nav-icon">📦</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4v10l-8 4-8-4Zm0 0 8 4 8-4M12 11v10"/></svg></span>
                     <span class="nav-label">المخزون</span>
                 </button>
                 <button class="nav-btn" data-page="damage">
-                    <span class="nav-icon">🗑️</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></span>
                     <span class="nav-label">الإتلاف</span>
                 </button>
                 <button class="nav-btn" data-page="bills">
-                    <span class="nav-icon">🧾</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2Zm3 5h6m-6 4h6"/></svg></span>
                     <span class="nav-label">الفواتير</span>
                 </button>
                 <button class="nav-btn" data-page="returns">
-                    <span class="nav-icon">↩️</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M5 12h9a5 5 0 0 1 5 5v2"/></svg></span>
                     <span class="nav-label">المرتجعات</span>
                 </button>
                 <button class="nav-btn" data-page="debts">
-                    <span class="nav-icon">📒</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h13v18H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm0 0v18M10 8h5m-5 4h5"/></svg></span>
                     <span class="nav-label">الذمم</span>
                 </button>
                 <button class="nav-btn" data-page="customers">
-                    <span class="nav-icon">👥</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2m6.5-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8.5 10v-2a4 4 0 0 0-3-3.9m1-11.8a4 4 0 0 1 0 7.4"/></svg></span>
                     <span class="nav-label">العملاء</span>
                 </button>
                 <button class="nav-btn" data-page="reports">
-                    <span class="nav-icon">📊</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V10h4v10m4 0V4h4v16m4 0V7h-4"/></svg></span>
                     <span class="nav-label">التقارير</span>
                 </button>
                 <button class="nav-btn" data-page="stats">
-                    <span class="nav-icon">📈</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19 10 13l4 4 6-9m-5 0h5v5"/></svg></span>
                     <span class="nav-label">الإحصائيات</span>
                 </button>
                 <button class="nav-btn feature-suppliers" data-page="suppliers" style="display:none;">
-                    <span class="nav-icon">🚚</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h11v12H3Zm11 5h4l3 3v4h-7ZM7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm10 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/></svg></span>
                     <span class="nav-label">الموردون</span>
                 </button>
                 <button class="nav-btn feature-stocktake" data-page="stocktake" style="display:none;">
-                    <span class="nav-icon">📋</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l1 3h3v14H5V7h3Zm0 0v3h6V4m-6 8h6m-6 4h6"/></svg></span>
                     <span class="nav-label">الجرد</span>
                 </button>
                 <button class="nav-btn feature-restaurant" data-page="restaurant" style="display:none;">
-                    <span class="nav-icon">🍽️</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 3v7a3 3 0 0 0 6 0V3M7 3v18m8-18v18m0-10c3 0 5-2 5-5V3c-3 0-5 2-5 5v3Z"/></svg></span>
                     <span class="nav-label">الطاولات</span>
                 </button>
                 <button class="nav-btn feature-hookah" data-page="hookah" style="display:none;">
-                    <span class="nav-icon">💨</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 17h11a3 3 0 0 0 0-6H9a2 2 0 1 1 0-4h7m-9 10a3 3 0 0 0 3 3h5m4-9 2-2m-2 8 2 2"/></svg></span>
                     <span class="nav-label">الأرجيلة</span>
                 </button>
                 <button class="nav-btn" data-page="settings">
-                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-3.5 2-1-2-4-2 .5-1.5-1L15 4h-6l-.5 2.5-1.5 1L5 7l-2 4 2 1v2l-2 1 2 4 2-.5 1.5 1L9 22h6l.5-2.5 1.5-1 2 .5 2-4-2-1Z"/></svg></span>
                     <span class="nav-label">الإعدادات</span>
                 </button>
             </nav>
@@ -141,7 +142,7 @@
                     <span class="sync-dot online"></span>
                     <span>متصل</span>
                 </div>
-                <div class="version-info" id="appVersion">v2.0.0</div>
+                <div class="version-info" id="appVersion">v4.0.0</div>
             </div>
         </aside>
 

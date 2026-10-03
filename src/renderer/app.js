@@ -14,7 +14,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '3.1.1';
+var APP_VERSION = '4.0.0';
 
 // ============ STATE ============
 var products = [];
@@ -294,7 +294,7 @@ function isAllowedUpdateUrl(url) {
     var trustedDomains = [
         'https://github.com/alsadiayham-sketch/',
         'https://drive.google.com/',
-        'https://web-designer-555.pages.dev/'
+        'https://rts-royal.pages.dev/'
     ];
     for (var i = 0; i < trustedDomains.length; i++) {
         if (url.indexOf(trustedDomains[i]) === 0) return true;
@@ -1836,7 +1836,7 @@ function buildEscPosTestBytes() {
     b.push(0x1B, 0x40);             // ESC @  -> initialize
     b.push(0x1B, 0x61, 0x01);       // center
     b.push(0x1D, 0x21, 0x11);       // double width/height
-    b = b.concat(strBytes('ADA POS\n'));
+    b = b.concat(strBytes('RTS POS\n'));
     b.push(0x1D, 0x21, 0x00);       // normal size
     b = b.concat(strBytes('RAW PRINT TEST (ESC/POS)\n'));
     b.push(0x1B, 0x61, 0x00);       // left

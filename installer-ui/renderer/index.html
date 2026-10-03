@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADA POS Installer</title>
+  <title>RTS POS Installer</title>
   <style>
     * {
       box-sizing: border-box;
@@ -746,6 +746,174 @@
         opacity: 1;
       }
     }
+
+    /* RTS POS setup: restrained light product styling */
+    html,
+    body {
+      color: #211523;
+      background: #f8f6f9;
+    }
+
+    .background-mesh {
+      display: none;
+    }
+
+    .shell {
+      padding: 16px;
+    }
+
+    .window {
+      border: 1px solid #ddd5df;
+      border-radius: 16px;
+      background: #ffffff;
+      backdrop-filter: none;
+      box-shadow: 0 18px 50px rgba(47, 18, 56, 0.14);
+    }
+
+    .window::before {
+      background:
+        linear-gradient(135deg, transparent 0 78%, rgba(72, 17, 91, 0.035) 78% 86%, transparent 86%);
+    }
+
+    .titlebar {
+      background: #faf6fb;
+      border-bottom-color: #ddd5df;
+    }
+
+    .title-icon {
+      border-radius: 7px;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .title-app,
+    .section-heading,
+    .complete-title {
+      color: #211523;
+    }
+
+    .title-sub,
+    .section-copy,
+    .complete-copy,
+    .progress-meta,
+    .status-file {
+      color: #6f6371;
+    }
+
+    .close-btn {
+      border-radius: 8px;
+      background: #f9e8eb;
+      color: #c93c50;
+      box-shadow: none;
+    }
+
+    .close-btn:hover {
+      transform: none;
+      background: #f4d7dc;
+      box-shadow: none;
+    }
+
+    .logo-badge,
+    .install-glow,
+    .checkmark-shell {
+      border: 1px solid #ddd5df;
+      border-radius: 14px;
+      background: #faf6fb;
+      box-shadow: none;
+    }
+
+    .logo-badge img {
+      border-radius: 10px;
+    }
+
+    .wordmark {
+      color: #48115b;
+      background: none;
+      -webkit-text-fill-color: currentColor;
+    }
+
+    .version-pill {
+      border-color: #d9c7df;
+      background: #f2e8f5;
+      color: #48115b;
+    }
+
+    .card {
+      border-color: #ddd5df;
+      border-radius: 12px;
+      background: #ffffff;
+      box-shadow: none;
+    }
+
+    .feature-list li,
+    .checkbox-row label,
+    .field-label {
+      color: #211523;
+    }
+
+    .feature-check,
+    .btn-primary,
+    .progress-fill,
+    .checkmark-circle {
+      background: #48115b;
+      box-shadow: none;
+    }
+
+    .btn {
+      border-radius: 8px;
+    }
+
+    .btn-primary:hover {
+      background: #642279;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      border-color: #ddd5df;
+      background: #ffffff;
+      color: #211523;
+      box-shadow: none;
+    }
+
+    .link-button {
+      color: #48115b;
+    }
+
+    .path-input,
+    .checkbox-row {
+      border-color: #ddd5df;
+      border-radius: 8px;
+      background: #faf8fa;
+    }
+
+    .path-input:focus {
+      border-color: #48115b;
+      box-shadow: 0 0 0 3px rgba(72, 17, 91, 0.1);
+    }
+
+    .checkbox-row input {
+      accent-color: #48115b;
+    }
+
+    .spinner {
+      border-color: #dccfe0;
+      border-top-color: #48115b;
+      border-right-color: #48115b;
+    }
+
+    .progress-track {
+      background: #eee8ef;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -765,11 +933,11 @@
       <div class="titlebar">
         <div class="title-left">
           <div class="title-icon">
-            <img src="icon.png" alt="ADA POS">
+            <img src="icon.png" alt="RTS POS">
           </div>
           <div class="title-copy">
-            <span class="title-app">ADA POS Installer</span>
-            <span class="title-sub">Premium setup experience</span>
+            <span class="title-app">RTS POS Installer</span>
+            <span class="title-sub">Royal Technology Solutions</span>
           </div>
         </div>
         <div class="window-controls">
@@ -781,21 +949,21 @@
         <div class="step active" id="stepWelcome">
           <div class="hero">
             <div class="logo-badge">
-              <img src="icon.png" alt="ADA POS icon">
+              <img src="icon.png" alt="RTS POS icon">
             </div>
 
             <div>
-              <h1 class="wordmark">ADA POS</h1>
+              <h1 class="wordmark">RTS POS</h1>
               <p class="subtitle">Point of Sale System</p>
             </div>
 
-            <div class="version-pill">Version 2.1.0</div>
+            <div class="version-pill">Version 4.0.0</div>
 
             <div class="card">
               <ul class="feature-list">
                 <li><span class="feature-check">&#10003;</span><span>Fast checkout flow built for modern retail teams</span></li>
                 <li><span class="feature-check">&#10003;</span><span>Inventory, receipts, and reporting in one streamlined desktop app</span></li>
-                <li><span class="feature-check">&#10003;</span><span>Offline-friendly experience with premium ADA branding</span></li>
+                <li><span class="feature-check">&#10003;</span><span>Offline-friendly operation backed by Royal Technology Solutions</span></li>
               </ul>
             </div>
           </div>
@@ -812,7 +980,7 @@
           <div class="hero">
             <div>
               <h2 class="section-heading">Customize your installation</h2>
-              <p class="section-copy">Choose where ADA POS should be installed and which shortcuts you want us to create for the fastest launch experience.</p>
+              <p class="section-copy">Choose where RTS POS should be installed and which shortcuts you want us to create for the fastest launch experience.</p>
             </div>
 
             <div class="card option-stack">
@@ -835,7 +1003,7 @@
                 </div>
                 <div class="checkbox-row">
                   <input id="launchAfterInstall" type="checkbox" checked>
-                  <label for="launchAfterInstall">Launch ADA POS after installation</label>
+                  <label for="launchAfterInstall">Launch RTS POS after installation</label>
                 </div>
                 <div class="checkbox-row">
                   <input id="addToPath" type="checkbox">
@@ -861,7 +1029,7 @@
 
             <div>
               <h2 class="section-heading" id="installStatusHeading">Installing...</h2>
-              <p class="section-copy" id="installStatusText">Preparing ADA POS for installation.</p>
+              <p class="section-copy" id="installStatusText">Preparing RTS POS for installation.</p>
             </div>
 
             <div class="card progress-shell">
@@ -883,10 +1051,10 @@
             <div class="checkmark-shell">
               <div class="checkmark-circle"></div>
             </div>
-            <h2 class="complete-title">ADA POS has been installed successfully!</h2>
-            <p class="complete-copy">Everything is ready to go. Launch ADA POS now or close the installer and start whenever you are ready.</p>
+            <h2 class="complete-title">RTS POS has been installed successfully!</h2>
+            <p class="complete-copy">Everything is ready to go. Launch RTS POS now or close the installer and start whenever you are ready.</p>
             <div class="button-row">
-              <button class="btn btn-primary btn-large" id="launchButton" type="button">Launch ADA POS</button>
+              <button class="btn btn-primary btn-large" id="launchButton" type="button">Launch RTS POS</button>
               <button class="btn btn-secondary" id="finishButton" type="button">Close</button>
             </div>
           </div>
@@ -983,18 +1151,18 @@
       state.installCompleted = false;
       clearError();
       setStep('stepInstalling');
-      setStatus('Installing...', 'Copying ADA POS and preparing the desktop experience.');
+      setStatus('Installing...', 'Copying RTS POS and preparing the desktop experience.');
       setProgress(0, 'Starting installation', 'Preparing installer engine...');
 
       ipcRenderer.invoke('install', options).then(function (result) {
         if (!result || !result.success) {
-          setStatus('Installation failed', 'We ran into an issue while setting up ADA POS.');
+          setStatus('Installation failed', 'We ran into an issue while setting up RTS POS.');
           showError(result && result.error ? result.error : 'Unknown installer error.');
           return;
         }
 
         state.installCompleted = true;
-        setProgress(100, 'Installation complete', 'ADA POS is ready.');
+        setProgress(100, 'Installation complete', 'RTS POS is ready.');
         setTimeout(function () {
           setStep('stepComplete');
           if (state.launchAfterInstall) {
@@ -1002,7 +1170,7 @@
           }
         }, 650);
       }).catch(function (error) {
-        setStatus('Installation failed', 'We ran into an issue while setting up ADA POS.');
+        setStatus('Installation failed', 'We ran into an issue while setting up RTS POS.');
         showError(error && error.message ? error.message : String(error));
       });
     }
@@ -1054,17 +1222,17 @@
       };
 
       ipcRenderer.on('install-stage', function (event, payload) {
-        var text = payload && payload.text ? payload.text : 'Installing ADA POS...';
+        var text = payload && payload.text ? payload.text : 'Installing RTS POS...';
         var lowerText = text.toLowerCase();
 
         if (lowerText.indexOf('shortcut') !== -1) {
           setStatus('Creating shortcuts...', 'Finishing the desktop and Start Menu experience.');
         } else if (lowerText.indexOf('final') !== -1) {
-          setStatus('Finalizing...', 'Wrapping up installation and getting ADA POS ready.');
+          setStatus('Finalizing...', 'Wrapping up installation and getting RTS POS ready.');
         } else if (lowerText.indexOf('register') !== -1) {
-          setStatus('Finalizing...', 'Registering ADA POS with Windows.');
+          setStatus('Finalizing...', 'Registering RTS POS with Windows.');
         } else {
-          setStatus('Installing...', 'Copying ADA POS and preparing the desktop experience.');
+          setStatus('Installing...', 'Copying RTS POS and preparing the desktop experience.');
         }
 
         byId('progressLabel').innerHTML = text;
