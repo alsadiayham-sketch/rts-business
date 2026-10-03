@@ -27,7 +27,7 @@
       {
         "provider": "github",
         "owner": "alsadiayham-sketch",
-        "repo": "ada-pos-releases",
+        "repo": "rts-pos-releases",
         "releaseType": "release"
       }
     ],
