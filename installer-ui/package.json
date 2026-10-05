@@ -1,5 +1,5 @@
 {
-  "name": "rts-pos-installer",
+  "name": "rts-business-installer",
   "version": "4.0.0",
   "main": "main.js",
   "devDependencies": {

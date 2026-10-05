@@ -7,32 +7,7 @@ const { autoUpdater } = require('electron-updater');
 
 let mainWindow = null;
 
-// Move Chromium/localStorage data into the RTS-branded directory on the first
-// rebranded launch. The legacy application ID stays stable for NSIS upgrades.
-function prepareUserDataPath() {
-  var appData = app.getPath('appData');
-  var rtsPath = path.join(appData, 'RTS POS');
-  var legacyPaths = [
-    path.join(appData, 'ADA POS'),
-    path.join(appData, 'ada-pos')
-  ];
-
-  if (!fs.existsSync(rtsPath)) {
-    for (var i = 0; i < legacyPaths.length; i += 1) {
-      if (!fs.existsSync(legacyPaths[i])) continue;
-      try {
-        fs.cpSync(legacyPaths[i], rtsPath, { recursive: true, errorOnExist: false });
-      } catch (error) {
-        console.error('RTS POS could not migrate legacy user data:', error);
-      }
-      break;
-    }
-  }
-
-  app.setPath('userData', rtsPath);
-}
-
-prepareUserDataPath();
+app.setPath('userData', path.join(app.getPath('appData'), 'RTS Business'));
 
 // In-app auto-update (electron-updater). Pulls the new build from the public
 // GitHub releases repo and installs it in place — no manual download needed.
@@ -72,7 +47,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 700,
-    title: 'RTS POS',
+    title: 'RTS Business',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     show: true,
     backgroundColor: '#f8f9fc',
@@ -329,7 +304,7 @@ function spoolRawToPrinter(printerName, bytes) {
       '[DllImport("winspool.Drv",EntryPoint="StartPagePrinter",SetLastError=true)] public static extern bool StartPagePrinter(IntPtr h);' + '\n' +
       '[DllImport("winspool.Drv",EntryPoint="EndPagePrinter",SetLastError=true)] public static extern bool EndPagePrinter(IntPtr h);' + '\n' +
       '[DllImport("winspool.Drv",EntryPoint="WritePrinter",SetLastError=true)] public static extern bool WritePrinter(IntPtr h,IntPtr buf,int count,out int written);' + '\n' +
-      'public static string Send(string printer,byte[] bytes){IntPtr h;var di=new DOCINFOA();di.pDocName="RTS POS Receipt";di.pDataType="RAW";' + '\n' +
+      'public static string Send(string printer,byte[] bytes){IntPtr h;var di=new DOCINFOA();di.pDocName="RTS Business Receipt";di.pDataType="RAW";' + '\n' +
       'if(!OpenPrinter(printer,out h,IntPtr.Zero)) return "OPEN_FAIL:"+Marshal.GetLastWin32Error();' + '\n' +
       'string r="UNKNOWN";try{if(StartDocPrinter(h,1,di)){if(StartPagePrinter(h)){IntPtr p=Marshal.AllocHGlobal(bytes.Length);Marshal.Copy(bytes,0,p,bytes.Length);int w;bool ok=WritePrinter(h,p,bytes.Length,out w);Marshal.FreeHGlobal(p);EndPagePrinter(h);r=ok?("OK:"+w):("WRITE_FAIL:"+Marshal.GetLastWin32Error());}else{r="STARTPAGE_FAIL:"+Marshal.GetLastWin32Error();}EndDocPrinter(h);}else{r="STARTDOC_FAIL:"+Marshal.GetLastWin32Error();}}finally{ClosePrinter(h);}return r;}' + '\n' +
       '}' + '\n' +

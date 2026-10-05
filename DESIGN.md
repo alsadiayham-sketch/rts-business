@@ -1,8 +1,8 @@
-# RTS POS Design System
+# RTS Business Design System
 
 ## Direction
 
-RTS POS is a light, operational desktop product. The visual system uses the angular
+RTS Business is a light, operational desktop product. The visual system uses the angular
 RTS R mark, restrained royal-purple emphasis, pale lilac surfaces, and mint only for
 positive status or completion. Product familiarity and legibility take priority over
 decorative branding.
@@ -103,10 +103,3 @@ Use the supplied RTS mark without mirroring, distortion, glow, or enclosing it i
 generic circular badge. On light surfaces use `#48115b`; on royal surfaces use white.
 The desktop icon uses the mark centered on a royal-purple square with a restrained
 light inset field so it remains recognizable at 16px.
-
-## Compatibility
-
-Customer-visible identity is RTS POS. The legacy `com.ada.pos` application ID, current
-update repository, and existing `ada_pos_*` localStorage keys remain temporarily as
-compatibility identifiers so existing installations update in place and preserve
-settings. New code must not introduce additional ADA-branded customer-facing copy.

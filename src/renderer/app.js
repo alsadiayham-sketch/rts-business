@@ -35,6 +35,7 @@ var supplierRecords = [];
 var purchaseOrders = [];
 var stocktakeRecords = [];
 var hookahItems = [];
+var clinicRecords = [];
 var registerBalance = 0;
 var heldSales = [];
 var damageRecords = [];
@@ -442,6 +443,7 @@ function initApp() {
     loadProductsBatch();
     subscribeBills();
     subscribeDamage();
+    renderClinic();
 }
 
 // ============ THEMED CONFIRM / ALERT ============
@@ -649,7 +651,7 @@ function buildDayCloseInnerHTML(s) {
     var sinceStr = new Date(s.since).toLocaleString('ar-EG');
     var html = '';
     html += '<div class="r-title">تقرير إغلاق اليوم</div>';
-    html += '<div class="r-meta">عقاد كيدز</div>';
+    html += '<div class="r-meta">' + escapeHtml((getStoreConfig().storeName || 'RTS Business')) + '</div>';
     html += '<div class="r-meta">تاريخ الطباعة: ' + nowStr + '</div>';
     html += '<div class="r-meta">منذ: ' + sinceStr + '</div>';
     if (currentUser && currentUser.username) html += '<div class="r-meta">المدير: ' + currentUser.username + '</div>';
@@ -741,6 +743,7 @@ function subscribeBills() {
         purchaseOrders = [];
         stocktakeRecords = [];
         hookahItems = [];
+        clinicRecords = [];
         var newLoyaltyConfig = null;
         var newStoreConfig = null;
         snapshot.forEach(function (doc) {
@@ -766,6 +769,7 @@ function subscribeBills() {
             else if (rt === 'purchase-order') purchaseOrders.push(b);
             else if (rt === 'stocktake') stocktakeRecords.push(b);
             else if (rt === 'hookah-item') hookahItems.push(b);
+            else if (rt === 'clinic') clinicRecords.push(b);
             else bills.push(b); // normal or debt sale
         });
         loyaltyConfig = newLoyaltyConfig;
@@ -799,6 +803,7 @@ function subscribeBills() {
         if (typeof renderPurchaseOrders === 'function') renderPurchaseOrders();
         if (typeof renderStocktakeHistory === 'function') renderStocktakeHistory();
         if (typeof renderHookahGrid === 'function') renderHookahGrid();
+        if (typeof renderClinic === 'function') renderClinic();
     }, function (err) {
         console.error('Bills subscription error:', err);
     });
@@ -1604,7 +1609,7 @@ function buildReceiptInnerHTML(bill) {
         ? bill.createdAt.toDate().toLocaleString('ar-EG')
         : (bill.createdAtIso ? new Date(bill.createdAtIso).toLocaleString('ar-EG') : new Date().toLocaleString('ar-EG'));
     var html = '';
-    html += '<div class="r-title">عقاد كيدز</div>';
+    html += '<div class="r-title">' + escapeHtml((getStoreConfig().storeName || 'RTS Business')) + '</div>';
     html += '<div class="r-meta">' + dateStr + '</div>';
     html += '<div class="r-meta">الكاشير: ' + escapeHtml(bill.cashier || '') + '</div>';
 
@@ -1760,7 +1765,7 @@ function gatherPrinterDiagnostics() {
 // Builds a self-contained sample receipt used by the in-app printer test buttons.
 function buildSamplePrintDoc(modeLabel) {
     var inner =
-        '<div class="r-title">عقاد كيدز</div>' +
+        '<div class="r-title">' + escapeHtml((getStoreConfig().storeName || 'RTS Business')) + '</div>' +
         '<div class="r-meta">فاتورة تجريبية للطباعة</div>' +
         '<div class="r-meta">الإعداد: ' + escapeHtml(modeLabel) + '</div>' +
         '<table class="r-items"><thead><tr><th>الصنف</th><th>كمية</th><th>السعر</th></tr></thead><tbody>' +
@@ -1836,7 +1841,7 @@ function buildEscPosTestBytes() {
     b.push(0x1B, 0x40);             // ESC @  -> initialize
     b.push(0x1B, 0x61, 0x01);       // center
     b.push(0x1D, 0x21, 0x11);       // double width/height
-    b = b.concat(strBytes('RTS POS\n'));
+    b = b.concat(strBytes('RTS Business\n'));
     b.push(0x1D, 0x21, 0x00);       // normal size
     b = b.concat(strBytes('RAW PRINT TEST (ESC/POS)\n'));
     b.push(0x1B, 0x61, 0x00);       // left
@@ -2987,6 +2992,7 @@ function switchPage(page) {
     else if (page === 'stocktake') { renderStocktakeRows(); renderStocktakeHistory(); }
     else if (page === 'restaurant') renderTables();
     else if (page === 'hookah') renderHookahGrid();
+    else if (page === 'clinic') renderClinic();
 }
 
 // ============ EVENT LISTENERS ============
@@ -3407,6 +3413,25 @@ function setupEventListeners() {
     // Hookah / custom items
     var addHookahBtn = document.getElementById('addHookahBtn');
     if (addHookahBtn) addHookahBtn.addEventListener('click', addHookahItem);
+
+    // RTS Clinic
+    var clinicTabs = document.getElementById('clinicTabs');
+    if (clinicTabs) clinicTabs.addEventListener('click', function (e) {
+        var tab = e.target.closest('.clinic-tab');
+        if (tab) switchClinicTab(tab.getAttribute('data-clinic-tab'));
+    });
+    var addClinicBtn = document.getElementById('addClinicBtn');
+    if (addClinicBtn) addClinicBtn.addEventListener('click', addClinic);
+    var addPatientBtn = document.getElementById('addPatientBtn');
+    if (addPatientBtn) addPatientBtn.addEventListener('click', addPatient);
+    var addReservationBtn = document.getElementById('addReservationBtn');
+    if (addReservationBtn) addReservationBtn.addEventListener('click', addReservation);
+    var addSessionBtn = document.getElementById('addSessionBtn');
+    if (addSessionBtn) addSessionBtn.addEventListener('click', addClinicSession);
+    var uploadMedicalFileBtn = document.getElementById('uploadMedicalFileBtn');
+    if (uploadMedicalFileBtn) uploadMedicalFileBtn.addEventListener('click', uploadMedicalFile);
+    var patientSearch = document.getElementById('patientSearch');
+    if (patientSearch) patientSearch.addEventListener('input', renderClinic);
 
     // Barcode labels
     var printLabelsBtn = document.getElementById('printLabelsBtn');
@@ -4272,6 +4297,182 @@ function saveTaxSettings() {
         if (typeof renderProducts === 'function') renderProducts();
         if (typeof updateTotals === 'function') updateTotals();
     });
+}
+
+// ============ RTS CLINIC ============
+function clinicEntities(type) {
+    var out = [];
+    for (var i = 0; i < clinicRecords.length; i++) {
+        if (clinicRecords[i].entityType === type) out.push(clinicRecords[i]);
+    }
+    return out;
+}
+function clinicId() { return newRecordId('CLINIC'); }
+function clinicEscape(value) { return escapeHtml(value == null ? '' : String(value)); }
+function clinicDate(value) {
+    if (!value) return '';
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? clinicEscape(value) : d.toLocaleString('ar-EG');
+}
+function clinicRecord(record, prefix, onOk) {
+    if (!isAdmin() && (record.entityType === 'clinic' || record.entityType === 'medical_file')) {
+        showAlert('إدارة العيادات والملفات متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
+    record.recordType = 'clinic';
+    record.source = 'clinic';
+    record.clinicTenant = getProjectId() || '';
+    record.createdBy = currentUser ? currentUser.username : 'system';
+    savePosRecord(record, prefix, function () {
+        if (onOk) onOk();
+        renderClinic();
+    });
+}
+function switchClinicTab(tab) {
+    var root = document.getElementById('page-clinic');
+    if (!root) return;
+    var tabs = root.querySelectorAll('.clinic-tab');
+    var panels = root.querySelectorAll('.clinic-panel');
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-clinic-tab') === tab);
+    for (var j = 0; j < panels.length; j++) panels[j].classList.toggle('active', panels[j].getAttribute('data-clinic-panel') === tab);
+    renderClinic();
+}
+function clinicSelectOptions(items, placeholder) {
+    var html = '<option value="">' + clinicEscape(placeholder) + '</option>';
+    for (var i = 0; i < items.length; i++) {
+        html += '<option value="' + clinicEscape(items[i].id) + '">' + clinicEscape(items[i].name || items[i].patientName || items[i].code || items[i].id) + '</option>';
+    }
+    return html;
+}
+function renderClinic() {
+    var root = document.getElementById('page-clinic');
+    if (!root) return;
+    var clinics = clinicEntities('clinic');
+    var patients = clinicEntities('patient');
+    var reservations = clinicEntities('reservation');
+    var sessions = clinicEntities('session');
+    var files = clinicEntities('medical_file');
+    var searchEl = document.getElementById('patientSearch');
+    var term = searchEl ? String(searchEl.value || '').trim().toLowerCase() : '';
+    var filteredPatients = patients.filter(function (p) {
+        return !term || String(p.name || '').toLowerCase().indexOf(term) >= 0 || String(p.phone || '').toLowerCase().indexOf(term) >= 0;
+    });
+    var today = new Date().toISOString().slice(0, 10);
+    var todayReservations = reservations.filter(function (r) { return String(r.startsAt || '').slice(0, 10) === today; });
+    var openSessions = sessions.filter(function (s) { return s.status !== 'closed'; });
+    var count = function (id, value) { var el = document.getElementById(id); if (el) el.textContent = String(value); };
+    count('clinicCount', clinics.filter(function (c) { return c.active !== false; }).length);
+    count('patientCount', patients.length);
+    count('reservationCount', todayReservations.length);
+    count('openSessionCount', openSessions.length);
+
+    var clinicsList = document.getElementById('clinicsList');
+    if (clinicsList) clinicsList.innerHTML = clinics.length ? clinics.map(function (c) {
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(c.name) + '</strong><small>' +
+            clinicEscape(c.code || '') + ' · ' + clinicEscape(c.phone || '') + ' · ' + clinicEscape(c.address || '') +
+            '</small></div><span class="clinic-status">' + (c.active === false ? 'غير نشطة' : 'نشطة') + '</span></div>';
+    }).join('') : '<div class="clinic-list-empty">لم تتم إضافة عيادات بعد.</div>';
+    var patientsList = document.getElementById('patientsList');
+    if (patientsList) patientsList.innerHTML = filteredPatients.length ? filteredPatients.map(function (p) {
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(p.name) + '</strong><small>' +
+            clinicEscape(p.phone || '') + (p.dob ? ' · ' + clinicEscape(p.dob) : '') + '</small></div><span class="clinic-status">' +
+            clinicEscape(p.patientNo || 'مريض') + '</span></div>';
+    }).join('') : '<div class="clinic-list-empty">لا توجد نتائج.</div>';
+    var reservationsList = document.getElementById('reservationsList');
+    if (reservationsList) reservationsList.innerHTML = reservations.length ? reservations.slice().sort(function (a, b) {
+        return String(a.startsAt || '').localeCompare(String(b.startsAt || ''));
+    }).map(function (r) {
+        var p = patients.find(function (x) { return x.id === r.patientId; });
+        var c = clinics.find(function (x) { return x.id === r.clinicId; });
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(p ? p.name : 'مريض غير معروف') + '</strong><small>' +
+            clinicDate(r.startsAt) + ' · ' + clinicEscape(c ? c.name : '') + ' · ' + clinicEscape(r.reason || '') +
+            '</small></div><span class="clinic-status">' + clinicEscape(r.status || 'محجوز') + '</span></div>';
+    }).join('') : '<div class="clinic-list-empty">لا توجد حجوزات.</div>';
+    var todayEl = document.getElementById('todayReservations');
+    if (todayEl) todayEl.innerHTML = todayReservations.length ? todayReservations.map(function (r) {
+        var p = patients.find(function (x) { return x.id === r.patientId; });
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(p ? p.name : 'مريض غير معروف') +
+            '</strong><small>' + clinicDate(r.startsAt) + ' · ' + clinicEscape(r.reason || '') + '</small></div></div>';
+    }).join('') : '<div class="clinic-list-empty">لا توجد حجوزات اليوم.</div>';
+    var sessionsList = document.getElementById('sessionsList');
+    if (sessionsList) sessionsList.innerHTML = sessions.length ? sessions.slice(0, 20).map(function (s) {
+        var p = patients.find(function (x) { return x.id === s.patientId; });
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(p ? p.name : 'مريض غير معروف') +
+            '</strong><small>' + clinicDate(s.createdAtIso) + ' · ' + clinicEscape(s.note || '') + '</small></div><span class="clinic-status">' +
+            clinicEscape(s.status || 'مفتوحة') + '</span></div>';
+    }).join('') : '<div class="clinic-list-empty">لم تُسجل جلسات بعد.</div>';
+    var filesList = document.getElementById('filesList');
+    if (filesList) filesList.innerHTML = files.length ? files.slice(0, 20).map(function (f) {
+        var p = patients.find(function (x) { return x.id === f.patientId; });
+        return '<div class="clinic-list-item"><div><strong>' + clinicEscape(f.name) + '</strong><small>' +
+            clinicEscape(p ? p.name : '') + ' · ' + clinicEscape(f.category || 'ملف طبي') + '</small></div><span class="clinic-status">' +
+            clinicEscape(f.mimeType || '') + '</span></div>';
+    }).join('') : '<div class="clinic-list-empty">لم تُرفع ملفات بعد.</div>';
+
+    var patientOptions = clinicSelectOptions(patients, 'اختر المريض');
+    ['reservationPatient', 'sessionPatient', 'filePatient'].forEach(function (id) {
+        var el = document.getElementById(id); if (el && el.options.length !== patients.length + 1) el.innerHTML = patientOptions;
+    });
+    var clinicOptions = clinicSelectOptions(clinics, 'اختر العيادة');
+    var clinicSelect = document.getElementById('reservationClinic');
+    if (clinicSelect && clinicSelect.options.length !== clinics.length + 1) clinicSelect.innerHTML = clinicOptions;
+    var sessionReservation = document.getElementById('sessionReservation');
+    if (sessionReservation && sessionReservation.options.length !== reservations.length + 1) sessionReservation.innerHTML = clinicSelectOptions(reservations, 'اختر الحجز');
+}
+function addClinic() {
+    var name = (document.getElementById('clinicName') || {}).value.trim();
+    var code = (document.getElementById('clinicCode') || {}).value.trim();
+    if (!name || !code) { showAlert('أدخل اسم العيادة ورمزها', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
+    clinicRecord({ entityType: 'clinic', name: name, code: code, phone: (document.getElementById('clinicPhone') || {}).value.trim(),
+        address: (document.getElementById('clinicAddress') || {}).value.trim(), hours: (document.getElementById('clinicHours') || {}).value.trim(),
+        rooms: parseInt((document.getElementById('clinicRooms') || {}).value, 10) || 1, active: true }, 'CLN', function () {
+        ['clinicName', 'clinicCode', 'clinicPhone', 'clinicAddress', 'clinicHours'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+        var hint = document.getElementById('clinicSavedHint'); if (hint) { hint.textContent = 'تم حفظ العيادة'; setTimeout(function () { hint.textContent = ''; }, 2500); }
+    });
+}
+function addPatient() {
+    var name = (document.getElementById('patientName') || {}).value.trim();
+    if (!name) { showAlert('أدخل اسم المريض', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
+    clinicRecord({ entityType: 'patient', name: name, phone: (document.getElementById('patientPhone') || {}).value.trim(),
+        dob: (document.getElementById('patientDob') || {}).value, notes: (document.getElementById('patientNotes') || {}).value.trim(),
+        patientNo: 'P-' + Date.now(), active: true }, 'PAT', function () {
+        ['patientName', 'patientPhone', 'patientDob', 'patientNotes'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+    });
+}
+function addReservation() {
+    var patientId = (document.getElementById('reservationPatient') || {}).value;
+    var clinicIdValue = (document.getElementById('reservationClinic') || {}).value;
+    var startsAt = (document.getElementById('reservationDate') || {}).value;
+    if (!patientId || !clinicIdValue || !startsAt) { showAlert('اختر المريض والعيادة والموعد', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
+    clinicRecord({ entityType: 'reservation', patientId: patientId, clinicId: clinicIdValue, startsAt: startsAt,
+        reason: (document.getElementById('reservationReason') || {}).value.trim(), status: 'محجوز' }, 'RSV', function () {
+        ['reservationPatient', 'reservationClinic', 'reservationDate', 'reservationReason'].forEach(function (id) { var el = document.getElementById(id); if (el) el.value = ''; });
+    });
+}
+function addClinicSession() {
+    var patientId = (document.getElementById('sessionPatient') || {}).value;
+    var reservationId = (document.getElementById('sessionReservation') || {}).value;
+    var note = (document.getElementById('sessionNote') || {}).value.trim();
+    if (!patientId || !note) { showAlert('اختر المريض واكتب ملاحظة الجلسة', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
+    clinicRecord({ entityType: 'session', patientId: patientId, reservationId: reservationId, note: note, status: 'مفتوحة' }, 'SES', function () {
+        var el = document.getElementById('sessionNote'); if (el) el.value = '';
+    });
+}
+function uploadMedicalFile() {
+    var patientId = (document.getElementById('filePatient') || {}).value;
+    var input = document.getElementById('medicalFile');
+    var file = input && input.files && input.files[0];
+    if (!patientId || !file) { showAlert('اختر المريض والملف', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
+    if (file.size > 5 * 1024 * 1024) { showAlert('الحد الأقصى للملف في هذه النسخة هو 5MB', { icon: '⚠️', title: 'الملف كبير' }); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+        clinicRecord({ entityType: 'medical_file', patientId: patientId, name: file.name, mimeType: file.type,
+            size: file.size, category: (document.getElementById('fileCategory') || {}).value.trim(), data: reader.result }, 'FILE', function () {
+            input.value = ''; var category = document.getElementById('fileCategory'); if (category) category.value = '';
+        });
+    };
+    reader.onerror = function () { showAlert('تعذر قراءة الملف', { icon: '⚠️', title: 'خطأ' }); };
+    reader.readAsDataURL(file);
 }
 
 // ============ PRODUCT STOCK HELPER ============
@@ -5977,7 +6178,7 @@ function renderReturnsHistory() {
 }
 function printReturnReceipt(rec) {
     var html = '';
-    html += '<div class="r-title">عقاد كيدز</div>';
+    html += '<div class="r-title">' + escapeHtml((getStoreConfig().storeName || 'RTS Business')) + '</div>';
     html += '<div class="r-meta">إيصال مرتجع / استبدال</div>';
     html += '<div class="r-meta">' + new Date().toLocaleString('ar-EG') + '</div>';
     if (rec.originalBill) html += '<div class="r-meta">الفاتورة الأصلية مرفقة بالباركود</div>';

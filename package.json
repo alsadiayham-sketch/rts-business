@@ -1,7 +1,7 @@
 {
-  "name": "rts-pos",
+  "name": "rts-business",
   "version": "4.0.1",
-  "description": "RTS POS by Royal Technology Solutions",
+  "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -20,14 +20,14 @@
     "firebase": "^9.23.0"
   },
   "build": {
-    "appId": "com.ada.pos",
-    "productName": "RTS POS",
+    "appId": "com.rts.business",
+    "productName": "RTS Business",
     "icon": "src/assets/icon.png",
     "publish": [
       {
         "provider": "github",
         "owner": "alsadiayham-sketch",
-        "repo": "rts-pos-releases",
+        "repo": "rts-business-releases",
         "releaseType": "release"
       }
     ],
@@ -43,14 +43,14 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "RTS POS",
+      "shortcutName": "RTS Business",
       "installerIcon": "src/assets/icon.ico",
       "uninstallerIcon": "src/assets/icon.ico",
       "installerHeaderIcon": "src/assets/icon.ico",
       "installerSidebar": "src/assets/installer-sidebar.bmp",
       "uninstallerSidebar": "src/assets/uninstaller-sidebar.bmp",
       "installerHeader": "src/assets/installer-header.bmp",
-      "artifactName": "RTS-POS-Setup.exe",
+      "artifactName": "RTS-Business-Setup.exe",
       "include": "build/installer.nsh",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": true,

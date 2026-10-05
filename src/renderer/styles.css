@@ -2010,6 +2010,33 @@ body {
 .hookah-card .hookah-name { font-weight: 700; font-size: 14px; text-align: center; }
 .hookah-card .hookah-price { color: #6c5ce7; font-weight: 700; }
 
+/* ===== RTS Clinic ===== */
+.clinic-scope-badge { color: var(--text-dim); font-size: 13px; }
+.clinic-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; border-bottom:2px solid var(--border); padding-bottom:10px; }
+.clinic-tab { padding:9px 16px; border:1px solid var(--border); background:#f5f1f6; color:var(--text); border-radius:10px; cursor:pointer; font-size:13px; font-weight:600; }
+.clinic-tab.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+.clinic-panel { display:none; }
+.clinic-panel.active { display:block; }
+.clinic-stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+.clinic-stat-card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:8px; }
+.clinic-stat-card span { color:var(--text-dim); font-size:13px; }
+.clinic-stat-card strong { color:var(--primary); font-size:28px; }
+.clinic-privacy-card { border-inline-start:4px solid var(--warning); }
+.clinic-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+.clinic-form-grid .full-width { grid-column:1 / -1; }
+.clinic-search-row { margin-bottom:12px; }
+.clinic-search-row input { width:100%; max-width:420px; }
+.clinic-list { display:flex; flex-direction:column; gap:8px; }
+.clinic-list-empty { color:var(--text-dim); padding:12px 0; }
+.clinic-list-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--border); border-radius:10px; background:#fff; }
+.clinic-list-item strong { display:block; color:var(--text); }
+.clinic-list-item small { display:block; color:var(--text-dim); margin-top:3px; }
+.clinic-list-item .clinic-status { color:var(--success,#16865b); font-weight:700; font-size:12px; }
+@media (max-width: 760px) {
+    .clinic-form-grid { grid-template-columns:1fr; }
+    .clinic-form-grid .full-width { grid-column:auto; }
+}
+
 /* Stocktake pagination controls */
 .stk-pager { display:flex; align-items:center; justify-content:center; gap:12px; margin:12px 0 4px; flex-wrap:wrap; }
 .stk-pager .stk-page-info { font-size:13px; color:var(--text-secondary,#666); }
@@ -2038,7 +2065,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     outline: 3px solid var(--primary); outline-offset: 2px; border-radius: 6px;
 }
 
-/* RTS POS visual unification */
+/* RTS Business visual unification */
 input,
 select,
 textarea,

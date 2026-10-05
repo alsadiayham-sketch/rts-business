@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RTS POS Installer</title>
+  <title>RTS Business Installer</title>
   <style>
     * {
       box-sizing: border-box;
@@ -747,7 +747,7 @@
       }
     }
 
-    /* RTS POS setup: restrained light product styling */
+    /* RTS Business setup: restrained light product styling */
     html,
     body {
       color: #211523;
@@ -933,10 +933,10 @@
       <div class="titlebar">
         <div class="title-left">
           <div class="title-icon">
-            <img src="icon.png" alt="RTS POS">
+            <img src="icon.png" alt="RTS Business">
           </div>
           <div class="title-copy">
-            <span class="title-app">RTS POS Installer</span>
+            <span class="title-app">RTS Business Installer</span>
             <span class="title-sub">Royal Technology Solutions</span>
           </div>
         </div>
@@ -949,11 +949,11 @@
         <div class="step active" id="stepWelcome">
           <div class="hero">
             <div class="logo-badge">
-              <img src="icon.png" alt="RTS POS icon">
+              <img src="icon.png" alt="RTS Business icon">
             </div>
 
             <div>
-              <h1 class="wordmark">RTS POS</h1>
+              <h1 class="wordmark">RTS Business</h1>
               <p class="subtitle">Point of Sale System</p>
             </div>
 
@@ -980,7 +980,7 @@
           <div class="hero">
             <div>
               <h2 class="section-heading">Customize your installation</h2>
-              <p class="section-copy">Choose where RTS POS should be installed and which shortcuts you want us to create for the fastest launch experience.</p>
+              <p class="section-copy">Choose where RTS Business should be installed and which shortcuts you want us to create for the fastest launch experience.</p>
             </div>
 
             <div class="card option-stack">
@@ -1003,7 +1003,7 @@
                 </div>
                 <div class="checkbox-row">
                   <input id="launchAfterInstall" type="checkbox" checked>
-                  <label for="launchAfterInstall">Launch RTS POS after installation</label>
+                  <label for="launchAfterInstall">Launch RTS Business after installation</label>
                 </div>
                 <div class="checkbox-row">
                   <input id="addToPath" type="checkbox">
@@ -1029,7 +1029,7 @@
 
             <div>
               <h2 class="section-heading" id="installStatusHeading">Installing...</h2>
-              <p class="section-copy" id="installStatusText">Preparing RTS POS for installation.</p>
+              <p class="section-copy" id="installStatusText">Preparing RTS Business for installation.</p>
             </div>
 
             <div class="card progress-shell">
@@ -1051,10 +1051,10 @@
             <div class="checkmark-shell">
               <div class="checkmark-circle"></div>
             </div>
-            <h2 class="complete-title">RTS POS has been installed successfully!</h2>
-            <p class="complete-copy">Everything is ready to go. Launch RTS POS now or close the installer and start whenever you are ready.</p>
+            <h2 class="complete-title">RTS Business has been installed successfully!</h2>
+            <p class="complete-copy">Everything is ready to go. Launch RTS Business now or close the installer and start whenever you are ready.</p>
             <div class="button-row">
-              <button class="btn btn-primary btn-large" id="launchButton" type="button">Launch RTS POS</button>
+              <button class="btn btn-primary btn-large" id="launchButton" type="button">Launch RTS Business</button>
               <button class="btn btn-secondary" id="finishButton" type="button">Close</button>
             </div>
           </div>
@@ -1151,18 +1151,18 @@
       state.installCompleted = false;
       clearError();
       setStep('stepInstalling');
-      setStatus('Installing...', 'Copying RTS POS and preparing the desktop experience.');
+      setStatus('Installing...', 'Copying RTS Business and preparing the desktop experience.');
       setProgress(0, 'Starting installation', 'Preparing installer engine...');
 
       ipcRenderer.invoke('install', options).then(function (result) {
         if (!result || !result.success) {
-          setStatus('Installation failed', 'We ran into an issue while setting up RTS POS.');
+          setStatus('Installation failed', 'We ran into an issue while setting up RTS Business.');
           showError(result && result.error ? result.error : 'Unknown installer error.');
           return;
         }
 
         state.installCompleted = true;
-        setProgress(100, 'Installation complete', 'RTS POS is ready.');
+        setProgress(100, 'Installation complete', 'RTS Business is ready.');
         setTimeout(function () {
           setStep('stepComplete');
           if (state.launchAfterInstall) {
@@ -1170,7 +1170,7 @@
           }
         }, 650);
       }).catch(function (error) {
-        setStatus('Installation failed', 'We ran into an issue while setting up RTS POS.');
+        setStatus('Installation failed', 'We ran into an issue while setting up RTS Business.');
         showError(error && error.message ? error.message : String(error));
       });
     }
@@ -1222,17 +1222,17 @@
       };
 
       ipcRenderer.on('install-stage', function (event, payload) {
-        var text = payload && payload.text ? payload.text : 'Installing RTS POS...';
+        var text = payload && payload.text ? payload.text : 'Installing RTS Business...';
         var lowerText = text.toLowerCase();
 
         if (lowerText.indexOf('shortcut') !== -1) {
           setStatus('Creating shortcuts...', 'Finishing the desktop and Start Menu experience.');
         } else if (lowerText.indexOf('final') !== -1) {
-          setStatus('Finalizing...', 'Wrapping up installation and getting RTS POS ready.');
+          setStatus('Finalizing...', 'Wrapping up installation and getting RTS Business ready.');
         } else if (lowerText.indexOf('register') !== -1) {
-          setStatus('Finalizing...', 'Registering RTS POS with Windows.');
+          setStatus('Finalizing...', 'Registering RTS Business with Windows.');
         } else {
-          setStatus('Installing...', 'Copying RTS POS and preparing the desktop experience.');
+          setStatus('Installing...', 'Copying RTS Business and preparing the desktop experience.');
         }
 
         byId('progressLabel').innerHTML = text;

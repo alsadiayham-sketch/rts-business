@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTS POS</title>
+    <title>RTS Business</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -50,7 +50,7 @@
     <!-- Login Screen -->
     <div id="loginScreen" class="login-screen" style="display:none;">
         <div class="login-box">
-            <img src="../assets/rts-pos-logo.svg" class="login-logo" alt="RTS POS - Royal Technology Solutions">
+            <img src="../assets/rts-business-logo.svg" class="login-logo" alt="RTS Business - Royal Technology Solutions">
             <h2>نظام نقطة البيع المصمم للعمل الحقيقي</h2>
             <p class="login-intro">المبيعات والمخزون والعملاء والتقارير في مساحة واحدة واضحة.</p>
             <div class="login-form">
@@ -72,7 +72,7 @@
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <img src="../assets/rts-pos-logo.svg" alt="RTS POS">
+                <img src="../assets/rts-business-logo.svg" alt="RTS Business">
                 <span class="brand-sub" id="sidebarStoreName">نقطة البيع</span>
             </div>
             <nav class="sidebar-nav">
@@ -127,6 +127,10 @@
                 <button class="nav-btn feature-hookah" data-page="hookah" style="display:none;">
                     <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 17h11a3 3 0 0 0 0-6H9a2 2 0 1 1 0-4h7m-9 10a3 3 0 0 0 3 3h5m4-9 2-2m-2 8 2 2"/></svg></span>
                     <span class="nav-label">الأرجيلة</span>
+                </button>
+                <button class="nav-btn feature-clinic" data-page="clinic">
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-14v10m-5-5h10"/></svg></span>
+                    <span class="nav-label">RTS Clinic</span>
                 </button>
                 <button class="nav-btn" data-page="settings">
                     <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-3.5 2-1-2-4-2 .5-1.5-1L15 4h-6l-.5 2.5-1.5 1L5 7l-2 4 2 1v2l-2 1 2 4 2-.5 1.5 1L9 22h6l.5-2.5 1.5-1 2 .5 2-4-2-1Z"/></svg></span>
@@ -1141,6 +1145,127 @@
                         <button class="btn-primary" id="addHookahBtn">+ إضافة صنف</button>
                     </div>
                     <div class="hookah-grid" id="hookahGrid"></div>
+                </div>
+            </section>
+
+            <!-- ===== RTS Clinic ===== -->
+            <section class="page feature-clinic" id="page-clinic">
+                <div class="page-header">
+                    <h2>RTS Clinic</h2>
+                    <span class="clinic-scope-badge">إدارة العيادات والمرضى</span>
+                </div>
+                <div class="clinic-tabs" id="clinicTabs">
+                    <button class="clinic-tab active" data-clinic-tab="overview">نظرة عامة</button>
+                    <button class="clinic-tab" data-clinic-tab="clinics">العيادات</button>
+                    <button class="clinic-tab" data-clinic-tab="patients">المرضى</button>
+                    <button class="clinic-tab" data-clinic-tab="reservations">الحجوزات</button>
+                    <button class="clinic-tab" data-clinic-tab="sessions">الجلسات والملاحظات</button>
+                    <button class="clinic-tab" data-clinic-tab="files">الملفات الطبية</button>
+                </div>
+
+                <div class="clinic-panel active" data-clinic-panel="overview">
+                    <div class="clinic-stat-grid">
+                        <div class="clinic-stat-card"><span>العيادات النشطة</span><strong id="clinicCount">0</strong></div>
+                        <div class="clinic-stat-card"><span>المرضى المسجلون</span><strong id="patientCount">0</strong></div>
+                        <div class="clinic-stat-card"><span>حجوزات اليوم</span><strong id="reservationCount">0</strong></div>
+                        <div class="clinic-stat-card"><span>جلسات مفتوحة</span><strong id="openSessionCount">0</strong></div>
+                    </div>
+                    <div class="stats-block clinic-privacy-card">
+                        <h3>ملاحظات الخصوصية</h3>
+                        <p class="stats-hint">بيانات المرضى والجلسات منفصلة عن مبيعات RTS Business. صلاحيات الموظفين وسجل الوصول يجب أن تُدار على مستوى الخادم قبل استخدام بيانات طبية حقيقية.</p>
+                    </div>
+                    <div class="stats-block">
+                        <h3>حجوزات اليوم</h3>
+                        <div id="todayReservations" class="clinic-list"></div>
+                    </div>
+                </div>
+
+                <div class="clinic-panel" data-clinic-panel="clinics">
+                    <div class="stats-block">
+                        <h3>إضافة عيادة جديدة</h3>
+                        <div class="clinic-form-grid">
+                            <div class="form-group"><label for="clinicName">اسم العيادة</label><input id="clinicName" type="text" placeholder="مثال: عيادة RTS الرئيسية"></div>
+                            <div class="form-group"><label for="clinicCode">رمز العيادة</label><input id="clinicCode" type="text" placeholder="CLINIC-01"></div>
+                            <div class="form-group"><label for="clinicPhone">الهاتف</label><input id="clinicPhone" type="text" placeholder="059..."></div>
+                            <div class="form-group"><label for="clinicAddress">العنوان</label><input id="clinicAddress" type="text" placeholder="العنوان"></div>
+                            <div class="form-group"><label for="clinicHours">ساعات العمل</label><input id="clinicHours" type="text" placeholder="09:00 - 18:00"></div>
+                            <div class="form-group"><label for="clinicRooms">الغرف</label><input id="clinicRooms" type="number" min="1" value="1"></div>
+                        </div>
+                        <button class="btn-primary" id="addClinicBtn">حفظ العيادة</button>
+                        <div class="notes-saved-hint" id="clinicSavedHint"></div>
+                    </div>
+                    <div class="stats-block">
+                        <h3>العيادات المسجلة</h3>
+                        <div id="clinicsList" class="clinic-list"></div>
+                    </div>
+                </div>
+
+                <div class="clinic-panel" data-clinic-panel="patients">
+                    <div class="stats-block">
+                        <h3>تسجيل مريض</h3>
+                        <div class="clinic-form-grid">
+                            <div class="form-group"><label for="patientName">الاسم الكامل</label><input id="patientName" type="text"></div>
+                            <div class="form-group"><label for="patientPhone">الهاتف</label><input id="patientPhone" type="text"></div>
+                            <div class="form-group"><label for="patientDob">تاريخ الميلاد</label><input id="patientDob" type="date"></div>
+                            <div class="form-group"><label for="patientNotes">ملاحظات إدارية</label><textarea id="patientNotes" rows="2"></textarea></div>
+                        </div>
+                        <button class="btn-primary" id="addPatientBtn">حفظ المريض</button>
+                    </div>
+                    <div class="stats-block">
+                        <h3>المرضى</h3>
+                        <div class="clinic-search-row"><input id="patientSearch" type="search" placeholder="بحث بالاسم أو الهاتف"></div>
+                        <div id="patientsList" class="clinic-list"></div>
+                    </div>
+                </div>
+
+                <div class="clinic-panel" data-clinic-panel="reservations">
+                    <div class="stats-block">
+                        <h3>حجز موعد جديد</h3>
+                        <div class="clinic-form-grid">
+                            <div class="form-group"><label for="reservationPatient">المريض</label><select id="reservationPatient"></select></div>
+                            <div class="form-group"><label for="reservationClinic">العيادة</label><select id="reservationClinic"></select></div>
+                            <div class="form-group"><label for="reservationDate">التاريخ والوقت</label><input id="reservationDate" type="datetime-local"></div>
+                            <div class="form-group"><label for="reservationReason">سبب الزيارة</label><input id="reservationReason" type="text"></div>
+                        </div>
+                        <button class="btn-primary" id="addReservationBtn">حفظ الحجز</button>
+                    </div>
+                    <div class="stats-block">
+                        <h3>الحجوزات القادمة</h3>
+                        <div id="reservationsList" class="clinic-list"></div>
+                    </div>
+                </div>
+
+                <div class="clinic-panel" data-clinic-panel="sessions">
+                    <div class="stats-block">
+                        <h3>تسجيل جلسة وملاحظة</h3>
+                        <div class="clinic-form-grid">
+                            <div class="form-group"><label for="sessionPatient">المريض</label><select id="sessionPatient"></select></div>
+                            <div class="form-group"><label for="sessionReservation">الحجز المرتبط</label><select id="sessionReservation"></select></div>
+                            <div class="form-group full-width"><label for="sessionNote">ملاحظة الجلسة</label><textarea id="sessionNote" rows="5" placeholder="اكتب الملاحظة، الخطة، والمتابعة..."></textarea></div>
+                        </div>
+                        <button class="btn-primary" id="addSessionBtn">حفظ الجلسة</button>
+                    </div>
+                    <div class="stats-block">
+                        <h3>آخر الجلسات</h3>
+                        <div id="sessionsList" class="clinic-list"></div>
+                    </div>
+                </div>
+
+                <div class="clinic-panel" data-clinic-panel="files">
+                    <div class="stats-block">
+                        <h3>رفع ملف طبي</h3>
+                        <p class="stats-hint">يُحفظ الملف كمرجع مرتبط بالمريض والجلسة. قبل الإنتاج يجب ربط هذا المسار بتخزين كائنات مشفّر مع صلاحيات خادم وسجل وصول.</p>
+                        <div class="clinic-form-grid">
+                            <div class="form-group"><label for="filePatient">المريض</label><select id="filePatient"></select></div>
+                            <div class="form-group"><label for="medicalFile">الملف</label><input id="medicalFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"></div>
+                            <div class="form-group"><label for="fileCategory">التصنيف</label><input id="fileCategory" type="text" placeholder="تحليل، صورة، تقرير..."></div>
+                        </div>
+                        <button class="btn-primary" id="uploadMedicalFileBtn">رفع الملف</button>
+                    </div>
+                    <div class="stats-block">
+                        <h3>الملفات المرفوعة</h3>
+                        <div id="filesList" class="clinic-list"></div>
+                    </div>
                 </div>
             </section>
         </main>

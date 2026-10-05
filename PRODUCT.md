@@ -1,4 +1,4 @@
-# RTS POS
+# RTS Business
 
 ## Register
 
@@ -7,23 +7,23 @@ product
 ## Users
 
 Arabic-speaking owners, cashiers, supervisors, and inventory staff across retail,
-supermarkets, clothing stores, restaurants, and coffee shops. They use RTS POS on
+supermarkets, clothing stores, restaurants, and coffee shops. They use RTS Business on
 Windows throughout the workday and need fast, low-error sales, stock, customer,
 supplier, and reporting workflows. The interface must remain useful under time
 pressure, with scanners, thermal printers, cash drawers, and intermittent internet.
 
 ## Product Purpose
 
-RTS POS is the point-of-sale product from Royal Technology Solutions. It brings
+RTS Business is the business operations product from Royal Technology Solutions. It brings
 checkout, inventory, receipts, returns, customers, loyalty, suppliers, restaurant
 tables, and business reporting into one dependable desktop application. Success
 means a cashier can complete common sales without hesitation, owners can trust the
-records, existing ADA POS customers retain their data during the rebrand, and future
+records and future
 updates install without disruption.
 
 ## Brand Personality
 
-Confident, precise, approachable. RTS POS should feel engineered for real work:
+Confident, precise, approachable. RTS Business should feel engineered for real work:
 professional without being corporate, modern without being unfamiliar, and polished
 without distracting a cashier from the transaction.
 
