@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -9,10 +9,37 @@ let mainWindow = null;
 
 app.setPath('userData', path.join(app.getPath('appData'), 'RTS Business'));
 
-// In-app auto-update (electron-updater). Pulls the new build from the public
-// GitHub releases repo and installs it in place — no manual download needed.
-autoUpdater.autoDownload = true;
+const UPDATE_RELEASES_URL = 'https://github.com/alsadiayham-sketch/rts-business-releases/releases/latest';
+
+// Keep downloads user-initiated and allow electron-updater to use blockmaps for
+// differential downloads. latest.yml supplies the SHA-512 used for verification.
+autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.disableDifferentialDownload = false;
+autoUpdater.allowDowngrade = false;
+autoUpdater.allowPrerelease = false;
+
+function getReleaseNotes(info) {
+  var notes = info && info.releaseNotes;
+  if (Array.isArray(notes)) {
+    return notes.map(function (entry) { return entry && entry.note || ''; }).join('\n');
+  }
+  return typeof notes === 'string' ? notes : '';
+}
+
+function getUpdatePolicy(info) {
+  var notes = getReleaseNotes(info);
+  var marker = /<!--\s*rts-update-policy\s+(\{[^\r\n]*\})\s*-->/i;
+  var match = notes.match(marker);
+  var policy = { mode: 'optional' };
+  if (match) {
+    try { policy = JSON.parse(match[1]); } catch (e) {}
+  }
+  return {
+    mandatory: policy.mode === 'mandatory',
+    notes: notes.replace(marker, '').trim()
+  };
+}
 
 function sendUpdater(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -21,7 +48,12 @@ function sendUpdater(channel, data) {
 }
 
 autoUpdater.on('update-available', function (info) {
-  sendUpdater('updater-available', { version: info && info.version });
+  var policy = getUpdatePolicy(info);
+  sendUpdater('updater-available', {
+    version: info && info.version,
+    mandatory: policy.mandatory,
+    notes: policy.notes
+  });
 });
 autoUpdater.on('update-not-available', function () {
   sendUpdater('updater-none', {});
@@ -108,9 +140,7 @@ ipcMain.handle('show-open-dialog', async function (event, options) {
   return result;
 });
 
-// IPC: Start the in-app update (download from GitHub releases).
-// Returns ok:false with a reason so the renderer can fall back to a browser download.
-ipcMain.handle('updater-start', async function () {
+ipcMain.handle('updater-check', async function () {
   if (!app.isPackaged) return { ok: false, reason: 'dev' };
   try {
     await autoUpdater.checkForUpdates();
@@ -118,6 +148,21 @@ ipcMain.handle('updater-start', async function () {
   } catch (e) {
     return { ok: false, reason: String((e && e.message) || e) };
   }
+});
+
+ipcMain.handle('updater-download', async function () {
+  if (!app.isPackaged) return { ok: false, reason: 'dev' };
+  try {
+    await autoUpdater.downloadUpdate();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String((e && e.message) || e) };
+  }
+});
+
+ipcMain.handle('updater-open-releases', async function () {
+  await shell.openExternal(UPDATE_RELEASES_URL);
+  return { ok: true };
 });
 
 // IPC: Quit and install the downloaded update, then relaunch.

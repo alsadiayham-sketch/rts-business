@@ -14,7 +14,7 @@ var fs = require('fs');
 var path = require('path');
 
 // App version from package.json
-var APP_VERSION = '4.0.0';
+var APP_VERSION = require('../../package.json').version;
 
 // ============ STATE ============
 var products = [];
@@ -219,8 +219,6 @@ function attemptLogin() {
         document.getElementById('sidebarStoreName').textContent = storeName;
         document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
         initApp();
-        setupUpdaterListeners();
-        checkForUpdates();
     }).catch(function (err) {
         errorEl.textContent = 'خطأ في الاتصال: ' + err.message;
         loginBtn.textContent = 'دخول';
@@ -250,86 +248,19 @@ function logout() {
 }
 
 // ============ AUTO-UPDATE SYSTEM ============
-function compareVersions(v1, v2) {
-    var parts1 = v1.split('.').map(Number);
-    var parts2 = v2.split('.').map(Number);
-    for (var i = 0; i < 3; i++) {
-        var a = parts1[i] || 0;
-        var b = parts2[i] || 0;
-        if (a > b) return 1;
-        if (a < b) return -1;
-    }
-    return 0;
-}
-
-function checkForUpdates() {
-    rawDb.collection('projects').doc('_global').collection('settings').doc('pos_updates').get().then(function (doc) {
-        if (!doc.exists) return;
-        var data = doc.data();
-        var remoteVersion = data.currentVersion || '0.0.0';
-        var minVersion = data.minVersion || '0.0.0';
-        var forceUpdate = data.forceUpdate === true;
-        var downloadUrl = data.downloadUrl || '';
-        var releaseNotes = data.releaseNotes || '';
-
-        // Security: only allow HTTPS URLs from trusted domains
-        if (downloadUrl && !isAllowedUpdateUrl(downloadUrl)) {
-            console.warn('Blocked untrusted update URL');
-            return;
-        }
-
-        // Check if update available
-        if (compareVersions(remoteVersion, APP_VERSION) > 0) {
-            // Check if force update required
-            if (forceUpdate && compareVersions(APP_VERSION, minVersion) < 0) {
-                showForceUpdate(remoteVersion, releaseNotes, downloadUrl);
-            } else {
-                showUpdateAvailable(remoteVersion, releaseNotes, downloadUrl);
-            }
-        }
-    }).catch(function () {});
-}
-
-// Security: validate update URLs against trusted domains
-function isAllowedUpdateUrl(url) {
-    var trustedDomains = [
-        'https://github.com/alsadiayham-sketch/',
-        'https://drive.google.com/',
-        'https://rts-royal.pages.dev/'
-    ];
-    for (var i = 0; i < trustedDomains.length; i++) {
-        if (url.indexOf(trustedDomains[i]) === 0) return true;
-    }
-    return false;
-}
-
-function showUpdateAvailable(version, notes, url) {
+function showUpdateAvailable(version, notes, mandatory) {
     var overlay = document.getElementById('updateOverlay');
     document.getElementById('updateVersion').textContent = version;
-    document.getElementById('updateNotes').textContent = notes;
-    setUpdateButtonToInstall(url);
-    document.getElementById('updateDismissBtn').style.display = 'inline-block';
+    document.getElementById('updateNotes').textContent = notes || 'يتضمن هذا الإصدار تحسينات وإصلاحات جديدة.';
+    setUpdateButtonToInstall();
+    document.getElementById('updateDismissBtn').style.display = mandatory ? 'none' : 'inline-block';
     document.getElementById('updateDismissBtn').onclick = function () {
         overlay.style.display = 'none';
     };
-    document.getElementById('updateForceMsg').style.display = 'none';
+    document.getElementById('updateForceMsg').style.display = mandatory ? 'block' : 'none';
     overlay.style.display = 'flex';
 }
 
-function showForceUpdate(version, notes, url) {
-    var overlay = document.getElementById('updateOverlay');
-    document.getElementById('updateVersion').textContent = version;
-    document.getElementById('updateNotes').textContent = notes;
-    setUpdateButtonToInstall(url);
-    document.getElementById('updateDismissBtn').style.display = 'none';
-    document.getElementById('updateForceMsg').style.display = 'block';
-    overlay.style.display = 'flex';
-    // Block the app
-    document.getElementById('appContainer').style.display = 'none';
-}
-
-// ===== In-app auto-update wiring (electron-updater) =====
-var _updateDownloadUrl = '';
 var _updaterListening = false;
 
 function setUpdateText(msg) {
@@ -343,16 +274,14 @@ function setUpdateProgress(pct) {
     if (bar && pct !== null) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
 }
 
-// Fall back to a plain browser download if in-app update can't run.
-function fallbackToBrowserDownload(url) {
+function fallbackToBrowserDownload() {
     var btn = document.getElementById('updateDownloadBtn');
     btn.disabled = false;
     btn.textContent = '⬇ تحميل التحديث من المتصفح';
-    btn.onclick = function () { if (url) electron.shell.openExternal(url); };
+    btn.onclick = function () { ipcRenderer.invoke('updater-open-releases'); };
 }
 
-function setUpdateButtonToInstall(url) {
-    _updateDownloadUrl = url || '';
+function setUpdateButtonToInstall() {
     var btn = document.getElementById('updateDownloadBtn');
     btn.disabled = false;
     btn.textContent = '⬇ تحديث التطبيق الآن';
@@ -360,17 +289,16 @@ function setUpdateButtonToInstall(url) {
     setUpdateText('');
     btn.onclick = function () {
         btn.disabled = true;
-        btn.textContent = '... جارٍ التحقق من التحديث';
-        setUpdateText('جارٍ الاتصال بخادم التحديثات...');
-        if (!ipcRenderer || !ipcRenderer.invoke) { fallbackToBrowserDownload(_updateDownloadUrl); return; }
-        ipcRenderer.invoke('updater-start').then(function (res) {
+        btn.textContent = '... جارٍ بدء التنزيل';
+        setUpdateText('جارٍ بدء التنزيل الآمن...');
+        if (!ipcRenderer || !ipcRenderer.invoke) { fallbackToBrowserDownload(); return; }
+        ipcRenderer.invoke('updater-download').then(function (res) {
             if (!res || !res.ok) {
-                // Dev mode or updater error -> let the user download manually.
                 setUpdateText('تعذّر التحديث التلقائي، يمكنك التحميل يدوياً.');
-                fallbackToBrowserDownload(_updateDownloadUrl);
+                fallbackToBrowserDownload();
             }
         }).catch(function () {
-            fallbackToBrowserDownload(_updateDownloadUrl);
+            fallbackToBrowserDownload();
         });
     };
 }
@@ -380,10 +308,8 @@ function setupUpdaterListeners() {
     _updaterListening = true;
     var btn = document.getElementById('updateDownloadBtn');
 
-    ipcRenderer.on('updater-available', function () {
-        if (btn) btn.textContent = '... جارٍ تنزيل التحديث';
-        setUpdateText('جارٍ تنزيل التحديث، الرجاء الانتظار...');
-        setUpdateProgress(0);
+    ipcRenderer.on('updater-available', function (event, info) {
+        showUpdateAvailable(info.version, info.notes, info.mandatory);
     });
     ipcRenderer.on('updater-progress', function (event, p) {
         var pct = Math.round(p && p.percent || 0);
@@ -405,13 +331,14 @@ function setupUpdaterListeners() {
         }
     });
     ipcRenderer.on('updater-none', function () {
-        setUpdateText('أنت تستخدم أحدث إصدار.');
-        fallbackToBrowserDownload(_updateDownloadUrl);
+        if (document.getElementById('updateOverlay').style.display !== 'none') {
+            setUpdateText('أنت تستخدم أحدث إصدار.');
+        }
     });
     ipcRenderer.on('updater-error', function (event, e) {
         setUpdateProgress(null);
         setUpdateText('حدث خطأ أثناء التحديث التلقائي. يمكنك التحميل يدوياً.');
-        fallbackToBrowserDownload(_updateDownloadUrl);
+        fallbackToBrowserDownload();
     });
 }
 
@@ -6286,6 +6213,10 @@ window.printProductLabel = printProductLabel;
 // ============ START ============
 document.addEventListener('DOMContentLoaded', function () {
     checkLicense();
+    setupUpdaterListeners();
+    if (ipcRenderer && ipcRenderer.invoke) {
+        ipcRenderer.invoke('updater-check').catch(function () {});
+    }
     var loginBtn = document.getElementById('loginBtn');
     if (loginBtn) loginBtn.addEventListener('click', attemptLogin);
     var passField = document.getElementById('loginPassword');

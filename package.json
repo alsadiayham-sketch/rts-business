@@ -7,7 +7,9 @@
     "start": "electron .",
     "build": "electron-builder --win",
     "build-portable": "electron-builder --win --config.win.target=portable",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "publish-update": "node scripts/publish-update.js",
+    "release": "npm run build && npm run publish-update"
   },
   "author": "Royal Technology Solutions",
   "license": "PROPRIETARY",
