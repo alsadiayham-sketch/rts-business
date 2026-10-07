@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {

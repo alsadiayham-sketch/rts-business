@@ -826,7 +826,7 @@ function renderProducts() {
     for (var g = 0; g < order.length; g++) {
         var sec = order[g];
         var list = groups[sec];
-        html += '<div class="section-header">' + escapeHtml(sec) + ' <span class="section-count">' + list.length + '</span></div>';
+        html += '<div class="section-header">' + categoryIcon(sec) + ' ' + escapeHtml(sec) + ' <span class="section-count">' + list.length + '</span></div>';
         for (var k = 0; k < list.length; k++) {
             var p = list[k];
             var totalStock = getTotalStock(p);
@@ -846,7 +846,65 @@ function renderProducts() {
 }
 
 // ============ CATEGORY BOXES + BRAND/FILTER POPUP ============
-var CATEGORY_ICONS = { 'ملابس': '👕', 'أحذية': '👟', 'إكسسوارات': '🎀', 'كريمات وعطور': '🧴', 'أخرى': '📦' };
+var CATEGORY_ICONS = {
+    apparel: '👕',
+    shoes: '👟',
+    accessories: '👜',
+    beauty: '💄',
+    food: '🍽️',
+    grocery: '🛒',
+    bakery: '🥐',
+    beverages: '☕',
+    electronics: '📱',
+    pharmacy: '💊',
+    home: '🏠',
+    furniture: '🛋️',
+    sports: '⚽',
+    toys: '🧸',
+    books: '📚',
+    jewelry: '💍',
+    automotive: '🚗',
+    services: '🧰',
+    other: '📦'
+};
+
+function normalizeCategory(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFKC')
+        .replace(/[\u064B-\u065F\u0670]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function categoryIcon(value) {
+    var category = normalizeCategory(value);
+    if (!category || category === 'أخرى' || category === 'اخرى' || category === 'other') return CATEGORY_ICONS.other;
+    var rules = [
+        ['beauty', ['مكياج', 'مستحضرات تجميل', 'تجميل', 'كريمات', 'عطور', 'makeup', 'cosmetic', 'beauty', 'perfume']],
+        ['food', ['مطعم', 'مطاعم', 'مأكولات', 'طعام', 'restaurant', 'food', 'catering']],
+        ['bakery', ['مخبز', 'مخبوزات', 'حلويات', 'bakery', 'pastry', 'dessert']],
+        ['beverages', ['مشروبات', 'قهوة', 'مقهى', 'عصائر', 'beverage', 'coffee', 'cafe', 'drinks']],
+        ['grocery', ['بقالة', 'سوبرماركت', 'سوبر ماركت', 'تموينات', 'grocery', 'supermarket', 'market']],
+        ['apparel', ['ملابس', 'أزياء', 'ثياب', 'clothing', 'apparel', 'fashion']],
+        ['shoes', ['أحذية', 'حذاء', 'shoes', 'footwear']],
+        ['accessories', ['إكسسوارات', 'اكسسوارات', 'حقائب', 'شنط', 'accessories', 'bags']],
+        ['electronics', ['إلكترونيات', 'الكترونيات', 'جوالات', 'هواتف', 'كمبيوتر', 'electronics', 'phone', 'computer']],
+        ['pharmacy', ['صيدلية', 'أدوية', 'طبي', 'pharmacy', 'medicine', 'health']],
+        ['home', ['منزل', 'منزلية', 'أدوات منزلية', 'home', 'household']],
+        ['furniture', ['أثاث', 'furniture']],
+        ['sports', ['رياضة', 'رياضي', 'sports', 'fitness']],
+        ['toys', ['ألعاب', 'لعب أطفال', 'toys', 'kids']],
+        ['books', ['كتب', 'قرطاسية', 'مكتبة', 'books', 'stationery']],
+        ['jewelry', ['مجوهرات', 'ذهب', 'فضة', 'jewelry', 'jewellery']],
+        ['automotive', ['سيارات', 'قطع غيار', 'سيارات', 'automotive', 'auto', 'car']],
+        ['services', ['خدمات', 'صيانة', 'خدمة', 'services', 'service', 'repair']]
+    ];
+    for (var i = 0; i < rules.length; i++) {
+        if (rules[i][1].some(function (term) { return category.indexOf(term) >= 0; })) return CATEGORY_ICONS[rules[i][0]];
+    }
+    return CATEGORY_ICONS.other;
+}
 
 function renderCategoryBoxes() {
     var box = document.getElementById('categoryBoxes');
@@ -862,7 +920,7 @@ function renderCategoryBoxes() {
     var html = '';
     for (var g = 0; g < order.length; g++) {
         var t = order[g];
-        var ic = CATEGORY_ICONS[t] || '📦';
+        var ic = categoryIcon(t);
         html += '<div class="category-box" data-type="' + escapeHtml(t) + '">' +
             '<span class="cat-ic">' + ic + '</span>' +
             '<span class="cat-name">' + escapeHtml(t) + '</span>' +
@@ -877,7 +935,7 @@ function openCategoryModal(type, target, showCats) {
     catModalSize = null;
     catModalTarget = target || 'sale';
     catModalShowCats = !!showCats;
-    var title = catModalType ? ((CATEGORY_ICONS[catModalType] || '📦') + ' ' + catModalType)
+    var title = catModalType ? (categoryIcon(catModalType) + ' ' + catModalType)
         : (catModalTarget === 'return' ? '🔁 اختر الصنف البديل' : 'اختر منتجاً');
     document.getElementById('categoryModalTitle').textContent = title;
     document.getElementById('categorySearch').value = '';
@@ -912,7 +970,7 @@ function renderCategoryModal() {
         }
         var chtml = '<div class="cat-chip' + (catModalType === null ? ' active' : '') + '" data-cat="">الكل</div>';
         for (var t = 0; t < typeOrder.length; t++) {
-            chtml += '<div class="cat-chip' + (catModalType === typeOrder[t] ? ' active' : '') + '" data-cat="' + escapeHtml(typeOrder[t]) + '">' + (CATEGORY_ICONS[typeOrder[t]] || '📦') + ' ' + escapeHtml(typeOrder[t]) + '</div>';
+            chtml += '<div class="cat-chip' + (catModalType === typeOrder[t] ? ' active' : '') + '" data-cat="' + escapeHtml(typeOrder[t]) + '">' + categoryIcon(typeOrder[t]) + ' ' + escapeHtml(typeOrder[t]) + '</div>';
         }
         document.getElementById('categoryCats').innerHTML = chtml;
     }
