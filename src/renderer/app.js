@@ -2,10 +2,18 @@ var fbConfig = require('./firebase-config');
 var db = fbConfig.db;
 var rawDb = fbConfig.rawDb;
 var firebase = fbConfig.firebase;
+var storage = fbConfig.storage;
 var setProjectId = fbConfig.setProjectId;
 var getProjectId = fbConfig.getProjectId;
 var isD1 = fbConfig.isD1;
 var registerD1Tenant = fbConfig.registerD1Tenant;
+var registerD1MessagingBackend = fbConfig.registerD1MessagingBackend;
+var isMessagingConfigured = fbConfig.isMessagingConfigured;
+var messagingGetStatus = fbConfig.messagingGetStatus;
+var messagingPreviewAudience = fbConfig.messagingPreviewAudience;
+var messagingRequestCredits = fbConfig.messagingRequestCredits;
+var messagingSend = fbConfig.messagingSend;
+var messagingUpdatePricing = fbConfig.messagingUpdatePricing;
 var serverTimestamp = fbConfig.serverTimestamp;
 var posAuthenticate = fbConfig.posAuthenticate;
 var electron = require('electron');
@@ -48,6 +56,17 @@ var appliedRewardIds = []; // reward ids currently selected for this sale (prize
 var currentPage = 'sales';
 var currentUser = null;
 var licenseValid = false;
+var storeSessionId = 0;
+var storeUnsubscribers = [];
+var appEventsInitialized = false;
+var DEFAULT_MESSAGING_PRICING = { customerNis: 0.20, platformCostNis: 0.10 };
+var messagingState = createMessagingState();
+var messagingPreview = null;
+var messagingPreviewInFlight = false;
+var messagingSendInFlight = false;
+var messagingCreditRequestInFlight = false;
+var messagingPricingInFlight = false;
+var pendingMessagingCreditRequest = null;
 
 var varModalProduct = null;
 var varModalColor = null;
@@ -62,6 +81,63 @@ var returnReplaceCart = [];
 var returnSourceBill = null;
 var currentReceiptBill = null;
 var openInvRows = {};
+
+function clearStoreSubscriptions() {
+    while (storeUnsubscribers.length) {
+        var unsubscribe = storeUnsubscribers.pop();
+        if (typeof unsubscribe === 'function') {
+            try { unsubscribe(); } catch (e) { console.error('Unable to stop store listener:', e); }
+        }
+    }
+}
+
+function trackStoreSubscription(unsubscribe) {
+    if (typeof unsubscribe === 'function') storeUnsubscribers.push(unsubscribe);
+}
+
+function resetStoreState() {
+    products = [];
+    bills = [];
+    withdrawals = [];
+    deposits = [];
+    debtPayments = [];
+    debtManual = [];
+    returnRecords = [];
+    customerRecords = [];
+    loyaltyTxns = [];
+    loyaltyConfig = null;
+    storeConfig = null;
+    registerRecords = [];
+    storeCredits = [];
+    supplierRecords = [];
+    purchaseOrders = [];
+    stocktakeRecords = [];
+    hookahItems = [];
+    clinicRecords = [];
+    damageRecords = [];
+    registerBalance = 0;
+    productsLoaded = false;
+    licenseValid = false;
+    messagingState = createMessagingState();
+    messagingPreview = null;
+    messagingPreviewInFlight = false;
+    messagingSendInFlight = false;
+    messagingCreditRequestInFlight = false;
+    messagingPricingInFlight = false;
+    pendingMessagingCreditRequest = null;
+}
+
+function beginStoreSession(storeId) {
+    clearStoreSubscriptions();
+    storeSessionId++;
+    resetStoreState();
+    setProjectId(storeId);
+    return storeSessionId;
+}
+
+function isActiveStoreSession(sessionId) {
+    return sessionId === storeSessionId;
+}
 
 // ============ SECURITY: LICENSE CHECK ============
 function checkLicense() {
@@ -78,6 +154,7 @@ function checkLicense() {
         var data = doc.data();
         if (data.dataBackend === 'd1' && data.apiBaseUrl) {
             registerD1Tenant(storeId, data.apiBaseUrl);
+            registerD1MessagingBackend(storeId, data);
         }
         if (!data.warrantyEnd) {
             showLicenseExpired(new Date());
@@ -131,11 +208,12 @@ function attemptLogin() {
     loginBtn.textContent = 'جاري الدخول...';
     loginBtn.disabled = true;
 
-    // Set project ID dynamically
-    setProjectId(storeName);
+    // Stop all listeners from a previous store before switching the database facade.
+    var sessionId = beginStoreSession(storeName);
 
     // First verify store exists and license is valid
     db.collection('settings').doc('pos').get({ source: 'server' }).then(function (doc) {
+        if (!isActiveStoreSession(sessionId)) return null;
         if (!doc.exists) {
             errorEl.textContent = 'المتجر غير موجود أو لم يتم إعداد نقطة البيع';
             loginBtn.textContent = 'دخول';
@@ -148,6 +226,7 @@ function attemptLogin() {
         // routing so the shared live catalog resolves to the right tenant.
         if (data.dataBackend === 'd1' && data.apiBaseUrl) {
             registerD1Tenant(storeName, data.apiBaseUrl);
+            registerD1MessagingBackend(storeName, data);
         }
         if (data.warrantyEnd) {
             var endDate = data.warrantyEnd.toDate ? data.warrantyEnd.toDate() : new Date(data.warrantyEnd);
@@ -163,8 +242,9 @@ function attemptLogin() {
             lastChecked: firebase.firestore.FieldValue.serverTimestamp()
         }).catch(function () {});
 
-        // Now authenticate user. For D1 tenants the comparison happens
-        // server-side (no hash/password list ever reaches this client).
+        // Password verification is server-side only. Reading a legacy credential
+        // document would expose credential material to every renderer, so Firestore-only stores are
+        // deliberately blocked until they implement this backend contract.
         if (isD1()) {
             return posAuthenticate(username, password, storeName).then(function (user) {
                 return { __d1user: user };
@@ -173,10 +253,17 @@ function attemptLogin() {
                 throw e;
             });
         }
-        return db.collection('settings').doc('pos_users').get();
+        return { __serverAuthRequired: true };
     }).then(function (doc) {
-        if (!doc) return; // license expired path
+        if (!doc || !isActiveStoreSession(sessionId)) return; // license expired or switched-store path
         var found = null;
+        if (doc.__serverAuthRequired) {
+            document.getElementById('loginPassword').value = '';
+            errorEl.textContent = 'هذا المتجر يحتاج مصادقة خادم مؤمّنة قبل تسجيل الدخول. راجع SECURITY.md.';
+            loginBtn.textContent = 'دخول';
+            loginBtn.disabled = false;
+            return;
+        }
         if (doc.__d1user || doc.__authFailed) {
             // D1 server-side auth result
             if (doc.__authFailed || !doc.__d1user) {
@@ -187,29 +274,16 @@ function attemptLogin() {
             }
             var u = doc.__d1user;
             found = { username: u.username, displayName: u.name, role: u.role, active: true };
-        } else {
-            if (!doc.exists) {
-                errorEl.textContent = 'لم يتم إعداد المستخدمين بعد';
-                loginBtn.textContent = 'دخول';
-                loginBtn.disabled = false;
-                return;
-            }
-            var data = doc.data();
-            var users = data.users || [];
-            for (var i = 0; i < users.length; i++) {
-                if (users[i].username === username && users[i].password === password && users[i].active !== false) {
-                    found = users[i];
-                    break;
-                }
-            }
         }
         if (!found) {
+            document.getElementById('loginPassword').value = '';
             errorEl.textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة';
             loginBtn.textContent = 'دخول';
             loginBtn.disabled = false;
             return;
         }
         currentUser = found;
+        document.getElementById('loginPassword').value = '';
         // Save store name for next time
         try { localStorage.setItem('ada_pos_store', storeName); } catch (e) {}
         logActivity('login', found.displayName + ' قام بتسجيل الدخول');
@@ -218,8 +292,10 @@ function attemptLogin() {
         document.getElementById('currentUserName').textContent = found.displayName || found.username;
         document.getElementById('sidebarStoreName').textContent = storeName;
         document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
-        initApp();
+        initApp(sessionId);
     }).catch(function (err) {
+        if (!isActiveStoreSession(sessionId)) return;
+        document.getElementById('loginPassword').value = '';
         errorEl.textContent = 'خطأ في الاتصال: ' + err.message;
         loginBtn.textContent = 'دخول';
         loginBtn.disabled = false;
@@ -230,6 +306,9 @@ function logout() {
     if (currentUser) {
         logActivity('logout', (currentUser.displayName || currentUser.username) + ' قام بتسجيل الخروج');
     }
+    clearStoreSubscriptions();
+    storeSessionId++;
+    resetStoreState();
     currentUser = null;
     cart = [];
     if (fbConfig.clearPosToken) fbConfig.clearPosToken();
@@ -355,22 +434,28 @@ function logActivity(type, description, details) {
 }
 
 // ============ INIT ============
-function initApp() {
-    setupNetworkListeners();
-    setupEventListeners();
+function initApp(sessionId) {
+    if (!isActiveStoreSession(sessionId)) return;
+    if (!appEventsInitialized) {
+        setupNetworkListeners();
+        setupEventListeners();
+        initShortcutsUI();
+        initPrinterSettings();
+        appEventsInitialized = true;
+    }
     applyRoleVisibility();
     loadShortcuts();
     renderShortcutsEditor();
-    initShortcutsUI();
     initGeneralNotes();
-    initPrinterSettings();
     loadHeldSales();
     updatePaymentUI();
     // Load first batch of products fast, then subscribe to rest
-    loadProductsBatch();
-    subscribeBills();
-    subscribeDamage();
+    loadProductsBatch(sessionId);
+    subscribeBills(sessionId);
+    subscribeDamage(sessionId);
     renderClinic();
+    renderMessaging();
+    if (isMessagingConfigured()) loadMessagingStatus();
 }
 
 // ============ THEMED CONFIRM / ALERT ============
@@ -428,6 +513,8 @@ function isAdmin() {
 function applyRoleVisibility() {
     var btn = document.getElementById('closeDayBtn');
     if (btn) btn.style.display = isAdmin() ? 'inline-flex' : 'none';
+    var messagingNav = document.querySelector('.nav-btn[data-page="messaging"]');
+    if (messagingNav) messagingNav.style.display = isMessagingConfigured() ? 'flex' : 'none';
 }
 
 // ============ WORK DAY / SHIFT (per terminal) ============
@@ -449,18 +536,67 @@ function billTimeMs(b) {
     return 0;
 }
 
+function normalizedPaymentMethod(method) {
+    var value = String(method || '').toLowerCase();
+    if (value === 'cash' || value === 'نقدي') return 'cash';
+    if (value === 'card' || value === 'visa' || value === 'credit_card') return 'card';
+    if (value === 'debt' || value === 'delayed') return 'debt';
+    if (value === 'insurance' || value === 'insured') return 'insurance';
+    return 'other';
+}
+
+// Supports split-payment records and the existing single-method shape. Unknown
+// methods deliberately never count as cash or trigger the drawer.
+function paymentAmounts(record) {
+    var amounts = { cash: 0, card: 0, debt: 0, insurance: 0, other: 0 };
+    var total = Number(record && record.total) || 0;
+    var breakdown = record && (record.paymentBreakdown || record.payments || record.paymentMethods);
+    var hasBreakdown = false;
+    function add(method, amount) {
+        var value = Number(amount);
+        if (!isFinite(value) || value <= 0) return;
+        amounts[normalizedPaymentMethod(method)] += value;
+        hasBreakdown = true;
+    }
+    if (Array.isArray(breakdown)) {
+        for (var i = 0; i < breakdown.length; i++) {
+            var item = breakdown[i] || {};
+            add(item.method || item.paymentMethod || item.type, item.amount != null ? item.amount : item.total);
+        }
+    } else if (breakdown && typeof breakdown === 'object') {
+        for (var method in breakdown) {
+            if (Object.prototype.hasOwnProperty.call(breakdown, method)) add(method, breakdown[method]);
+        }
+    }
+    if (!hasBreakdown && record) {
+        if (record.paymentMethod === 'mixed') {
+            add('cash', record.cashAmount);
+            add('card', record.cardAmount);
+            add('debt', record.debtAmount);
+            add('insurance', record.insuranceAmount);
+        }
+        if (!hasBreakdown) add(record.paymentMethod, total);
+    }
+    return amounts;
+}
+
+function hasCashPayment(record) {
+    return paymentAmounts(record).cash > 0.001;
+}
+
 // POS (register) activity since the last day-close on this terminal.
 function computeShiftSummary() {
     var start = getDayStart();
-    var cash = 0, card = 0, debtNew = 0, count = 0;
+    var cash = 0, card = 0, debtNew = 0, insurance = 0, count = 0;
     for (var i = 0; i < bills.length; i++) {
         var b = bills[i];
         if (b.source !== 'pos') continue;
         if (billTimeMs(b) < start) continue;
-        var t = b.total || 0;
-        if (b.paymentMethod === 'card') card += t;
-        else if (b.paymentMethod === 'debt') debtNew += t;
-        else cash += t;
+        var amounts = paymentAmounts(b);
+        cash += amounts.cash;
+        card += amounts.card;
+        debtNew += amounts.debt;
+        insurance += amounts.insurance;
         count++;
     }
     for (var i = 0; i < debtManual.length; i++) {
@@ -494,7 +630,7 @@ function computeShiftSummary() {
     var opening = registerBalance || 0;
     var drawer = opening + cash - withdrawn + deposited + returnsCash;
     return {
-        cash: cash, card: card, debtNew: debtNew, total: cash + card,
+        cash: cash, card: card, debtNew: debtNew, insurance: insurance, total: cash + card + insurance,
         count: count, withdrawn: withdrawn, wCount: wCount,
         deposited: deposited, dCount: dCount,
         debtPaidCash: debtPaidCash, returnsCash: returnsCash,
@@ -511,6 +647,7 @@ function openCloseDayModal() {
     html += '<div class="cd-row"><span>رصيد الصندوق الافتتاحي 🏦</span><span>\u20AA' + s.opening.toFixed(2) + '</span></div>';
     html += '<div class="cd-row"><span>مبيعات نقدي 💵</span><span>\u20AA' + s.cash.toFixed(2) + '</span></div>';
     html += '<div class="cd-row"><span>مبيعات بطاقة 💳</span><span>\u20AA' + s.card.toFixed(2) + '</span></div>';
+    if (s.insurance) html += '<div class="cd-row"><span>مبيعات تأمين</span><span>\u20AA' + s.insurance.toFixed(2) + '</span></div>';
     html += '<div class="cd-row cd-total"><span>إجمالي المبيعات</span><span>\u20AA' + s.total.toFixed(2) + '</span></div>';
     html += '<div class="cd-row"><span>عدد الفواتير</span><span>' + s.count + '</span></div>';
     if (s.debtNew) html += '<div class="cd-row"><span>مبيعات آجلة (ذمم جديدة) 📒</span><span>\u20AA' + s.debtNew.toFixed(2) + '</span></div>';
@@ -586,6 +723,7 @@ function buildDayCloseInnerHTML(s) {
     html += '<tr><td>رصيد الصندوق الافتتاحي</td><td>\u20AA' + (s.opening || 0).toFixed(2) + '</td></tr>';
     html += '<tr><td>مبيعات نقدي</td><td>\u20AA' + s.cash.toFixed(2) + '</td></tr>';
     html += '<tr><td>مبيعات بطاقة</td><td>\u20AA' + s.card.toFixed(2) + '</td></tr>';
+    if (s.insurance) html += '<tr><td>مبيعات تأمين</td><td>\u20AA' + s.insurance.toFixed(2) + '</td></tr>';
     html += '<tr><td>عدد الفواتير</td><td>' + s.count + '</td></tr>';
     if (s.debtNew) html += '<tr><td>ذمم جديدة (آجل)</td><td>\u20AA' + s.debtNew.toFixed(2) + '</td></tr>';
     if (s.debtPaidCash) html += '<tr><td>تسديد ذمم نقدي</td><td>\u20AA' + s.debtPaidCash.toFixed(2) + '</td></tr>';
@@ -614,9 +752,10 @@ function printDayClose(s) {
 // ============ FIREBASE SUBSCRIPTIONS ============
 var productsLoaded = false;
 
-function loadProductsBatch() {
+function loadProductsBatch(sessionId) {
     // Load first 20 products immediately for fast display
     db.collection('products').limit(20).get().then(function (snapshot) {
+        if (!isActiveStoreSession(sessionId)) return;
         products = [];
         snapshot.forEach(function (doc) {
             var p = doc.data();
@@ -628,16 +767,18 @@ function loadProductsBatch() {
         updateReports();
         updateSyncStatus(true);
         // Then subscribe to ALL products in background for real-time updates
-        subscribeAllProducts();
+        subscribeAllProducts(sessionId);
     }).catch(function () {
+        if (!isActiveStoreSession(sessionId)) return;
         updateSyncStatus(false);
         // Fallback: subscribe directly
-        subscribeAllProducts();
+        subscribeAllProducts(sessionId);
     });
 }
 
-function subscribeAllProducts() {
-    db.collection('products').onSnapshot(function (snapshot) {
+function subscribeAllProducts(sessionId) {
+    var unsubscribe = db.collection('products').onSnapshot(function (snapshot) {
+        if (!isActiveStoreSession(sessionId)) return;
         products = [];
         snapshot.forEach(function (doc) {
             var p = doc.data();
@@ -650,12 +791,15 @@ function subscribeAllProducts() {
         updateSyncStatus(true);
         productsLoaded = true;
     }, function () {
+        if (!isActiveStoreSession(sessionId)) return;
         updateSyncStatus(false);
     });
+    trackStoreSubscription(unsubscribe);
 }
 
-function subscribeBills() {
-    db.collection('orders').onSnapshot(function (snapshot) {
+function subscribeBills(sessionId) {
+    var unsubscribe = db.collection('orders').onSnapshot(function (snapshot) {
+        if (!isActiveStoreSession(sessionId)) return;
         bills = [];
         withdrawals = [];
         deposits = [];
@@ -732,16 +876,19 @@ function subscribeBills() {
         if (typeof renderHookahGrid === 'function') renderHookahGrid();
         if (typeof renderClinic === 'function') renderClinic();
     }, function (err) {
+        if (!isActiveStoreSession(sessionId)) return;
         console.error('Bills subscription error:', err);
     });
+    trackStoreSubscription(unsubscribe);
 }
 
 function billSortDesc(a, b) {
     return billTimeMs(b) - billTimeMs(a);
 }
 
-function subscribeDamage() {
-    db.collection('pos_damage').orderBy('createdAt', 'desc').limit(100).onSnapshot(function (snapshot) {
+function subscribeDamage(sessionId) {
+    var unsubscribe = db.collection('pos_damage').orderBy('createdAt', 'desc').limit(100).onSnapshot(function (snapshot) {
+        if (!isActiveStoreSession(sessionId)) return;
         damageRecords = [];
         snapshot.forEach(function (doc) {
             var d = doc.data();
@@ -751,6 +898,7 @@ function subscribeDamage() {
         renderDamageHistory();
         updateReports();
     });
+    trackStoreSubscription(unsubscribe);
 }
 
 function updateSyncStatus(online) {
@@ -779,6 +927,7 @@ function setupNetworkListeners() {
 function renderProducts() {
     var grid = document.getElementById('productsGrid');
     var searchVal = (document.getElementById('productSearch').value || '').toLowerCase();
+    syncCategoryFilterOptions();
     var catFilter = document.getElementById('categoryFilter').value;
 
     renderCategoryBoxes();
@@ -832,13 +981,14 @@ function renderProducts() {
             var totalStock = getTotalStock(p);
             var outClass = totalStock <= 0 ? ' out-of-stock' : '';
             var img = p.image || '';
-            html += '<div class="product-card' + outClass + '" data-id="' + escapeHtml(p.id) + '">';
+            html += '<button type="button" class="product-card' + outClass + '" data-id="' + escapeHtml(p.id) +
+                '" aria-label="إضافة ' + escapeHtml(p.name || '') + ' إلى الفاتورة"' + (totalStock <= 0 ? ' disabled' : '') + '>';
             if (img) html += '<img src="' + escapeHtml(img) + '" alt="' + escapeHtml(p.name || '') + '" onerror="this.style.display=\'none\'" loading="lazy">';
             html += '<div class="p-name">' + escapeHtml(p.name || '') + '</div>';
             html += '<div class="p-code">#' + escapeHtml(p.id) + '</div>';
             html += '<div class="p-price">\u20AA' + getMinPrice(p) + '</div>';
             html += '<div class="p-stock">' + totalStock + ' قطعة</div>';
-            html += '</div>';
+            html += '</button>';
         }
     }
 
@@ -877,6 +1027,39 @@ function normalizeCategory(value) {
         .trim();
 }
 
+function activeCategories() {
+    var seen = {}, categories = [];
+    for (var i = 0; i < products.length; i++) {
+        var product = products[i];
+        if (product.status === 'disabled') continue;
+        var category = product.type || 'أخرى';
+        if (!seen[category]) {
+            seen[category] = true;
+            categories.push(category);
+        }
+    }
+    return categories.sort(function (a, b) { return String(a).localeCompare(String(b), 'ar'); });
+}
+
+function syncCategoryFilterOptions() {
+    var select = document.getElementById('categoryFilter');
+    if (!select) return;
+    var selected = select.value;
+    var categories = activeCategories();
+    var signature = categories.join('\u0001');
+    if (select.getAttribute('data-categories') === signature) return;
+
+    select.innerHTML = '<option value="">كل الأصناف</option>';
+    for (var i = 0; i < categories.length; i++) {
+        var option = document.createElement('option');
+        option.value = categories[i];
+        option.textContent = categories[i];
+        select.appendChild(option);
+    }
+    select.setAttribute('data-categories', signature);
+    select.value = categories.indexOf(selected) >= 0 ? selected : '';
+}
+
 function categoryIcon(value) {
     var category = normalizeCategory(value);
     if (!category || category === 'أخرى' || category === 'اخرى' || category === 'other') return CATEGORY_ICONS.other;
@@ -909,22 +1092,24 @@ function categoryIcon(value) {
 function renderCategoryBoxes() {
     var box = document.getElementById('categoryBoxes');
     if (!box) return;
-    var counts = {}, order = [];
+    var counts = {};
     for (var i = 0; i < products.length; i++) {
         var p = products[i];
         if (p.status === 'disabled') continue;
         var t = p.type || 'أخرى';
-        if (!(t in counts)) { counts[t] = 0; order.push(t); }
+        if (!(t in counts)) counts[t] = 0;
         counts[t]++;
     }
+    var order = Object.keys(counts).sort(function (a, b) { return String(a).localeCompare(String(b), 'ar'); });
     var html = '';
     for (var g = 0; g < order.length; g++) {
         var t = order[g];
         var ic = categoryIcon(t);
-        html += '<div class="category-box" data-type="' + escapeHtml(t) + '">' +
+        html += '<button type="button" class="category-box" data-type="' + escapeHtml(t) +
+            '" aria-label="عرض منتجات تصنيف ' + escapeHtml(t) + '">' +
             '<span class="cat-ic">' + ic + '</span>' +
             '<span class="cat-name">' + escapeHtml(t) + '</span>' +
-            '<span class="cat-count">' + counts[t] + '</span></div>';
+            '<span class="cat-count">' + counts[t] + '</span></button>';
     }
     box.innerHTML = html;
 }
@@ -968,9 +1153,9 @@ function renderCategoryModal() {
             var tt = tp.type || 'أخرى';
             if (!(tt in typeSeen)) { typeSeen[tt] = 1; typeOrder.push(tt); }
         }
-        var chtml = '<div class="cat-chip' + (catModalType === null ? ' active' : '') + '" data-cat="">الكل</div>';
+        var chtml = '<button type="button" class="cat-chip' + (catModalType === null ? ' active' : '') + '" data-cat="" aria-pressed="' + (catModalType === null) + '">الكل</button>';
         for (var t = 0; t < typeOrder.length; t++) {
-            chtml += '<div class="cat-chip' + (catModalType === typeOrder[t] ? ' active' : '') + '" data-cat="' + escapeHtml(typeOrder[t]) + '">' + categoryIcon(typeOrder[t]) + ' ' + escapeHtml(typeOrder[t]) + '</div>';
+            chtml += '<button type="button" class="cat-chip' + (catModalType === typeOrder[t] ? ' active' : '') + '" data-cat="' + escapeHtml(typeOrder[t]) + '" aria-pressed="' + (catModalType === typeOrder[t]) + '">' + categoryIcon(typeOrder[t]) + ' ' + escapeHtml(typeOrder[t]) + '</button>';
         }
         document.getElementById('categoryCats').innerHTML = chtml;
     }
@@ -988,9 +1173,9 @@ function renderCategoryModal() {
             }
         }
     }
-    var bhtml = '<div class="cat-chip' + (catModalBrand === null ? ' active' : '') + '" data-brand="">الكل</div>';
+    var bhtml = '<button type="button" class="cat-chip' + (catModalBrand === null ? ' active' : '') + '" data-brand="" aria-pressed="' + (catModalBrand === null) + '">الكل</button>';
     for (var b = 0; b < brandOrder.length; b++) {
-        bhtml += '<div class="cat-chip' + (catModalBrand === brandOrder[b] ? ' active' : '') + '" data-brand="' + escapeHtml(brandOrder[b]) + '">' + escapeHtml(brandOrder[b]) + '</div>';
+        bhtml += '<button type="button" class="cat-chip' + (catModalBrand === brandOrder[b] ? ' active' : '') + '" data-brand="' + escapeHtml(brandOrder[b]) + '" aria-pressed="' + (catModalBrand === brandOrder[b]) + '">' + escapeHtml(brandOrder[b]) + '</button>';
     }
     document.getElementById('categoryBrands').innerHTML = bhtml;
 
@@ -999,9 +1184,9 @@ function renderCategoryModal() {
         if (!isNaN(na) && !isNaN(nb)) return na - nb;
         return String(a).localeCompare(String(b));
     });
-    var shtml = '<div class="cat-chip' + (catModalSize === null ? ' active' : '') + '" data-size="">الكل</div>';
+    var shtml = '<button type="button" class="cat-chip' + (catModalSize === null ? ' active' : '') + '" data-size="" aria-pressed="' + (catModalSize === null) + '">الكل</button>';
     for (var s = 0; s < sizeOrder.length; s++) {
-        shtml += '<div class="cat-chip' + (catModalSize === sizeOrder[s] ? ' active' : '') + '" data-size="' + escapeHtml(sizeOrder[s]) + '">' + escapeHtml(sizeOrder[s]) + '</div>';
+        shtml += '<button type="button" class="cat-chip' + (catModalSize === sizeOrder[s] ? ' active' : '') + '" data-size="' + escapeHtml(sizeOrder[s]) + '" aria-pressed="' + (catModalSize === sizeOrder[s]) + '">' + escapeHtml(sizeOrder[s]) + '</button>';
     }
     document.getElementById('categorySizes').innerHTML = shtml;
 
@@ -1014,13 +1199,14 @@ function renderCategoryModal() {
         var totalStock = getTotalStock(pr);
         var outClass = totalStock <= 0 ? ' out-of-stock' : '';
         var img = pr.image || '';
-        html += '<div class="product-card' + outClass + '" data-id="' + escapeHtml(pr.id) + '">';
+        html += '<button type="button" class="product-card' + outClass + '" data-id="' + escapeHtml(pr.id) +
+            '" aria-label="إضافة ' + escapeHtml(pr.name || '') + ' إلى الفاتورة"' + (totalStock <= 0 ? ' disabled' : '') + '>';
         if (img) html += '<img src="' + escapeHtml(img) + '" alt="' + escapeHtml(pr.name || '') + '" onerror="this.style.display=\'none\'" loading="lazy">';
         html += '<div class="p-name">' + escapeHtml(pr.name || '') + '</div>';
         html += '<div class="p-code">#' + escapeHtml(pr.id) + '</div>';
         html += '<div class="p-price">\u20AA' + getMinPrice(pr) + '</div>';
         html += '<div class="p-stock">' + totalStock + ' قطعة</div>';
-        html += '</div>';
+        html += '</button>';
     }
     grid.innerHTML = html || '<div style="text-align:center;color:var(--text-dim);padding:30px;grid-column:1/-1;">لا توجد منتجات مطابقة</div>';
 }
@@ -1094,7 +1280,10 @@ function renderVariantColors() {
         var hasStock = hasColorStock(varModalProduct, c.name);
         var selClass = varModalColor === c.name ? ' selected' : '';
         var disClass = !hasStock ? ' disabled' : '';
-        html += '<div class="color-option' + selClass + disClass + '" data-color="' + escapeHtml(c.name) + '" style="background:' + escapeHtml(c.hex || '#ccc') + '" title="' + escapeHtml(c.name) + '"></div>';
+        html += '<button type="button" class="color-option' + selClass + disClass + '" data-color="' + escapeHtml(c.name) +
+            '" style="background:' + escapeHtml(c.hex || '#ccc') + '" title="' + escapeHtml(c.name) +
+            '" aria-label="اللون ' + escapeHtml(c.name) + '" aria-pressed="' + (varModalColor === c.name) + '"' +
+            (!hasStock ? ' disabled' : '') + '></button>';
     }
     document.getElementById('variantColors').innerHTML = html;
 }
@@ -1115,7 +1304,9 @@ function renderVariantSizes() {
         var v = sizes[i];
         var selClass = varModalSize === v.size ? ' selected' : '';
         var disClass = (v.stock || 0) <= 0 ? ' disabled' : '';
-        html += '<div class="size-option' + selClass + disClass + '" data-size="' + escapeHtml(v.size) + '">' + escapeHtml(v.size) + '</div>';
+        html += '<button type="button" class="size-option' + selClass + disClass + '" data-size="' + escapeHtml(v.size) +
+            '" aria-pressed="' + (varModalSize === v.size) + '"' + ((v.stock || 0) <= 0 ? ' disabled' : '') + '>' +
+            escapeHtml(v.size) + '</button>';
     }
     document.getElementById('variantSizes').innerHTML = html || '<span style="color:var(--text-dim)">لا توجد مقاسات</span>';
     updateStockInfo();
@@ -1380,7 +1571,10 @@ function checkout() {
     if (selectedPayment === 'debt' && pendingCustomer) {
         msg += 'العميل: ' + pendingCustomer.name + '\n⚠️ سيُسجَّل المبلغ كذمة على العميل.\n';
     }
-    msg += '\nسيتم إتمام البيع وطباعة الفاتورة وفتح الدرج.';
+    msg += '\nسيتم إتمام البيع وطباعة الفاتورة' +
+        (hasCashPayment({ paymentMethod: selectedPayment, paymentBreakdown: (function () {
+            var amounts = {}; amounts[selectedPayment] = total; return amounts;
+        })() }) ? ' وفتح الدرج.' : '.');
 
     showConfirm(msg, function () { doCheckout(); }, {
         icon: '🧾',
@@ -1443,6 +1637,11 @@ function doCheckout() {
         total: total,
         totalBase: total,
         paymentMethod: selectedPayment,
+        paymentBreakdown: (function () {
+            var amounts = {};
+            amounts[selectedPayment] = total;
+            return amounts;
+        })(),
         note: billNote,
         cashier: currentUser ? (currentUser.displayName || currentUser.username) : 'unknown',
         source: 'pos',
@@ -1479,7 +1678,7 @@ function doCheckout() {
             billNumber: billNumber, total: total, items: items.length, payment: selectedPayment
         });
         showReceipt(billData);
-        printReceipt(billData, true); // open drawer on every checkout (cash, card, debt)
+        printReceipt(billData, hasCashPayment(billData));
         // Loyalty: earn points when a customer is attached and the system is enabled.
         if (billData.customer) {
             if (redeemValue > 0 && pendingRedeem) {
@@ -1517,7 +1716,10 @@ function doCheckout() {
         checkoutBtn.disabled = false;
     }
     function onCheckoutError(err) {
-        alert('خطأ في حفظ الفاتورة: ' + err.message);
+        var message = err && err.code === 'insufficient-stock'
+            ? err.message
+            : 'تعذر إتمام البيع أو تحديث المخزون. لم تُحفظ الفاتورة؛ تحقق من الاتصال والمخزون ثم أعد المحاولة.';
+        showAlert(message, { icon: '⚠️', title: 'لم يكتمل البيع' });
         checkoutBtn.textContent = 'إتمام البيع';
         checkoutBtn.disabled = false;
     }
@@ -1530,41 +1732,76 @@ function doCheckout() {
         return;
     }
 
-    // Atomic batch: save bill + deduct stock together
-    var batch = rawDb.batch();
-    var billRef = rawDb.collection('projects').doc(getProjectId()).collection('orders').doc(billNumber);
-    batch.set(billRef, billData);
+    commitFirestoreCheckout(billData, items).then(onCheckoutSuccess).catch(onCheckoutError);
+}
 
-    // Deduct stock
+function checkoutError(code, message) {
+    var err = new Error(message);
+    err.code = code;
+    return err;
+}
+
+// Firestore batches do not read current inventory, so they can overwrite another
+// terminal's change. The transaction reads and validates every affected product
+// before atomically writing both the sale and the resulting stock.
+function commitFirestoreCheckout(billData, items) {
+    var projectRef = rawDb.collection('projects').doc(getProjectId());
     var productUpdates = {};
-    for (var i = 0; i < cart.length; i++) {
-        var cartItem = cart[i];
-        if (!productUpdates[cartItem.productId]) {
-            var prod = products.find(function (p) { return p.id === cartItem.productId; });
-            if (prod) {
-                productUpdates[cartItem.productId] = {
-                    ref: rawDb.collection('projects').doc(getProjectId()).collection('products').doc(cartItem.productId),
-                    variants: JSON.parse(JSON.stringify(prod.variants || []))
-                };
-            }
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (!item.productId) continue; // reward-only line; it has no inventory variant
+        if (!productUpdates[item.productId]) {
+            productUpdates[item.productId] = {
+                ref: projectRef.collection('products').doc(item.productId),
+                items: []
+            };
         }
-        if (productUpdates[cartItem.productId]) {
-            var vars = productUpdates[cartItem.productId].variants;
-            for (var j = 0; j < vars.length; j++) {
-                if (vars[j].color === cartItem.color && vars[j].size === cartItem.size) {
-                    vars[j].stock = Math.max(0, (vars[j].stock || 0) - cartItem.qty);
+        productUpdates[item.productId].items.push(item);
+    }
+    var productIds = Object.keys(productUpdates);
+    var billRef = projectRef.collection('orders').doc(billData.billNumber);
+
+    return rawDb.runTransaction(function (transaction) {
+        var snapshots = {};
+        var readChain = Promise.resolve();
+        for (var i = 0; i < productIds.length; i++) {
+            (function (productId) {
+                readChain = readChain.then(function () {
+                    return transaction.get(productUpdates[productId].ref).then(function (snapshot) {
+                        snapshots[productId] = snapshot;
+                    });
+                });
+            })(productIds[i]);
+        }
+        return readChain.then(function () {
+            for (var p = 0; p < productIds.length; p++) {
+                var id = productIds[p];
+                var snapshot = snapshots[id];
+                if (!snapshot || !snapshot.exists) {
+                    throw checkoutError('insufficient-stock', 'أحد المنتجات لم يعد متاحاً. حدّث القائمة وأعد المحاولة.');
                 }
+                var variants = JSON.parse(JSON.stringify((snapshot.data() || {}).variants || []));
+                var productItems = productUpdates[id].items;
+                for (var x = 0; x < productItems.length; x++) {
+                    var saleItem = productItems[x];
+                    var variant = null;
+                    for (var v = 0; v < variants.length; v++) {
+                        if (variants[v].color === saleItem.color && variants[v].size === saleItem.size) {
+                            variant = variants[v];
+                            break;
+                        }
+                    }
+                    var available = variant ? Number(variant.stock) || 0 : 0;
+                    if (!variant || available < saleItem.qty) {
+                        throw checkoutError('insufficient-stock', 'المخزون غير كافٍ للمنتج «' + saleItem.name + '». لم تُحفظ الفاتورة.');
+                    }
+                    variant.stock = available - saleItem.qty;
+                }
+                transaction.update(productUpdates[id].ref, { variants: variants });
             }
-        }
-    }
-
-    var prodKeys = Object.keys(productUpdates);
-    for (var i = 0; i < prodKeys.length; i++) {
-        var pu = productUpdates[prodKeys[i]];
-        batch.update(pu.ref, { variants: pu.variants });
-    }
-
-    batch.commit().then(onCheckoutSuccess).catch(onCheckoutError);
+            transaction.set(billRef, billData);
+        });
+    });
 }
 
 // ============ RECEIPT ============
@@ -2965,14 +3202,25 @@ function switchPage(page) {
     var pages = document.querySelectorAll('.page');
     var btns = document.querySelectorAll('.nav-btn');
     for (var i = 0; i < pages.length; i++) pages[i].classList.remove('active');
-    for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+        btns[i].removeAttribute('aria-current');
+    }
     document.getElementById('page-' + page).classList.add('active');
-    var btn = document.querySelector('[data-page="' + page + '"]');
-    if (btn) btn.classList.add('active');
+    var btn = document.querySelector('.nav-btn[data-page="' + page + '"]');
+    if (btn) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-current', 'page');
+    }
     if (page === 'debts') renderDebts();
     else if (page === 'returns') renderReturnsHistory();
     else if (page === 'reports') updateReports();
     else if (page === 'customers') renderCustomers();
+    else if (page === 'messaging') {
+        populateMessagingAudienceOptions();
+        renderMessaging();
+        if (isMessagingConfigured()) loadMessagingStatus();
+    }
     else if (page === 'suppliers') { renderSuppliers(); renderSupplierOptions(); renderPurchaseOrders(); }
     else if (page === 'stocktake') { renderStocktakeRows(); renderStocktakeHistory(); }
     else if (page === 'restaurant') renderTables();
@@ -3054,6 +3302,9 @@ function setupEventListeners() {
             for (var j = 0; j < payBtns.length; j++) payBtns[j].classList.remove('active');
             this.classList.add('active');
             selectedPayment = this.getAttribute('data-method');
+            for (var k = 0; k < payBtns.length; k++) {
+                payBtns[k].setAttribute('aria-pressed', payBtns[k] === this ? 'true' : 'false');
+            }
             updatePaymentUI();
         });
     }
@@ -3505,6 +3756,50 @@ function setupEventListeners() {
     if (rewardModalConfirm) rewardModalConfirm.addEventListener('click', applySelectedRewards);
     var useCreditBtn = document.getElementById('useCreditBtn');
     if (useCreditBtn) useCreditBtn.addEventListener('click', useStoreCredit);
+
+    // Secure messaging: the browser only submits a server-side audience selector
+    // and preview token; it never reads or sends a list of customer contacts.
+    var messagingRefreshBtn = document.getElementById('messagingRefreshBtn');
+    if (messagingRefreshBtn) messagingRefreshBtn.addEventListener('click', function () { loadMessagingStatus(); });
+    var smsAudienceTarget = document.getElementById('smsAudienceTarget');
+    if (smsAudienceTarget) smsAudienceTarget.addEventListener('change', function () {
+        updateMessagingAudienceCountVisibility();
+        invalidateMessagingPreview();
+    });
+    var messagingSelectionControls = ['smsMessage', 'smsAudienceCount', 'smsFilterFrom', 'smsFilterTo', 'smsCategory', 'smsSegment'];
+    for (var mi = 0; mi < messagingSelectionControls.length; mi++) {
+        var messagingControl = document.getElementById(messagingSelectionControls[mi]);
+        if (messagingControl) {
+            messagingControl.addEventListener('input', invalidateMessagingPreview);
+            messagingControl.addEventListener('change', invalidateMessagingPreview);
+        }
+    }
+    var smsMessage = document.getElementById('smsMessage');
+    if (smsMessage) smsMessage.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            previewMessagingAudience();
+        }
+    });
+    var smsPreviewBtn = document.getElementById('smsPreviewBtn');
+    if (smsPreviewBtn) smsPreviewBtn.addEventListener('click', previewMessagingAudience);
+    var smsSendBtn = document.getElementById('smsSendBtn');
+    if (smsSendBtn) smsSendBtn.addEventListener('click', confirmMessagingSend);
+    var creditRequestBtn = document.getElementById('creditRequestBtn');
+    if (creditRequestBtn) creditRequestBtn.addEventListener('click', requestMessagingCredits);
+    var messagingSavePricingBtn = document.getElementById('messagingSavePricingBtn');
+    if (messagingSavePricingBtn) messagingSavePricingBtn.addEventListener('click', saveMessagingPricing);
+    var messagingHistorySearch = document.getElementById('messagingHistorySearch');
+    if (messagingHistorySearch) messagingHistorySearch.addEventListener('input', debounce(renderMessagingHistory, 150));
+    var messagingHistoryType = document.getElementById('messagingHistoryType');
+    if (messagingHistoryType) messagingHistoryType.addEventListener('change', renderMessagingHistory);
+    var messagingHistoryStatus = document.getElementById('messagingHistoryStatus');
+    if (messagingHistoryStatus) messagingHistoryStatus.addEventListener('change', renderMessagingHistory);
+    var messagingHistoryApplyBtn = document.getElementById('messagingHistoryApplyBtn');
+    if (messagingHistoryApplyBtn) messagingHistoryApplyBtn.addEventListener('click', function () {
+        var range = getMessagingHistoryRange();
+        if (range) loadMessagingStatus(range);
+    });
 }
 function updateAttachedCustomerLabel() {
     var lbl = document.getElementById('attachedCustomerLabel');
@@ -3816,8 +4111,11 @@ function setPaymentMethod(method) {
     selectedPayment = method;
     var payBtns = document.querySelectorAll('.pay-btn');
     for (var i = 0; i < payBtns.length; i++) {
-        payBtns[i].classList.toggle('active', payBtns[i].getAttribute('data-method') === method);
+        var active = payBtns[i].getAttribute('data-method') === method;
+        payBtns[i].classList.toggle('active', active);
+        payBtns[i].setAttribute('aria-pressed', active ? 'true' : 'false');
     }
+    updatePaymentUI();
 }
 function runShortcutAction(action) {
     switch (action) {
@@ -4299,7 +4597,7 @@ function clinicDate(value) {
     var d = new Date(value);
     return isNaN(d.getTime()) ? clinicEscape(value) : d.toLocaleString('ar-EG');
 }
-function clinicRecord(record, prefix, onOk) {
+function clinicRecord(record, prefix, onOk, onErr) {
     if (!isAdmin() && (record.entityType === 'clinic' || record.entityType === 'medical_file')) {
         showAlert('إدارة العيادات والملفات متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
         return;
@@ -4311,7 +4609,7 @@ function clinicRecord(record, prefix, onOk) {
     savePosRecord(record, prefix, function () {
         if (onOk) onOk();
         renderClinic();
-    });
+    }, onErr);
 }
 function switchClinicTab(tab) {
     var root = document.getElementById('page-clinic');
@@ -4443,21 +4741,79 @@ function addClinicSession() {
         var el = document.getElementById('sessionNote'); if (el) el.value = '';
     });
 }
+var MEDICAL_FILE_MAX_BYTES = 10 * 1024 * 1024;
+var MEDICAL_FILE_TYPES = {
+    'application/pdf': true,
+    'image/jpeg': true,
+    'image/png': true,
+    'application/msword': true,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': true
+};
+
+function safeStorageSegment(value) {
+    return String(value || '').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 120) || 'file';
+}
+
 function uploadMedicalFile() {
     var patientId = (document.getElementById('filePatient') || {}).value;
     var input = document.getElementById('medicalFile');
     var file = input && input.files && input.files[0];
+    if (!isAdmin()) {
+        showAlert('رفع الملفات الطبية متاح للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
     if (!patientId || !file) { showAlert('اختر المريض والملف', { icon: '⚠️', title: 'بيانات ناقصة' }); return; }
-    if (file.size > 5 * 1024 * 1024) { showAlert('الحد الأقصى للملف في هذه النسخة هو 5MB', { icon: '⚠️', title: 'الملف كبير' }); return; }
-    var reader = new FileReader();
-    reader.onload = function () {
-        clinicRecord({ entityType: 'medical_file', patientId: patientId, name: file.name, mimeType: file.type,
-            size: file.size, category: (document.getElementById('fileCategory') || {}).value.trim(), data: reader.result }, 'FILE', function () {
-            input.value = ''; var category = document.getElementById('fileCategory'); if (category) category.value = '';
+    if (!MEDICAL_FILE_TYPES[file.type]) {
+        showAlert('نوع الملف غير مسموح. استخدم PDF أو JPG أو PNG أو DOC أو DOCX.', { icon: '⚠️', title: 'نوع ملف غير مدعوم' });
+        return;
+    }
+    if (file.size <= 0 || file.size > MEDICAL_FILE_MAX_BYTES) {
+        showAlert('يجب أن يكون حجم الملف بين 1 بايت و10MB.', { icon: '⚠️', title: 'حجم ملف غير مسموح' });
+        return;
+    }
+    if (!storage || typeof storage.ref !== 'function') {
+        showAlert('تخزين الملفات الآمن غير متاح؛ تم منع حفظ الملف داخل قاعدة البيانات.', { icon: '⛔', title: 'تعذر الرفع بأمان' });
+        return;
+    }
+
+    var button = document.getElementById('uploadMedicalFileBtn');
+    var fileId = clinicId();
+    var objectPath = 'projects/' + safeStorageSegment(getProjectId()) + '/medical-files/' +
+        safeStorageSegment(patientId) + '/' + safeStorageSegment(fileId) + '-' + safeStorageSegment(file.name);
+    var objectRef = storage.ref().child(objectPath);
+    if (button) { button.disabled = true; button.textContent = 'جاري رفع الملف...'; }
+
+    objectRef.put(file, {
+        contentType: file.type,
+        customMetadata: { patientId: String(patientId), clinicTenant: String(getProjectId() || '') }
+    }).then(function () {
+        clinicRecord({
+            id: fileId,
+            entityType: 'medical_file',
+            patientId: patientId,
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            category: (document.getElementById('fileCategory') || {}).value.trim(),
+            storageProvider: 'firebase',
+            storagePath: objectPath
+        }, 'FILE', function () {
+            input.value = '';
+            var category = document.getElementById('fileCategory');
+            if (category) category.value = '';
+            if (button) { button.disabled = false; button.textContent = 'رفع الملف'; }
+        }, function (err) {
+            objectRef.delete().catch(function (cleanupErr) {
+                console.error('Could not remove unreferenced medical file:', cleanupErr);
+            }).then(function () {
+                if (button) { button.disabled = false; button.textContent = 'رفع الملف'; }
+                showAlert('تم رفع الملف لكن تعذر حفظ بياناته: ' + err.message, { icon: '⚠️', title: 'لم يكتمل الرفع' });
+            });
         });
-    };
-    reader.onerror = function () { showAlert('تعذر قراءة الملف', { icon: '⚠️', title: 'خطأ' }); };
-    reader.readAsDataURL(file);
+    }).catch(function (err) {
+        if (button) { button.disabled = false; button.textContent = 'رفع الملف'; }
+        showAlert('تعذر رفع الملف إلى التخزين الآمن: ' + err.message, { icon: '⚠️', title: 'فشل الرفع' });
+    });
 }
 
 // ============ PRODUCT STOCK HELPER ============
@@ -5670,6 +6026,645 @@ function renderCustomerMatches(term, container) {
             ' — ' + escapeHtml(c.phone || '') + ' <span class="cm-bal">متبقي \u20AA' + c.balance.toFixed(2) + '</span></div>';
     }
     container.innerHTML = html;
+}
+
+// ============ SECURE MESSAGING & CREDIT WORKSPACE ============
+// The D1 API is the authority for credit mutations, recipient selection, and
+// delivery. These renderer models intentionally retain only aggregate, redacted
+// ledger data so customer contacts and provider credentials never enter the UI.
+function createMessagingState() {
+    return {
+        loaded: false,
+        loading: false,
+        error: '',
+        balanceNis: 0,
+        availableCredits: 0,
+        allocationStatus: 'unavailable',
+        allocationNote: '',
+        pricing: {
+            customerNis: DEFAULT_MESSAGING_PRICING.customerNis,
+            platformCostNis: DEFAULT_MESSAGING_PRICING.platformCostNis
+        },
+        permissions: { canSend: false, canRequestCredits: false, canManagePricing: false },
+        capabilities: { pricingOverrides: false },
+        audienceOptions: { maxRecipients: 10000, maxMessageLength: 459, segments: [] },
+        creditLedger: [],
+        messageLedger: [],
+        analytics: {
+            purchased: 0, allocated: 0, consumed: 0, grossRevenueNis: 0,
+            platformCostNis: 0, netProfitNis: 0, remainingCredits: 0,
+            deliveryRate: null
+        }
+    };
+}
+
+function messagingNumber(value, fallback) {
+    var n = Number(value);
+    return isFinite(n) ? n : (fallback == null ? 0 : fallback);
+}
+
+function messagingWholeNumber(value, fallback) {
+    var n = Math.floor(messagingNumber(value, fallback));
+    return n >= 0 ? n : (fallback == null ? 0 : fallback);
+}
+
+function messagingText(value, maxLength) {
+    if (value == null) return '';
+    return String(value).slice(0, maxLength || 240);
+}
+
+function messagingStatusCode(value) {
+    var code = String(value || '').toLowerCase();
+    var allowed = {
+        pending: true, queued: true, processing: true, sent: true, delivered: true,
+        failed: true, allocated: true, active: true, rejected: true, blocked: true
+    };
+    return allowed[code] ? code : 'unknown';
+}
+
+function messagingStatusLabel(code) {
+    var labels = {
+        pending: 'قيد المراجعة',
+        queued: 'في انتظار الإرسال',
+        processing: 'جارٍ المعالجة',
+        sent: 'مرسل',
+        delivered: 'تم التسليم',
+        failed: 'فشل',
+        allocated: 'مخصّص',
+        active: 'نشط',
+        rejected: 'مرفوض',
+        blocked: 'معلّق',
+        unknown: 'غير معروف'
+    };
+    return labels[messagingStatusCode(code)] || labels.unknown;
+}
+
+function messagingTypeLabel(type, kind) {
+    var labels = {
+        purchase: 'شراء رصيد',
+        allocation: 'تخصيص من المنصة',
+        consumption: 'استهلاك رصيد',
+        request: 'طلب رصيد',
+        adjustment: 'تعديل رصيد',
+        message: 'رسالة SMS',
+        campaign: 'حملة رسائل'
+    };
+    return labels[String(type || '').toLowerCase()] || (kind === 'message' ? 'رسالة SMS' : 'حركة رصيد');
+}
+
+function messagingTime(value) {
+    if (!value) return 0;
+    var date = new Date(value && value.toDate ? value.toDate() : value);
+    return isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function normalizeMessagingCreditLedger(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries.slice(0, 250).map(function (entry) {
+        entry = entry || {};
+        return {
+            id: messagingText(entry.id || entry.ledgerId, 120),
+            kind: 'credit',
+            type: messagingText(entry.type || entry.action, 40).toLowerCase(),
+            description: messagingText(entry.summary || entry.description || entry.note, 180),
+            credits: messagingWholeNumber(entry.credits != null ? entry.credits : entry.creditDelta),
+            amountNis: messagingNumber(entry.amountNis != null ? entry.amountNis : entry.amount),
+            status: messagingStatusCode(entry.status),
+            createdAt: entry.createdAt || entry.timestamp || entry.requestedAt || null
+        };
+    });
+}
+
+function normalizeMessagingLedger(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries.slice(0, 250).map(function (entry) {
+        entry = entry || {};
+        return {
+            id: messagingText(entry.id || entry.messageId, 120),
+            kind: 'message',
+            type: messagingText(entry.type || entry.audienceType || 'message', 40).toLowerCase(),
+            description: messagingText(entry.summary || entry.audienceLabel || entry.description, 180),
+            recipientCount: messagingWholeNumber(entry.recipientCount != null ? entry.recipientCount : entry.count),
+            amountNis: messagingNumber(entry.amountNis != null ? entry.amountNis : entry.grossRevenueNis),
+            platformCostNis: messagingNumber(entry.platformCostNis),
+            status: messagingStatusCode(entry.status),
+            createdAt: entry.createdAt || entry.timestamp || entry.queuedAt || null
+        };
+    });
+}
+
+function messagingMetric(raw, keys, fallback) {
+    raw = raw || {};
+    for (var i = 0; i < keys.length; i++) {
+        if (raw[keys[i]] != null) return messagingNumber(raw[keys[i]], fallback);
+    }
+    return fallback == null ? 0 : fallback;
+}
+
+function normalizeMessagingState(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('استجابة غير صالحة من خدمة الرسائل.');
+    }
+    var balance = payload.balance || {};
+    var pricing = payload.pricing || {};
+    var allocation = payload.allocation || {};
+    var permissions = payload.permissions || {};
+    var capabilities = payload.capabilities || {};
+    var audience = payload.audienceOptions || {};
+    var maxRecipients = messagingWholeNumber(audience.maxRecipients, 10000);
+    var maxMessageLength = messagingWholeNumber(audience.maxMessageLength, 459);
+    var rawSegments = Array.isArray(audience.segments) ? audience.segments : [];
+    var segments = [];
+    for (var i = 0; i < rawSegments.length && i < 25; i++) {
+        var rawSegment = rawSegments[i] || {};
+        var value = messagingText(rawSegment.value != null ? rawSegment.value : rawSegment.id, 48);
+        if (!/^[a-zA-Z0-9_-]+$/.test(value)) continue;
+        segments.push({ value: value, label: messagingText(rawSegment.label || value, 80) });
+    }
+    var rawAnalytics = payload.analytics || {};
+    var customerNis = messagingMetric(pricing, ['customerNis', 'customerPriceNis'], DEFAULT_MESSAGING_PRICING.customerNis);
+    var platformCostNis = messagingMetric(pricing, ['platformCostNis', 'platformNis'], DEFAULT_MESSAGING_PRICING.platformCostNis);
+    var availableCredits = messagingWholeNumber(balance.availableCredits != null ? balance.availableCredits : (balance.messages != null ? balance.messages : payload.availableCredits));
+    var deliveryRate = rawAnalytics.deliveryRate;
+    if (deliveryRate != null) {
+        deliveryRate = messagingNumber(deliveryRate, null);
+        if (deliveryRate != null && deliveryRate >= 0 && deliveryRate <= 1) deliveryRate *= 100;
+        if (deliveryRate == null || deliveryRate < 0 || deliveryRate > 100) deliveryRate = null;
+    }
+    return {
+        loaded: true,
+        loading: false,
+        error: '',
+        balanceNis: Math.max(0, messagingMetric(balance, ['nis', 'balanceNis', 'valueNis'], 0)),
+        availableCredits: availableCredits,
+        allocationStatus: messagingStatusCode(allocation.status || payload.status || 'active'),
+        allocationNote: messagingText(allocation.note || payload.statusNote, 180),
+        pricing: {
+            customerNis: Math.max(0, customerNis),
+            platformCostNis: Math.max(0, platformCostNis)
+        },
+        permissions: {
+            canSend: permissions.canSend === true,
+            canRequestCredits: permissions.canRequestCredits === true,
+            canManagePricing: permissions.canManagePricing === true
+        },
+        capabilities: {
+            pricingOverrides: capabilities.pricingOverrides === true
+        },
+        audienceOptions: {
+            maxRecipients: Math.min(Math.max(maxRecipients, 1), 100000),
+            maxMessageLength: Math.min(Math.max(maxMessageLength, 1), 1000),
+            segments: segments
+        },
+        creditLedger: normalizeMessagingCreditLedger(payload.creditLedger || payload.creditEntries),
+        messageLedger: normalizeMessagingLedger(payload.messageLedger || payload.messages),
+        analytics: {
+            purchased: messagingWholeNumber(messagingMetric(rawAnalytics, ['purchased', 'purchasedCredits'], 0)),
+            allocated: messagingWholeNumber(messagingMetric(rawAnalytics, ['allocated', 'allocatedCredits'], 0)),
+            consumed: messagingWholeNumber(messagingMetric(rawAnalytics, ['consumed', 'consumedCredits'], 0)),
+            grossRevenueNis: messagingMetric(rawAnalytics, ['grossRevenueNis', 'grossRevenue'], 0),
+            platformCostNis: messagingMetric(rawAnalytics, ['platformCostNis', 'platformCost'], 0),
+            netProfitNis: messagingMetric(rawAnalytics, ['netProfitNis', 'netProfit'], 0),
+            remainingCredits: messagingWholeNumber(messagingMetric(rawAnalytics, ['remainingCredits'], availableCredits)),
+            deliveryRate: deliveryRate
+        }
+    };
+}
+
+function formatNis(value) {
+    return '₪' + messagingNumber(value).toFixed(2);
+}
+
+function setMessagingText(id, value) {
+    var element = document.getElementById(id);
+    if (element) element.textContent = value;
+}
+
+function getMessagingHistoryRange() {
+    var from = (document.getElementById('messagingHistoryFrom') || {}).value || '';
+    var to = (document.getElementById('messagingHistoryTo') || {}).value || '';
+    if (from && to && from > to) {
+        showAlert('تاريخ البداية يجب أن يسبق تاريخ النهاية.', { icon: '⚠️', title: 'فترة غير صالحة' });
+        return null;
+    }
+    return { from: from, to: to };
+}
+
+function populateMessagingAudienceOptions() {
+    var category = document.getElementById('smsCategory');
+    if (category) {
+        var selectedCategory = category.value;
+        var categories = {};
+        for (var i = 0; i < products.length; i++) {
+            var value = messagingText(products[i].category || products[i].type, 80).trim();
+            if (value) categories[value] = true;
+        }
+        category.innerHTML = '';
+        var allCategories = document.createElement('option');
+        allCategories.value = '';
+        allCategories.textContent = 'كل التصنيفات';
+        category.appendChild(allCategories);
+        Object.keys(categories).sort().forEach(function (value) {
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            category.appendChild(option);
+        });
+        category.value = categories[selectedCategory] ? selectedCategory : '';
+    }
+    var segment = document.getElementById('smsSegment');
+    if (segment) {
+        var selectedSegment = segment.value;
+        segment.innerHTML = '';
+        var allSegments = document.createElement('option');
+        allSegments.value = '';
+        allSegments.textContent = 'كل الشرائح';
+        segment.appendChild(allSegments);
+        for (var j = 0; j < messagingState.audienceOptions.segments.length; j++) {
+            var segmentData = messagingState.audienceOptions.segments[j];
+            var segmentOption = document.createElement('option');
+            segmentOption.value = segmentData.value;
+            segmentOption.textContent = segmentData.label;
+            segment.appendChild(segmentOption);
+        }
+        segment.value = selectedSegment;
+    }
+    updateMessagingAudienceCountVisibility();
+}
+
+function updateMessagingAudienceCountVisibility() {
+    var target = (document.getElementById('smsAudienceTarget') || {}).value || 'all';
+    var group = document.getElementById('smsAudienceCountGroup');
+    var count = document.getElementById('smsAudienceCount');
+    var needsCount = target !== 'all';
+    if (group) group.hidden = !needsCount;
+    if (count) {
+        count.required = needsCount;
+        count.max = messagingState.audienceOptions.maxRecipients;
+    }
+}
+
+function setMessagingPreviewNotice(message, kind) {
+    var panel = document.getElementById('smsPreviewPanel');
+    if (!panel) return;
+    panel.textContent = message;
+    panel.classList.toggle('is-ready', kind === 'ready');
+    panel.classList.toggle('is-error', kind === 'error');
+}
+
+function renderMessaging() {
+    var configured = isMessagingConfigured();
+    var notice = document.getElementById('messagingBackendNotice');
+    var backendMessage = '';
+    var noticeClass = '';
+    if (!configured) {
+        backendMessage = 'الرسائل محجوبة لهذا المتجر: يلزم تفعيل عقد D1 الآمن للرسائل من المنصة. لا يوجد مسار Firestore بديل.';
+        noticeClass = 'is-error';
+    } else if (messagingState.error) {
+        backendMessage = messagingState.error;
+        noticeClass = 'is-error';
+    } else if (messagingState.loading) {
+        backendMessage = 'جارٍ تحديث الرصيد وحالة الرسائل من المنصة...';
+        noticeClass = 'is-info';
+    }
+    if (notice) {
+        notice.textContent = backendMessage;
+        notice.className = 'messaging-notice' + (noticeClass ? ' ' + noticeClass : '');
+    }
+
+    setMessagingText('messagingBalanceNis', formatNis(messagingState.balanceNis));
+    setMessagingText('messagingBalanceMessages', String(messagingState.availableCredits));
+    setMessagingText('messagingAllocationStatus', messagingStatusLabel(messagingState.allocationStatus));
+    setMessagingText('messagingAllocationNote', messagingState.allocationNote || 'تُدار التخصيصات من منصة RTS');
+    setMessagingText('messagingCustomerPrice', formatNis(messagingState.pricing.customerNis));
+    setMessagingText('messagingPlatformCost', formatNis(messagingState.pricing.platformCostNis));
+    setMessagingText('messagingPriceDisplay', 'للعميل ' + formatNis(messagingState.pricing.customerNis) + ' · تكلفة المنصة ' + formatNis(messagingState.pricing.platformCostNis));
+
+    var messageInput = document.getElementById('smsMessage');
+    var charCount = document.getElementById('smsCharCount');
+    if (messageInput) {
+        messageInput.maxLength = messagingState.audienceOptions.maxMessageLength;
+        if (charCount) charCount.textContent = messageInput.value.length + ' / ' + messagingState.audienceOptions.maxMessageLength;
+    }
+
+    var canSend = configured && messagingState.loaded && !messagingState.error && messagingState.permissions.canSend;
+    var canRequestCredits = configured && messagingState.loaded && !messagingState.error && messagingState.permissions.canRequestCredits;
+    var previewBtn = document.getElementById('smsPreviewBtn');
+    if (previewBtn) previewBtn.disabled = !canSend || messagingPreviewInFlight || messagingSendInFlight;
+    var sendBtn = document.getElementById('smsSendBtn');
+    if (sendBtn) sendBtn.disabled = !canSend || !messagingPreview || messagingPreviewInFlight || messagingSendInFlight;
+    var creditBtn = document.getElementById('creditRequestBtn');
+    if (creditBtn) creditBtn.disabled = !canRequestCredits || messagingCreditRequestInFlight;
+    var refreshBtn = document.getElementById('messagingRefreshBtn');
+    if (refreshBtn) refreshBtn.disabled = !configured || messagingState.loading;
+
+    var platformControls = document.getElementById('messagingPlatformControls');
+    var canManagePricing = configured && messagingState.loaded && messagingState.permissions.canManagePricing && messagingState.capabilities.pricingOverrides;
+    if (platformControls) platformControls.hidden = !canManagePricing;
+    var priceInput = document.getElementById('messagingCustomerPriceInput');
+    var costInput = document.getElementById('messagingPlatformCostInput');
+    if (priceInput && document.activeElement !== priceInput) priceInput.value = messagingState.pricing.customerNis.toFixed(2);
+    if (costInput && document.activeElement !== costInput) costInput.value = messagingState.pricing.platformCostNis.toFixed(2);
+    var savePricingBtn = document.getElementById('messagingSavePricingBtn');
+    if (savePricingBtn) savePricingBtn.disabled = !canManagePricing || messagingPricingInFlight;
+
+    renderMessagingAnalytics();
+    renderMessagingHistory();
+}
+
+function renderMessagingAnalytics() {
+    var analytics = messagingState.analytics;
+    setMessagingText('analyticsPurchased', String(analytics.purchased));
+    setMessagingText('analyticsAllocated', String(analytics.allocated));
+    setMessagingText('analyticsConsumed', String(analytics.consumed));
+    setMessagingText('analyticsGrossRevenue', formatNis(analytics.grossRevenueNis));
+    setMessagingText('analyticsPlatformCost', formatNis(analytics.platformCostNis));
+    setMessagingText('analyticsNetProfit', formatNis(analytics.netProfitNis));
+    setMessagingText('analyticsRemainingCredits', String(analytics.remainingCredits));
+    setMessagingText('analyticsDeliveryRate', analytics.deliveryRate == null ? '—' : analytics.deliveryRate.toFixed(1) + '%');
+}
+
+function renderMessagingHistory() {
+    var body = document.getElementById('messagingHistoryBody');
+    if (!body) return;
+    var term = ((document.getElementById('messagingHistorySearch') || {}).value || '').trim().toLowerCase();
+    var kind = (document.getElementById('messagingHistoryType') || {}).value || '';
+    var status = (document.getElementById('messagingHistoryStatus') || {}).value || '';
+    var from = (document.getElementById('messagingHistoryFrom') || {}).value || '';
+    var to = (document.getElementById('messagingHistoryTo') || {}).value || '';
+    var records = messagingState.creditLedger.concat(messagingState.messageLedger).filter(function (record) {
+        if (kind && record.kind !== kind) return false;
+        if (status && record.status !== status) return false;
+        if (term && (record.description + ' ' + record.type + ' ' + record.status).toLowerCase().indexOf(term) === -1) return false;
+        var recordTime = messagingTime(record.createdAt);
+        var date = recordTime ? new Date(recordTime).toISOString().slice(0, 10) : '';
+        if (from && (!date || date < from)) return false;
+        if (to && (!date || date > to)) return false;
+        return true;
+    });
+    records.sort(function (a, b) { return messagingTime(b.createdAt) - messagingTime(a.createdAt); });
+    var html = '';
+    for (var i = 0; i < records.length; i++) {
+        var record = records[i];
+        var dateMs = messagingTime(record.createdAt);
+        var dateText = dateMs ? new Date(dateMs).toLocaleString('ar-EG') : '—';
+        var count = record.kind === 'message' ? record.recipientCount : record.credits;
+        var description = record.description || messagingTypeLabel(record.type, record.kind);
+        html += '<tr><td>' + escapeHtml(dateText) + '</td><td>' + escapeHtml(record.kind === 'message' ? 'رسالة' : 'رصيد') + '</td>' +
+            '<td>' + escapeHtml(description) + '</td><td>' + count + '</td><td>' + formatNis(record.amountNis) + '</td>' +
+            '<td><span class="messaging-status ' + messagingStatusCode(record.status) + '">' + escapeHtml(messagingStatusLabel(record.status)) + '</span></td></tr>';
+    }
+    body.innerHTML = html || '<tr><td colspan="6" style="text-align:center;padding:18px;">لا توجد حركات ضمن المرشحات الحالية.</td></tr>';
+}
+
+function loadMessagingStatus(filters) {
+    if (!isMessagingConfigured()) {
+        messagingState = createMessagingState();
+        messagingState.error = 'لم يتم تفعيل خدمة الرسائل الآمنة لهذا المتجر.';
+        renderMessaging();
+        return;
+    }
+    filters = filters || {};
+    var storeId = getProjectId();
+    messagingState.loading = true;
+    messagingState.error = '';
+    renderMessaging();
+    messagingGetStatus(filters).then(function (payload) {
+        if (storeId !== getProjectId()) return;
+        messagingState = normalizeMessagingState(payload);
+        populateMessagingAudienceOptions();
+        renderMessaging();
+    }).catch(function (err) {
+        if (storeId !== getProjectId()) return;
+        messagingState.loading = false;
+        messagingState.error = 'تعذر تحديث حالة الرسائل: ' + messagingText(err && err.message, 180);
+        renderMessaging();
+    });
+}
+
+function invalidateMessagingPreview() {
+    messagingPreview = null;
+    var messageInput = document.getElementById('smsMessage');
+    var charCount = document.getElementById('smsCharCount');
+    if (messageInput && charCount) charCount.textContent = messageInput.value.length + ' / ' + messagingState.audienceOptions.maxMessageLength;
+    if (!messagingPreviewInFlight && !messagingSendInFlight) {
+        setMessagingPreviewNotice('تغيّرت الرسالة أو الشريحة. اعرض معاينة جديدة قبل الإرسال.', '');
+    }
+    renderMessaging();
+}
+
+function messagingIdempotencyKey(prefix) {
+    if (!window.crypto || typeof window.crypto.randomUUID !== 'function') return '';
+    return prefix + '_' + window.crypto.randomUUID();
+}
+
+function selectedMessagingSegment() {
+    var selected = (document.getElementById('smsSegment') || {}).value || '';
+    for (var i = 0; i < messagingState.audienceOptions.segments.length; i++) {
+        if (messagingState.audienceOptions.segments[i].value === selected) return selected;
+    }
+    return '';
+}
+
+function collectMessagingCommand() {
+    var message = ((document.getElementById('smsMessage') || {}).value || '').trim();
+    var target = (document.getElementById('smsAudienceTarget') || {}).value || 'all';
+    var from = (document.getElementById('smsFilterFrom') || {}).value || '';
+    var to = (document.getElementById('smsFilterTo') || {}).value || '';
+    var category = messagingText((document.getElementById('smsCategory') || {}).value || '', 80);
+    var allowedTargets = { all: true, latest: true, random: true, frequent: true, recurrent: true };
+    if (!message) return { error: 'اكتب نص الرسالة أولاً.' };
+    if (message.length > messagingState.audienceOptions.maxMessageLength) return { error: 'تجاوزت الرسالة الحد الأقصى المسموح.' };
+    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(message)) return { error: 'تحتوي الرسالة على محارف غير مسموح بها.' };
+    if (!allowedTargets[target]) return { error: 'اختيار الجمهور غير صالح.' };
+    if (from && to && from > to) return { error: 'تاريخ البداية يجب أن يسبق تاريخ النهاية.' };
+    var audience = {
+        target: target,
+        from: from || null,
+        to: to || null,
+        category: category || null,
+        segment: selectedMessagingSegment() || null
+    };
+    if (target !== 'all') {
+        var count = Number((document.getElementById('smsAudienceCount') || {}).value);
+        if (!isFinite(count) || Math.floor(count) !== count || count < 1) return { error: 'أدخل عدداً صحيحاً للعملاء.' };
+        if (count > messagingState.audienceOptions.maxRecipients) return { error: 'يتجاوز العدد الحد المسموح به لهذه المنصة.' };
+        if (count > messagingState.availableCredits) return { error: 'عدد المستلمين أكبر من رصيد الرسائل المتاح.' };
+        audience.limit = count;
+    }
+    return { command: { message: message, audience: audience } };
+}
+
+function previewMessagingAudience() {
+    if (messagingPreviewInFlight || messagingSendInFlight) return;
+    if (!isMessagingConfigured() || !messagingState.permissions.canSend) {
+        setMessagingPreviewNotice('لا تملك هذه الجلسة صلاحية معاينة أو إرسال الرسائل.', 'error');
+        return;
+    }
+    var collected = collectMessagingCommand();
+    if (collected.error) {
+        setMessagingPreviewNotice(collected.error, 'error');
+        return;
+    }
+    var previewKey = messagingIdempotencyKey('preview');
+    if (!previewKey) {
+        setMessagingPreviewNotice('لا يمكن إنشاء معرف عملية آمن على هذا الجهاز.', 'error');
+        return;
+    }
+    messagingPreviewInFlight = true;
+    setMessagingPreviewNotice('جارٍ إنشاء معاينة محمية للجمهور...', '');
+    renderMessaging();
+    messagingPreviewAudience({
+        requestId: previewKey,
+        message: collected.command.message,
+        audience: collected.command.audience
+    }, previewKey).then(function (payload) {
+        var previewId = messagingText(payload && (payload.previewId || payload.audienceSnapshotId), 160);
+        var recipientCount = messagingWholeNumber(payload && payload.recipientCount);
+        if (!previewId || recipientCount < 1) throw new Error('لم تعِد المنصة معاينة صالحة للجمهور.');
+        if (recipientCount > messagingState.availableCredits) {
+            throw new Error('عدد المستلمين في المعاينة أكبر من رصيدك المتاح.');
+        }
+        messagingPreview = {
+            id: previewId,
+            recipientCount: recipientCount,
+            estimatedCustomerNis: Math.max(0, messagingNumber(payload.estimatedCustomerNis != null ? payload.estimatedCustomerNis : payload.estimatedCostNis)),
+            estimatedPlatformCostNis: Math.max(0, messagingNumber(payload.estimatedPlatformCostNis)),
+            expiresAt: payload.expiresAt || null,
+            message: collected.command.message,
+            audience: collected.command.audience,
+            sendIdempotencyKey: messagingIdempotencyKey('send')
+        };
+        if (!messagingPreview.sendIdempotencyKey) throw new Error('لا يمكن إنشاء معرف إرسال آمن على هذا الجهاز.');
+        messagingPreviewInFlight = false;
+        setMessagingPreviewNotice('المعاينة جاهزة: ' + recipientCount + ' مستلمًا · التكلفة المتوقعة ' +
+            formatNis(messagingPreview.estimatedCustomerNis) + '. راجع ثم اضغط «إرسال بعد التأكيد».', 'ready');
+        renderMessaging();
+    }).catch(function (err) {
+        messagingPreviewInFlight = false;
+        messagingPreview = null;
+        setMessagingPreviewNotice('تعذر إنشاء المعاينة: ' + messagingText(err && err.message, 180), 'error');
+        renderMessaging();
+    });
+}
+
+function confirmMessagingSend() {
+    if (!messagingPreview || messagingSendInFlight) return;
+    var current = collectMessagingCommand();
+    if (current.error || current.command.message !== messagingPreview.message ||
+        JSON.stringify(current.command.audience) !== JSON.stringify(messagingPreview.audience)) {
+        invalidateMessagingPreview();
+        setMessagingPreviewNotice('تغيّر الجمهور أو النص؛ اعرض معاينة جديدة قبل الإرسال.', 'error');
+        return;
+    }
+    if (messagingPreview.recipientCount > messagingState.availableCredits) {
+        setMessagingPreviewNotice('الرصيد المعروض لم يعد كافياً. حدّث الحالة ثم أنشئ معاينة جديدة.', 'error');
+        return;
+    }
+    showConfirm(
+        'سيتم إرسال الرسالة إلى ' + messagingPreview.recipientCount + ' مستلمًا بتكلفة متوقعة ' +
+        formatNis(messagingPreview.estimatedCustomerNis) + '. لا يمكن التراجع بعد قبول الخادم.',
+        sendMessagingCampaign,
+        { icon: '✉️', title: 'تأكيد إرسال الرسالة', yesText: 'إرسال الآن', noText: 'مراجعة' }
+    );
+}
+
+function sendMessagingCampaign() {
+    if (!messagingPreview || messagingSendInFlight) return;
+    messagingSendInFlight = true;
+    setMessagingPreviewNotice('جارٍ إرسال الحملة إلى الخادم بشكل آمن...', '');
+    renderMessaging();
+    var preview = messagingPreview;
+    messagingSend({
+        sendId: preview.sendIdempotencyKey,
+        previewId: preview.id,
+        message: preview.message,
+        confirm: true
+    }, preview.sendIdempotencyKey).then(function (payload) {
+        messagingSendInFlight = false;
+        messagingPreview = null;
+        var status = messagingStatusCode(payload && payload.status);
+        if (status === 'failed') {
+            setMessagingPreviewNotice('رفض الخادم الحملة ولم تُرسل الرسائل. راجع السجل أو أنشئ معاينة جديدة.', 'error');
+        } else {
+            setMessagingPreviewNotice('تم قبول الحملة. ستظهر حالة التسليم في السجل عند وصولها من المنصة.', 'ready');
+        }
+        loadMessagingStatus(getMessagingHistoryRange() || {});
+    }).catch(function (err) {
+        messagingSendInFlight = false;
+        setMessagingPreviewNotice('تعذر تأكيد الإرسال: ' + messagingText(err && err.message, 180) + '. يمكن إعادة المحاولة بنفس المعاينة.', 'error');
+        renderMessaging();
+    });
+}
+
+function requestMessagingCredits() {
+    if (messagingCreditRequestInFlight) return;
+    if (!isMessagingConfigured() || !messagingState.permissions.canRequestCredits) {
+        setMessagingText('creditRequestStatus', 'لا تملك هذه الجلسة صلاحية طلب رصيد.');
+        return;
+    }
+    var request = pendingMessagingCreditRequest;
+    if (!request) {
+        var quantity = Number((document.getElementById('creditRequestQuantity') || {}).value);
+        var note = ((document.getElementById('creditRequestNote') || {}).value || '').trim();
+        if (!isFinite(quantity) || Math.floor(quantity) !== quantity || quantity < 1 || quantity > 100000) {
+            setMessagingText('creditRequestStatus', 'أدخل عدداً صحيحاً من 1 إلى 100000 رسالة.');
+            return;
+        }
+        if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(note)) {
+            setMessagingText('creditRequestStatus', 'تحتوي الملاحظة على محارف غير مسموح بها.');
+            return;
+        }
+        var requestId = messagingIdempotencyKey('credit-request');
+        if (!requestId) {
+            setMessagingText('creditRequestStatus', 'لا يمكن إنشاء معرف طلب آمن على هذا الجهاز.');
+            return;
+        }
+        request = { requestId: requestId, credits: quantity, note: note };
+        pendingMessagingCreditRequest = request;
+    }
+    messagingCreditRequestInFlight = true;
+    setMessagingText('creditRequestStatus', 'جارٍ إرسال طلب الرصيد إلى المنصة...');
+    renderMessaging();
+    messagingRequestCredits(request, request.requestId).then(function (payload) {
+        messagingCreditRequestInFlight = false;
+        pendingMessagingCreditRequest = null;
+        var quantityInput = document.getElementById('creditRequestQuantity');
+        var noteInput = document.getElementById('creditRequestNote');
+        if (quantityInput) quantityInput.value = '';
+        if (noteInput) noteInput.value = '';
+        setMessagingText('creditRequestStatus', 'تم تسجيل الطلب وإشعار مدير المنصة. الحالة: ' + messagingStatusLabel(payload && payload.status || 'pending'));
+        loadMessagingStatus(getMessagingHistoryRange() || {});
+    }).catch(function (err) {
+        messagingCreditRequestInFlight = false;
+        setMessagingText('creditRequestStatus', 'تعذر تأكيد الطلب: ' + messagingText(err && err.message, 160) + '. أعد المحاولة؛ سيُستخدم نفس معرف الطلب.');
+        renderMessaging();
+    });
+}
+
+function saveMessagingPricing() {
+    if (messagingPricingInFlight || !messagingState.permissions.canManagePricing || !messagingState.capabilities.pricingOverrides) return;
+    var customerNis = Number((document.getElementById('messagingCustomerPriceInput') || {}).value);
+    var platformCostNis = Number((document.getElementById('messagingPlatformCostInput') || {}).value);
+    if (!isFinite(customerNis) || !isFinite(platformCostNis) || customerNis < 0 || platformCostNis < 0 || customerNis > 100 || platformCostNis > 100) {
+        showAlert('أدخل سعراً صالحاً بين 0 و100 شيكل.', { icon: '⚠️', title: 'تسعير غير صالح' });
+        return;
+    }
+    var priceKey = messagingIdempotencyKey('pricing');
+    if (!priceKey) {
+        showAlert('لا يمكن إنشاء معرف تعديل آمن على هذا الجهاز.', { icon: '⚠️', title: 'تعذر الحفظ' });
+        return;
+    }
+    messagingPricingInFlight = true;
+    renderMessaging();
+    messagingUpdatePricing({ customerNis: customerNis, platformCostNis: platformCostNis }, priceKey).then(function () {
+        messagingPricingInFlight = false;
+        loadMessagingStatus(getMessagingHistoryRange() || {});
+    }).catch(function (err) {
+        messagingPricingInFlight = false;
+        showAlert('تعذر حفظ تسعير المنصة: ' + messagingText(err && err.message, 180), { icon: '⚠️', title: 'تعذر الحفظ' });
+        renderMessaging();
+    });
 }
 
 // ============ PERSONAL WITHDRAWALS ============

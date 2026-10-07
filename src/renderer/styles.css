@@ -284,6 +284,13 @@ body {
     gap: 12px;
 }
 
+.login-form label {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: right;
+}
+
 .login-form input {
     padding: 12px 16px;
     background: var(--bg-card);
@@ -561,6 +568,14 @@ body {
     margin-top: 10px;
 }
 
+.filter-row label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+}
+
 .filter-row select {
     padding: 8px 12px;
     background: var(--bg-card);
@@ -588,6 +603,7 @@ body {
     border: 1px solid var(--border);
     text-align: center;
     box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    font: inherit;
 }
 
 .product-card:hover {
@@ -1865,6 +1881,7 @@ body {
     gap: 10px; padding: 28px 16px; border: 2px solid var(--border); border-radius: 16px;
     background: var(--bg-card); cursor: pointer; transition: all .18s ease; text-align: center;
     box-shadow: 0 2px 6px rgba(0,0,0,.05); min-height: 150px; position: relative;
+    width: 100%; font-family: inherit; color: inherit;
 }
 .category-box:hover { border-color: var(--primary); background: var(--primary-light); transform: translateY(-4px); box-shadow: 0 8px 20px rgba(0,0,0,.12); }
 .category-box .cat-ic { font-size: 52px; line-height: 1; }
@@ -1889,6 +1906,7 @@ body {
     padding: 6px 14px; border: 1px solid var(--border); border-radius: 20px;
     background: var(--bg-card); cursor: pointer; font-size: 13px; font-weight: 600;
     color: var(--text); transition: all .15s; white-space: nowrap;
+    font-family: inherit;
 }
 .cat-chip:hover { border-color: var(--primary); }
 .cat-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
@@ -2065,6 +2083,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     outline: 3px solid var(--primary); outline-offset: 2px; border-radius: 6px;
 }
 
+.product-card:focus-visible,
+.category-box:focus-visible,
+.cat-chip:focus-visible,
+.color-option:focus-visible,
+.size-option:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 3px;
+}
+
+@media (max-width: 1100px) {
+    .page { padding: 16px; }
+    .sales-layout { gap: 12px; height: calc(100vh - 32px); }
+    .cart-panel { width: 320px; }
+    .category-boxes { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .category-box { min-height: 132px; padding: 20px 12px; }
+}
+
 /* RTS Business visual unification */
 input,
 select,
@@ -2221,6 +2256,392 @@ button:active:not(:disabled) {
 
 .login-btn {
     min-height: 44px;
+}
+
+/* Secure messaging and credit workspace */
+.page-description {
+    margin-top: 4px;
+    color: var(--text-dim);
+    line-height: 1.55;
+}
+
+.messaging-notice {
+    display: none;
+    margin-bottom: 16px;
+    padding: 11px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    background: #f5f1f6;
+    line-height: 1.5;
+}
+
+.messaging-notice.is-error {
+    display: block;
+    border-color: #e9bac2;
+    color: #842536;
+    background: #fff5f6;
+}
+
+.messaging-notice.is-info {
+    display: block;
+    border-color: #b8d2e2;
+    color: #1d527b;
+    background: #f3f9fd;
+}
+
+.messaging-balance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.messaging-balance-item,
+.messaging-panel,
+.messaging-analytics {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-card);
+}
+
+.messaging-balance-item {
+    display: flex;
+    min-height: 116px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 16px;
+}
+
+.messaging-balance-item span,
+.messaging-balance-item small,
+.messaging-panel-heading p,
+.messaging-section-heading p,
+.field-support,
+.inline-status {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.messaging-balance-item strong {
+    color: var(--primary);
+    font-size: 24px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.messaging-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(290px, 0.85fr);
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 16px;
+}
+
+.messaging-panel,
+.messaging-analytics {
+    padding: 18px;
+}
+
+.messaging-side-stack {
+    display: grid;
+    gap: 16px;
+}
+
+.messaging-panel h3,
+.messaging-analytics h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: 16px;
+}
+
+.messaging-panel-heading,
+.messaging-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.messaging-panel-heading p,
+.messaging-section-heading p {
+    margin: 5px 0 0;
+    max-width: 65ch;
+}
+
+.messaging-price {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+    border-radius: 999px;
+    color: var(--primary-dark);
+    background: var(--primary-light);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.field-support {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 6px;
+}
+
+.messaging-form-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.messaging-form-grid .form-group {
+    margin-bottom: 0;
+}
+
+.messaging-composer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.messaging-preview {
+    min-height: 48px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    background: var(--bg);
+    line-height: 1.55;
+}
+
+.messaging-preview.is-ready {
+    border-color: #a8d8c7;
+    color: #176148;
+    background: #f2fbf7;
+}
+
+.messaging-preview.is-error {
+    border-color: #e9bac2;
+    color: #842536;
+    background: #fff5f6;
+}
+
+.inline-status {
+    min-height: 19px;
+    margin: 9px 0 0;
+}
+
+.messaging-pricing-list {
+    display: grid;
+    gap: 0;
+    margin: 14px 0 12px;
+}
+
+.messaging-pricing-list div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.messaging-pricing-list dt {
+    color: var(--text-dim);
+}
+
+.messaging-pricing-list dd {
+    margin: 0;
+    color: var(--text);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.messaging-platform-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    align-items: end;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.messaging-platform-controls .form-group {
+    margin-bottom: 0;
+}
+
+.messaging-analytics {
+    margin-bottom: 16px;
+}
+
+.messaging-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+}
+
+.messaging-metrics-grid > div {
+    display: flex;
+    min-height: 82px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+}
+
+.messaging-metrics-grid span {
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.messaging-metrics-grid strong {
+    color: var(--text);
+    font-size: 17px;
+    font-variant-numeric: tabular-nums;
+}
+
+.messaging-history {
+    margin-bottom: 16px;
+}
+
+.messaging-history-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.messaging-history-filters label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.messaging-history-filters input,
+.messaging-history-filters select {
+    min-height: 34px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text);
+}
+
+.messaging-history-filters input[type="search"] {
+    min-width: 190px;
+}
+
+.messaging-table-wrap {
+    max-height: 360px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.messaging-table-wrap .data-table {
+    min-width: 680px;
+}
+
+.messaging-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.messaging-status.pending,
+.messaging-status.queued {
+    color: #75420c;
+    background: #fff4df;
+}
+
+.messaging-status.sent,
+.messaging-status.allocated,
+.messaging-status.active {
+    color: #176148;
+    background: #eefaf5;
+}
+
+.messaging-status.failed,
+.messaging-status.blocked {
+    color: #842536;
+    background: #fff2f4;
+}
+
+.messaging-status.unknown {
+    color: var(--text-dim);
+    background: #f3eff4;
+}
+
+@media (max-width: 1100px) {
+    .messaging-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .messaging-side-stack {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .messaging-form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .messaging-metrics-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .messaging-balance-grid,
+    .messaging-side-stack,
+    .messaging-form-grid,
+    .messaging-metrics-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .messaging-panel,
+    .messaging-analytics {
+        padding: 14px;
+    }
+
+    .messaging-panel-heading,
+    .messaging-section-heading {
+        flex-direction: column;
+    }
+
+    .messaging-platform-controls {
+        grid-template-columns: 1fr;
+    }
+
+    .messaging-history-filters {
+        align-items: stretch;
+    }
+
+    .messaging-history-filters label,
+    .messaging-history-filters input,
+    .messaging-history-filters select,
+    .messaging-history-filters button {
+        width: 100%;
+    }
+
+    .field-support {
+        flex-direction: column;
+        gap: 2px;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {

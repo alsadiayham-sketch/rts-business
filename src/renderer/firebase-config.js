@@ -10,12 +10,14 @@ var firebaseConfig = {
 
 var firebase = require('firebase/compat/app');
 require('firebase/compat/firestore');
+require('firebase/compat/storage');
 
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 
 var rawDb = firebase.firestore();
+var storage = firebase.storage();
 var PROJECT_ID = null;
 
 // =====================================================================
@@ -25,11 +27,21 @@ var PROJECT_ID = null;
 //  For those tenants, products/orders/pos_logs/pos_damage are routed through
 //  the secure HTTP API; cashier login is verified server-side (no hash ever
 //  reaches the client). All OTHER tenants stay on Firestore, untouched.
-//  settings/* (license + pos_users) always stays on Firestore.
+//  settings/* (license and server-authentication endpoint configuration) always
+//  stays on Firestore.
 // =====================================================================
 var D1_TENANTS = { aqqad: 'https://aqqad.pages.dev' };
 var D1_COLLECTIONS = { products: true, orders: true, pos_logs: true, pos_damage: true };
 var posToken = null; // cashier bearer token, set by posAuthenticate()
+var MESSAGING_CONTRACT_VERSION = 1;
+var D1_MESSAGING_TENANTS = {};
+var MESSAGING_ENDPOINTS = {
+    status: '/api/messaging/status',
+    audiencePreview: '/api/messaging/audience-preview',
+    creditRequests: '/api/messaging/credit-requests',
+    messages: '/api/messaging/messages',
+    pricing: '/api/messaging/pricing'
+};
 
 function isD1() { return !!(PROJECT_ID && D1_TENANTS[PROJECT_ID]); }
 function d1Base() { return D1_TENANTS[PROJECT_ID]; }
@@ -41,6 +53,86 @@ function d1Base() { return D1_TENANTS[PROJECT_ID]; }
 function registerD1Tenant(projectId, baseUrl) {
     if (!projectId || !baseUrl) return;
     D1_TENANTS[projectId] = String(baseUrl).replace(/\/+$/, '');
+}
+
+// Messaging is deliberately an opt-in D1 contract. It never falls back to
+// Firestore because balances, recipient selection, and provider delivery all
+// require server-side authorization and atomic credit consumption.
+function registerD1MessagingBackend(projectId, posSettings) {
+    if (!projectId) return;
+    delete D1_MESSAGING_TENANTS[projectId];
+    if (!posSettings || posSettings.dataBackend !== 'd1' || !posSettings.apiBaseUrl) return;
+    var messaging = posSettings.messaging;
+    if (!messaging || messaging.enabled !== true || Number(messaging.contractVersion) !== MESSAGING_CONTRACT_VERSION) return;
+    D1_MESSAGING_TENANTS[projectId] = { contractVersion: MESSAGING_CONTRACT_VERSION };
+}
+
+function isMessagingConfigured() {
+    return !!(isD1() && D1_MESSAGING_TENANTS[PROJECT_ID] &&
+        D1_MESSAGING_TENANTS[PROJECT_ID].contractVersion === MESSAGING_CONTRACT_VERSION);
+}
+
+function messagingUnavailableError() {
+    if (!isD1()) return new Error('Messaging requires the secure D1 backend.');
+    if (!isMessagingConfigured()) return new Error('Messaging is not enabled for this tenant.');
+    if (!posToken) return new Error('Messaging requires an authenticated staff session.');
+    return null;
+}
+
+function messagingApi(endpointName, opts) {
+    var unavailable = messagingUnavailableError();
+    if (unavailable) return Promise.reject(unavailable);
+    var endpoint = MESSAGING_ENDPOINTS[endpointName];
+    if (!endpoint) return Promise.reject(new Error('Unsupported messaging endpoint.'));
+    return apiFetch(endpoint, opts);
+}
+
+function messagingGetStatus(filters) {
+    filters = filters || {};
+    var query = [];
+    if (filters.from && !/^\d{4}-\d{2}-\d{2}$/.test(filters.from)) {
+        return Promise.reject(new Error('Invalid messaging history start date.'));
+    }
+    if (filters.to && !/^\d{4}-\d{2}-\d{2}$/.test(filters.to)) {
+        return Promise.reject(new Error('Invalid messaging history end date.'));
+    }
+    if (filters.from) query.push('from=' + encodeURIComponent(filters.from));
+    if (filters.to) query.push('to=' + encodeURIComponent(filters.to));
+    var unavailable = messagingUnavailableError();
+    if (unavailable) return Promise.reject(unavailable);
+    return apiFetch(MESSAGING_ENDPOINTS.status + (query.length ? '?' + query.join('&') : ''), {});
+}
+
+function messagingPreviewAudience(command, idempotencyKey) {
+    return messagingApi('audiencePreview', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(command)
+    });
+}
+
+function messagingRequestCredits(request, idempotencyKey) {
+    return messagingApi('creditRequests', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(request)
+    });
+}
+
+function messagingSend(command, idempotencyKey) {
+    return messagingApi('messages', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(command)
+    });
+}
+
+function messagingUpdatePricing(pricing, idempotencyKey) {
+    return messagingApi('pricing', {
+        method: 'PATCH',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(pricing)
+    });
 }
 
 // Per-collection D1 list endpoint config
@@ -91,8 +183,7 @@ function apiFetch(path, opts) {
     return fetch(d1Base() + path, { method: opts.method || 'GET', headers: headers, body: opts.body })
         .then(function (res) {
             return res.text().then(function (t) {
-                var data = {};
-                try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
+                var data = t ? JSON.parse(t) : {};
                 if (!res.ok) {
                     var err = new Error(data.error || ('HTTP ' + res.status));
                     err.status = res.status;
@@ -242,8 +333,7 @@ function posAuthenticate(username, password, storeId) {
         body: JSON.stringify({ storeId: storeId || PROJECT_ID, username: username, password: password })
     }).then(function (res) {
         return res.text().then(function (t) {
-            var data = {};
-            try { data = t ? JSON.parse(t) : {}; } catch (e) { data = {}; }
+            var data = t ? JSON.parse(t) : {};
             if (!res.ok) {
                 var err = new Error(data.error || ('HTTP ' + res.status));
                 err.status = res.status;
@@ -260,12 +350,20 @@ function clearPosToken() { posToken = null; }
 module.exports = {
     db: db,
     rawDb: rawDb,
+    storage: storage,
     firebase: firebase,
     PROJECT_ID: PROJECT_ID,
     setProjectId: setProjectId,
     getProjectId: function () { return PROJECT_ID; },
     isD1: isD1,
     registerD1Tenant: registerD1Tenant,
+    registerD1MessagingBackend: registerD1MessagingBackend,
+    isMessagingConfigured: isMessagingConfigured,
+    messagingGetStatus: messagingGetStatus,
+    messagingPreviewAudience: messagingPreviewAudience,
+    messagingRequestCredits: messagingRequestCredits,
+    messagingSend: messagingSend,
+    messagingUpdatePricing: messagingUpdatePricing,
     serverTimestamp: serverTimestamp,
     posAuthenticate: posAuthenticate,
     clearPosToken: clearPosToken

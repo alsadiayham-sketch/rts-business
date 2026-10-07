@@ -54,11 +54,14 @@
             <h2>نظام نقطة البيع المصمم للعمل الحقيقي</h2>
             <p class="login-intro">المبيعات والمخزون والعملاء والتقارير في مساحة واحدة واضحة.</p>
             <div class="login-form">
+                <label for="loginStoreName">اسم المتجر</label>
                 <input type="text" id="loginStoreName" placeholder="اسم المتجر (Store ID)" autocomplete="off">
+                <label for="loginUsername">اسم المستخدم</label>
                 <input type="text" id="loginUsername" placeholder="اسم المستخدم" autocomplete="off">
+                <label for="loginPassword">كلمة المرور</label>
                 <input type="password" id="loginPassword" placeholder="كلمة المرور">
                 <button class="btn-primary login-btn" id="loginBtn">دخول</button>
-                <p class="login-error" id="loginError"></p>
+                <p class="login-error" id="loginError" role="alert" aria-live="polite"></p>
             </div>
         </div>
     </div>
@@ -76,7 +79,7 @@
                 <span class="brand-sub" id="sidebarStoreName">نقطة البيع</span>
             </div>
             <nav class="sidebar-nav">
-                <button class="nav-btn active" data-page="sales">
+                <button class="nav-btn active" data-page="sales" aria-current="page">
                     <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h2l2 11h10l2-7H7M9 20h.01M17 20h.01"/></svg></span>
                     <span class="nav-label">المبيعات</span>
                 </button>
@@ -103,6 +106,10 @@
                 <button class="nav-btn" data-page="customers">
                     <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2m6.5-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8.5 10v-2a4 4 0 0 0-3-3.9m1-11.8a4 4 0 0 1 0 7.4"/></svg></span>
                     <span class="nav-label">العملاء</span>
+                </button>
+                <button class="nav-btn messaging-nav" data-page="messaging" style="display:none;">
+                    <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z"/><path d="M8 8h8M8 11h5"/></svg></span>
+                    <span class="nav-label">رسائل العملاء</span>
                 </button>
                 <button class="nav-btn" data-page="reports">
                     <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V10h4v10m4 0V4h4v16m4 0V7h-4"/></svg></span>
@@ -163,12 +170,9 @@
                                 <input type="text" id="productSearch" placeholder="بحث بالاسم أو مسح الباركود..." aria-label="بحث عن منتج بالاسم أو الباركود" autofocus>
                             </div>
                             <div class="filter-row">
+                                <label for="categoryFilter">تصفية حسب التصنيف</label>
                                 <select id="categoryFilter">
                                     <option value="">كل الأصناف</option>
-                                    <option value="ملابس">ملابس</option>
-                                    <option value="أحذية">أحذية</option>
-                                    <option value="إكسسوارات">إكسسوارات</option>
-                                    <option value="كريمات وعطور">كريمات وعطور</option>
                                 </select>
                             </div>
                             <div class="code-add-row">
@@ -242,9 +246,9 @@
                                 <span class="change-due" id="changeDue"></span>
                             </div>
                             <div class="payment-methods">
-                                <button class="pay-btn cash active" data-method="cash">نقدي</button>
-                                <button class="pay-btn card" data-method="card">بطاقة</button>
-                                <button class="pay-btn debt" data-method="debt">آجل (ذمم)</button>
+                                <button class="pay-btn cash active" data-method="cash" aria-pressed="true">نقدي</button>
+                                <button class="pay-btn card" data-method="card" aria-pressed="false">بطاقة</button>
+                                <button class="pay-btn debt" data-method="debt" aria-pressed="false">آجل (ذمم)</button>
                             </div>
                             <div class="cart-action-buttons">
                                 <button class="btn-secondary" id="holdSaleBtn">⏸️ تعليق</button>
@@ -657,6 +661,201 @@
                         <tbody id="customersBody"></tbody>
                     </table>
                 </div>
+            </section>
+
+            <!-- SECURE CUSTOMER MESSAGING PAGE -->
+            <section class="page" id="page-messaging" aria-labelledby="messagingPageTitle">
+                <div class="page-header">
+                    <div>
+                        <h2 id="messagingPageTitle">رسائل العملاء والرصيد</h2>
+                        <p class="page-description">إرسال آمن عبر منصة RTS — لا تظهر أرقام العملاء أو بيانات مزوّد الرسائل هنا.</p>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn-secondary" id="messagingRefreshBtn" type="button">تحديث الحالة</button>
+                    </div>
+                </div>
+
+                <div id="messagingBackendNotice" class="messaging-notice" role="alert" aria-live="polite"></div>
+
+                <div class="messaging-balance-grid" aria-label="ملخص رصيد الرسائل">
+                    <section class="messaging-balance-item">
+                        <span>الرصيد المتاح</span>
+                        <strong id="messagingBalanceNis">₪0.00</strong>
+                        <small>قيمة الرصيد بالشيكل</small>
+                    </section>
+                    <section class="messaging-balance-item">
+                        <span>الرسائل المتاحة</span>
+                        <strong id="messagingBalanceMessages">0</strong>
+                        <small>رسالة يمكن استخدامها</small>
+                    </section>
+                    <section class="messaging-balance-item">
+                        <span>حالة الحساب</span>
+                        <strong id="messagingAllocationStatus">بانتظار الاتصال</strong>
+                        <small id="messagingAllocationNote">تُدار التخصيصات من منصة RTS</small>
+                    </section>
+                </div>
+
+                <div class="messaging-layout">
+                    <section class="messaging-panel messaging-composer" aria-labelledby="smsComposerTitle">
+                        <div class="messaging-panel-heading">
+                            <div>
+                                <h3 id="smsComposerTitle">إنشاء رسالة SMS</h3>
+                                <p>تتم معاينة الشريحة على الخادم قبل الإرسال. لا تُرسل قائمة عملاء من هذا الجهاز.</p>
+                            </div>
+                            <span class="messaging-price" id="messagingPriceDisplay">للعميل ₪0.20 · تكلفة المنصة ₪0.10</span>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label for="smsMessage">نص الرسالة</label>
+                            <textarea id="smsMessage" rows="4" maxlength="459" placeholder="اكتب الرسالة التي تريد إرسالها للعملاء..." aria-describedby="smsMessageHelp smsCharCount"></textarea>
+                            <div class="field-support">
+                                <span id="smsMessageHelp">لا تضع أرقام هواتف أو بيانات حساسة في الرسالة.</span>
+                                <span id="smsCharCount" aria-live="polite">0 / 459</span>
+                            </div>
+                        </div>
+
+                        <div class="messaging-form-grid">
+                            <div class="form-group">
+                                <label for="smsAudienceTarget">الجمهور</label>
+                                <select id="smsAudienceTarget">
+                                    <option value="all">كل العملاء المؤهلين</option>
+                                    <option value="latest">أحدث N من العملاء</option>
+                                    <option value="random">عينة عشوائية من N</option>
+                                    <option value="frequent">الأكثر شراءً</option>
+                                    <option value="recurrent">العملاء المتكررون</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="smsAudienceCountGroup" hidden>
+                                <label for="smsAudienceCount">عدد العملاء (N)</label>
+                                <input type="number" id="smsAudienceCount" min="1" max="10000" step="1" inputmode="numeric" placeholder="مثال: 50">
+                            </div>
+                            <div class="form-group">
+                                <label for="smsFilterFrom">اشترى من تاريخ</label>
+                                <input type="date" id="smsFilterFrom">
+                            </div>
+                            <div class="form-group">
+                                <label for="smsFilterTo">حتى تاريخ</label>
+                                <input type="date" id="smsFilterTo">
+                            </div>
+                            <div class="form-group">
+                                <label for="smsCategory">تصنيف المنتج</label>
+                                <select id="smsCategory">
+                                    <option value="">كل التصنيفات</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="smsSegment">شريحة العملاء</label>
+                                <select id="smsSegment">
+                                    <option value="">كل الشرائح</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="messaging-composer-actions">
+                            <button class="btn-secondary" id="smsPreviewBtn" type="button">معاينة الجمهور والتكلفة</button>
+                            <button class="btn-primary" id="smsSendBtn" type="button" disabled>إرسال بعد التأكيد</button>
+                        </div>
+                        <div class="messaging-preview" id="smsPreviewPanel" role="status" aria-live="polite">
+                            اكتب الرسالة وحدد الجمهور ثم اعرض المعاينة قبل الإرسال.
+                        </div>
+                    </section>
+
+                    <aside class="messaging-side-stack">
+                        <section class="messaging-panel" aria-labelledby="creditRequestTitle">
+                            <div class="messaging-panel-heading">
+                                <div>
+                                    <h3 id="creditRequestTitle">طلب رصيد</h3>
+                                    <p>يصل الطلب إلى مدير المنصة للمراجعة والتخصيص.</p>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="creditRequestQuantity">عدد الرسائل المطلوبة</label>
+                                <input type="number" id="creditRequestQuantity" min="1" max="100000" step="1" inputmode="numeric" placeholder="مثال: 500">
+                            </div>
+                            <div class="form-group">
+                                <label for="creditRequestNote">ملاحظة للمنصة <span class="optional-label">(اختياري)</span></label>
+                                <textarea id="creditRequestNote" rows="2" maxlength="300" placeholder="سبب الطلب أو الحملة"></textarea>
+                            </div>
+                            <button class="btn-primary" id="creditRequestBtn" type="button">إرسال طلب الرصيد</button>
+                            <p class="inline-status" id="creditRequestStatus" role="status" aria-live="polite"></p>
+                        </section>
+
+                        <section class="messaging-panel messaging-pricing-panel" aria-labelledby="pricingTitle">
+                            <h3 id="pricingTitle">تسعير الرسائل</h3>
+                            <dl class="messaging-pricing-list">
+                                <div><dt>سعر العميل</dt><dd id="messagingCustomerPrice">₪0.20</dd></div>
+                                <div><dt>تكلفة المنصة</dt><dd id="messagingPlatformCost">₪0.10</dd></div>
+                            </dl>
+                            <p class="field-support">قد تحدد المنصة سعراً خاصاً بحسابك. لا يمكن تعديل السعر من نقطة البيع إلا بصلاحية منصة معتمدة.</p>
+                            <div id="messagingPlatformControls" class="messaging-platform-controls" hidden>
+                                <div class="form-group">
+                                    <label for="messagingCustomerPriceInput">سعر العميل (₪)</label>
+                                    <input type="number" id="messagingCustomerPriceInput" min="0" max="100" step="0.01">
+                                </div>
+                                <div class="form-group">
+                                    <label for="messagingPlatformCostInput">تكلفة المنصة (₪)</label>
+                                    <input type="number" id="messagingPlatformCostInput" min="0" max="100" step="0.01">
+                                </div>
+                                <button class="btn-secondary" id="messagingSavePricingBtn" type="button">حفظ تسعير المنصة</button>
+                            </div>
+                        </section>
+                    </aside>
+                </div>
+
+                <section class="messaging-analytics" aria-labelledby="messagingAnalyticsTitle">
+                    <div class="messaging-section-heading">
+                        <div>
+                            <h3 id="messagingAnalyticsTitle">تحليلات الرصيد والتسليم</h3>
+                            <p>تعكس الفترة المحددة في السجل أدناه.</p>
+                        </div>
+                    </div>
+                    <div class="messaging-metrics-grid">
+                        <div><span>مشتَرى</span><strong id="analyticsPurchased">0</strong></div>
+                        <div><span>مخصَّص</span><strong id="analyticsAllocated">0</strong></div>
+                        <div><span>مستهلك</span><strong id="analyticsConsumed">0</strong></div>
+                        <div><span>إجمالي الإيراد</span><strong id="analyticsGrossRevenue">₪0.00</strong></div>
+                        <div><span>تكلفة المنصة</span><strong id="analyticsPlatformCost">₪0.00</strong></div>
+                        <div><span>صافي الربح</span><strong id="analyticsNetProfit">₪0.00</strong></div>
+                        <div><span>المتبقي</span><strong id="analyticsRemainingCredits">0</strong></div>
+                        <div><span>نسبة التسليم</span><strong id="analyticsDeliveryRate">—</strong></div>
+                    </div>
+                </section>
+
+                <section class="messaging-panel messaging-history" aria-labelledby="messagingHistoryTitle">
+                    <div class="messaging-section-heading">
+                        <div>
+                            <h3 id="messagingHistoryTitle">سجل الرصيد والرسائل</h3>
+                            <p>سجل تشغيلي بدون أرقام هواتف أو بيانات مزود الخدمة.</p>
+                        </div>
+                        <div class="messaging-history-filters">
+                            <label>من <input type="date" id="messagingHistoryFrom"></label>
+                            <label>إلى <input type="date" id="messagingHistoryTo"></label>
+                            <select id="messagingHistoryType" aria-label="نوع السجل">
+                                <option value="">كل السجلات</option>
+                                <option value="credit">الرصيد</option>
+                                <option value="message">الرسائل</option>
+                            </select>
+                            <select id="messagingHistoryStatus" aria-label="حالة السجل">
+                                <option value="">كل الحالات</option>
+                                <option value="pending">قيد المراجعة</option>
+                                <option value="queued">في الانتظار</option>
+                                <option value="sent">مرسل</option>
+                                <option value="failed">فشل</option>
+                                <option value="allocated">مخصّص</option>
+                            </select>
+                            <input type="search" id="messagingHistorySearch" placeholder="بحث في الوصف أو الحالة" aria-label="بحث في سجل الرسائل">
+                            <button class="btn-secondary" id="messagingHistoryApplyBtn" type="button">تطبيق الفترة</button>
+                        </div>
+                    </div>
+                    <div class="messaging-table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>العدد</th><th>القيمة</th><th>الحالة</th></tr>
+                            </thead>
+                            <tbody id="messagingHistoryBody"></tbody>
+                        </table>
+                    </div>
+                </section>
             </section>
 
             <!-- STATISTICS PAGE -->
@@ -1254,7 +1453,7 @@
                 <div class="clinic-panel" data-clinic-panel="files">
                     <div class="stats-block">
                         <h3>رفع ملف طبي</h3>
-                        <p class="stats-hint">يُحفظ الملف كمرجع مرتبط بالمريض والجلسة. قبل الإنتاج يجب ربط هذا المسار بتخزين كائنات مشفّر مع صلاحيات خادم وسجل وصول.</p>
+                        <p class="stats-hint">يُحفظ محتوى الملف في تخزين ملفات منفصل؛ تسجّل هنا بياناته الوصفية فقط. يتطلب ذلك قواعد وصول مؤمّنة في التخزين.</p>
                         <div class="clinic-form-grid">
                             <div class="form-group"><label for="filePatient">المريض</label><select id="filePatient"></select></div>
                             <div class="form-group"><label for="medicalFile">الملف</label><input id="medicalFile" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"></div>

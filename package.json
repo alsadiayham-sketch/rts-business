@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.5",
+  "version": "4.0.6",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
@@ -56,7 +56,6 @@
       "artifactName": "RTS-Business-Setup.exe",
       "include": "build/installer.nsh",
       "runAfterFinish": true,
-      "deleteAppDataOnUninstall": true,
       "displayLanguageSelector": false
     }
   }
