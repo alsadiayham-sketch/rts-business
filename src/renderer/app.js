@@ -166,7 +166,7 @@ function attemptLogin() {
         // Now authenticate user. For D1 tenants the comparison happens
         // server-side (no hash/password list ever reaches this client).
         if (isD1()) {
-            return posAuthenticate(username, password).then(function (user) {
+            return posAuthenticate(username, password, storeName).then(function (user) {
                 return { __d1user: user };
             }).catch(function (e) {
                 if (e.status === 401 || e.status === 403) return { __authFailed: true };

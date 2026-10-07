@@ -235,11 +235,11 @@ function serverTimestamp() {
 // Server-side cashier authentication for D1 tenants. Never receives a hash.
 // Resolves with { username, name, role } on success; rejects with err.status
 // 401/403 on bad/disabled credentials.
-function posAuthenticate(username, password) {
+function posAuthenticate(username, password, storeId) {
     return fetch(d1Base() + '/api/pos-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username, password: password })
+        body: JSON.stringify({ storeId: storeId || PROJECT_ID, username: username, password: password })
     }).then(function (res) {
         return res.text().then(function (t) {
             var data = {};
