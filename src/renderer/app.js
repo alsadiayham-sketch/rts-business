@@ -881,12 +881,12 @@ function categoryIcon(value) {
     var category = normalizeCategory(value);
     if (!category || category === 'أخرى' || category === 'اخرى' || category === 'other') return CATEGORY_ICONS.other;
     var rules = [
-        ['beauty', ['مكياج', 'مستحضرات تجميل', 'تجميل', 'كريمات', 'عطور', 'makeup', 'cosmetic', 'beauty', 'perfume']],
+        ['beauty', ['مكياج', 'مستحضرات تجميل', 'تجميل', 'كريمات', 'عطور', 'makeup', 'make up', 'cosmetic', 'beauty', 'perfume']],
         ['food', ['مطعم', 'مطاعم', 'مأكولات', 'طعام', 'restaurant', 'food', 'catering']],
         ['bakery', ['مخبز', 'مخبوزات', 'حلويات', 'bakery', 'pastry', 'dessert']],
         ['beverages', ['مشروبات', 'قهوة', 'مقهى', 'عصائر', 'beverage', 'coffee', 'cafe', 'drinks']],
         ['grocery', ['بقالة', 'سوبرماركت', 'سوبر ماركت', 'تموينات', 'grocery', 'supermarket', 'market']],
-        ['apparel', ['ملابس', 'أزياء', 'ثياب', 'clothing', 'apparel', 'fashion']],
+        ['apparel', ['ملابس', 'أزياء', 'ثياب', 'clothing', 'clothes', 'apparel', 'fashion']],
         ['shoes', ['أحذية', 'حذاء', 'shoes', 'footwear']],
         ['accessories', ['إكسسوارات', 'اكسسوارات', 'حقائب', 'شنط', 'accessories', 'bags']],
         ['electronics', ['إلكترونيات', 'الكترونيات', 'جوالات', 'هواتف', 'كمبيوتر', 'electronics', 'phone', 'computer']],
