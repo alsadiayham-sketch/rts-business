@@ -15,6 +15,13 @@
   SetSilent normal
 !macroend
 
+!macro customInstall
+  ; Remove the legacy desktop and Start Menu shortcuts during upgrade.
+  Delete "$DESKTOP\RTS POS.lnk"
+  Delete "$SMPROGRAMS\RTS POS.lnk"
+  RMDir "$SMPROGRAMS\RTS POS"
+!macroend
+
 !macro customInstallMode
   ; Default per-user
 !macroend
