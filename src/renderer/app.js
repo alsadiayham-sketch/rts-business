@@ -514,7 +514,7 @@ function applyRoleVisibility() {
     var btn = document.getElementById('closeDayBtn');
     if (btn) btn.style.display = isAdmin() ? 'inline-flex' : 'none';
     var messagingNav = document.querySelector('.nav-btn[data-page="messaging"]');
-    if (messagingNav) messagingNav.style.display = isMessagingConfigured() ? 'flex' : 'none';
+    if (messagingNav) messagingNav.style.display = isAdmin() ? 'flex' : 'none';
 }
 
 // ============ WORK DAY / SHIFT (per terminal) ============
@@ -6318,8 +6318,8 @@ function renderMessaging() {
     var backendMessage = '';
     var noticeClass = '';
     if (!configured) {
-        backendMessage = 'الرسائل محجوبة لهذا المتجر: يلزم تفعيل عقد D1 الآمن للرسائل من المنصة. لا يوجد مسار Firestore بديل.';
-        noticeClass = 'is-error';
+        backendMessage = 'خدمة الرسائل غير مفعّلة لهذا المتجر بعد. تواصل مع إدارة RTS لتوصيل مزوّد الرسائل وتخصيص الرصيد؛ ستظهر أدوات المعاينة والإرسال هنا فور التفعيل.';
+        noticeClass = 'is-info';
     } else if (messagingState.error) {
         backendMessage = messagingState.error;
         noticeClass = 'is-error';
