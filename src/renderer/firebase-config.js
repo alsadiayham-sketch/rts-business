@@ -19,6 +19,7 @@ if (!firebase.apps.length) {
 var rawDb = firebase.firestore();
 var storage = firebase.storage();
 var PROJECT_ID = null;
+var ownerTelemetry = require('./owner-telemetry');
 
 // =====================================================================
 //  D1 TENANTS
@@ -135,6 +136,19 @@ function messagingUpdatePricing(pricing, idempotencyKey) {
     });
 }
 
+// The bearer token and tenant API base stay private to this module. The payload is
+// whitelisted again here so future renderer callers cannot accidentally publish POS
+// records, customer data, or activity-log details.
+function publishOwnerTelemetry(payload, signal) {
+    if (!isD1()) return Promise.reject(new Error('Owner telemetry requires the secure D1 backend.'));
+    if (!posToken) return Promise.reject(new Error('Owner telemetry requires an authenticated staff session.'));
+    return apiFetch('/api/owner-telemetry', {
+        method: 'POST',
+        body: JSON.stringify(ownerTelemetry.sanitizeOwnerTelemetryPayload(payload)),
+        signal: signal
+    });
+}
+
 // Per-collection D1 list endpoint config
 var D1_CONFIG = {
     products: { list: '/api/products', key: 'products', limitParam: false },
@@ -180,7 +194,9 @@ function apiFetch(path, opts) {
     if (opts.headers) { for (var k in opts.headers) headers[k] = opts.headers[k]; }
     if (posToken) headers['Authorization'] = 'Bearer ' + posToken;
     if (opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    return fetch(d1Base() + path, { method: opts.method || 'GET', headers: headers, body: opts.body })
+    var request = { method: opts.method || 'GET', headers: headers, body: opts.body };
+    if (opts.signal) request.signal = opts.signal;
+    return fetch(d1Base() + path, request)
         .then(function (res) {
             return res.text().then(function (t) {
                 var data = t ? JSON.parse(t) : {};
@@ -364,6 +380,7 @@ module.exports = {
     messagingRequestCredits: messagingRequestCredits,
     messagingSend: messagingSend,
     messagingUpdatePricing: messagingUpdatePricing,
+    publishOwnerTelemetry: publishOwnerTelemetry,
     serverTimestamp: serverTimestamp,
     posAuthenticate: posAuthenticate,
     clearPosToken: clearPosToken

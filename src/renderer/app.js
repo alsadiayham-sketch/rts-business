@@ -16,6 +16,8 @@ var messagingSend = fbConfig.messagingSend;
 var messagingUpdatePricing = fbConfig.messagingUpdatePricing;
 var serverTimestamp = fbConfig.serverTimestamp;
 var posAuthenticate = fbConfig.posAuthenticate;
+var publishOwnerTelemetry = fbConfig.publishOwnerTelemetry;
+var ownerTelemetryHelper = require('./owner-telemetry');
 var electron = require('electron');
 var ipcRenderer = electron.ipcRenderer;
 var fs = require('fs');
@@ -67,6 +69,22 @@ var messagingSendInFlight = false;
 var messagingCreditRequestInFlight = false;
 var messagingPricingInFlight = false;
 var pendingMessagingCreditRequest = null;
+var ownerTelemetryRunning = false;
+var ownerTelemetryPublishing = false;
+var ownerTelemetryDirty = false;
+var ownerTelemetryStateVersion = 0;
+var ownerTelemetryGeneration = 0;
+var ownerTelemetrySessionId = null;
+var ownerTelemetryTimer = null;
+var ownerTelemetryInterval = null;
+var ownerTelemetryAbortController = null;
+var ownerTelemetryPendingPayload = null;
+var ownerTelemetryAuditDay = '';
+var ownerTelemetryAuditBaseCounts = ownerTelemetryHelper.emptyAuditCounts();
+var ownerTelemetryAuditSessionCounts = ownerTelemetryHelper.emptyAuditCounts();
+var OWNER_TELEMETRY_INTERVAL_MS = 5 * 60 * 1000;
+var OWNER_TELEMETRY_DEBOUNCE_MS = 1000;
+var OWNER_TELEMETRY_REQUEST_TIMEOUT_MS = 15000;
 
 var varModalProduct = null;
 var varModalColor = null;
@@ -128,6 +146,7 @@ function resetStoreState() {
 }
 
 function beginStoreSession(storeId) {
+    stopOwnerTelemetry();
     clearStoreSubscriptions();
     storeSessionId++;
     resetStoreState();
@@ -303,6 +322,7 @@ function attemptLogin() {
 }
 
 function logout() {
+    stopOwnerTelemetry();
     if (currentUser) {
         logActivity('logout', (currentUser.displayName || currentUser.username) + ' قام بتسجيل الخروج');
     }
@@ -430,7 +450,185 @@ function logActivity(type, description, details) {
         timestamp: serverTimestamp(),
         details: details || null
     };
+    recordOwnerTelemetryAuditEvent(type);
+    queueOwnerTelemetryFlush(false);
     db.collection('pos_logs').add(logEntry).catch(function () {});
+}
+
+// ============ PRIVACY-SAFE OWNER TELEMETRY ============
+// Keep one latest aggregate snapshot only. No POS records, log entries, tenant IDs,
+// or retry queue are retained by this publisher.
+function ownerTelemetryIsOnline() {
+    return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+function ensureOwnerTelemetryAuditDay(now) {
+    var day = ownerTelemetryHelper.localDayKey(now || Date.now());
+    if (ownerTelemetryAuditDay === day) return;
+    ownerTelemetryPendingPayload = null;
+    ownerTelemetryAuditDay = day;
+    ownerTelemetryAuditBaseCounts = ownerTelemetryHelper.emptyAuditCounts();
+    ownerTelemetryAuditSessionCounts = ownerTelemetryHelper.emptyAuditCounts();
+}
+
+function currentOwnerTelemetryAuditCounts() {
+    ensureOwnerTelemetryAuditDay(Date.now());
+    return ownerTelemetryHelper.mergeAuditCounts(ownerTelemetryAuditBaseCounts, ownerTelemetryAuditSessionCounts);
+}
+
+function recordOwnerTelemetryAuditEvent(type) {
+    if (!ownerTelemetryRunning) return;
+    ensureOwnerTelemetryAuditDay(Date.now());
+    ownerTelemetryHelper.incrementAuditCount(ownerTelemetryAuditSessionCounts, type);
+}
+
+// Existing activity logs can contain staff/customer-facing text. Read them only to
+// derive today's fixed category counters, then discard each record immediately.
+function loadOwnerTelemetryAuditCounts(sessionId) {
+    if (!ownerTelemetryRunning || !isActiveStoreSession(sessionId)) return;
+    var startedSessionCounts = ownerTelemetryHelper.cloneAuditCounts(ownerTelemetryAuditSessionCounts);
+    var requestedDay = ownerTelemetryHelper.localDayKey(Date.now());
+    db.collection('pos_logs').get().then(function (snapshot) {
+        if (!ownerTelemetryRunning || ownerTelemetrySessionId !== sessionId ||
+            !isActiveStoreSession(sessionId) || ownerTelemetryAuditDay !== requestedDay) return;
+        var counts = ownerTelemetryHelper.emptyAuditCounts();
+        var now = Date.now();
+        snapshot.forEach(function (doc) {
+            var entry = doc.data();
+            if (ownerTelemetryHelper.isOnLocalDay(entry, now)) {
+                ownerTelemetryHelper.incrementAuditCount(counts, entry.type);
+            }
+        });
+        ownerTelemetryAuditBaseCounts = counts;
+        ownerTelemetryAuditSessionCounts = ownerTelemetryHelper.subtractAuditCounts(
+            ownerTelemetryAuditSessionCounts,
+            startedSessionCounts
+        );
+        queueOwnerTelemetryFlush(false);
+    }).catch(function () {
+        // Telemetry remains best-effort; current-session counters can still publish.
+    });
+}
+
+function buildOwnerTelemetrySnapshot() {
+    return ownerTelemetryHelper.buildOwnerTelemetryPayload({
+        generatedAt: Date.now(),
+        appVersion: APP_VERSION,
+        products: products,
+        bills: bills,
+        returnRecords: returnRecords,
+        damageRecords: damageRecords,
+        lowStockThreshold: getLowStockThreshold(),
+        activeTerminal: !!currentUser,
+        online: ownerTelemetryIsOnline(),
+        auditCounts: currentOwnerTelemetryAuditCounts()
+    });
+}
+
+function queueOwnerTelemetryFlush(immediate) {
+    if (!ownerTelemetryRunning) return;
+    ownerTelemetryDirty = true;
+    ownerTelemetryStateVersion++;
+    if (ownerTelemetryPendingPayload) ownerTelemetryPendingPayload = null;
+    if (ownerTelemetryTimer) return;
+    ownerTelemetryTimer = setTimeout(function () {
+        ownerTelemetryTimer = null;
+        flushOwnerTelemetry();
+    }, immediate ? 0 : OWNER_TELEMETRY_DEBOUNCE_MS);
+}
+
+function publishOwnerTelemetryWithTimeout(payload, abortController) {
+    return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timeout = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            if (abortController) abortController.abort();
+            reject(new Error('Owner telemetry request timed out.'));
+        }, OWNER_TELEMETRY_REQUEST_TIMEOUT_MS);
+        try {
+            publishOwnerTelemetry(payload, abortController ? abortController.signal : null).then(function (result) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                resolve(result);
+            }).catch(function (err) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                reject(err);
+            });
+        } catch (err) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            reject(err);
+        }
+    });
+}
+
+function flushOwnerTelemetry() {
+    if (!ownerTelemetryRunning || ownerTelemetryPublishing || !currentUser ||
+        !isD1() || !ownerTelemetryIsOnline() || typeof publishOwnerTelemetry !== 'function') {
+        return;
+    }
+
+    ensureOwnerTelemetryAuditDay(Date.now());
+    var generation = ownerTelemetryGeneration;
+    var stateVersion = ownerTelemetryStateVersion;
+    var payload = ownerTelemetryPendingPayload || buildOwnerTelemetrySnapshot();
+    var abortController = typeof AbortController === 'function' ? new AbortController() : null;
+    ownerTelemetryAbortController = abortController;
+    ownerTelemetryPublishing = true;
+    ownerTelemetryDirty = false;
+
+    publishOwnerTelemetryWithTimeout(payload, abortController).then(function () {
+        if (!ownerTelemetryRunning || generation !== ownerTelemetryGeneration) return;
+        if (ownerTelemetryPendingPayload === payload) ownerTelemetryPendingPayload = null;
+        if (ownerTelemetryDirty) queueOwnerTelemetryFlush(false);
+    }).catch(function () {
+        if (!ownerTelemetryRunning || generation !== ownerTelemetryGeneration) return;
+        // A single safe aggregate snapshot is retained for the next online/interval retry.
+        // A mutation during this request supersedes it with a fresh snapshot instead.
+        ownerTelemetryPendingPayload = ownerTelemetryStateVersion === stateVersion ? payload : null;
+        ownerTelemetryDirty = true;
+    }).then(function () {
+        if (generation !== ownerTelemetryGeneration) return;
+        ownerTelemetryPublishing = false;
+        if (ownerTelemetryAbortController === abortController) ownerTelemetryAbortController = null;
+        if (ownerTelemetryDirty && ownerTelemetryStateVersion !== stateVersion) {
+            queueOwnerTelemetryFlush(false);
+        }
+    });
+}
+
+function startOwnerTelemetry(sessionId) {
+    stopOwnerTelemetry();
+    if (!isD1() || !currentUser || typeof publishOwnerTelemetry !== 'function') return;
+    ownerTelemetryRunning = true;
+    ownerTelemetrySessionId = sessionId;
+    ownerTelemetryAuditDay = '';
+    ensureOwnerTelemetryAuditDay(Date.now());
+    loadOwnerTelemetryAuditCounts(sessionId);
+    ownerTelemetryInterval = setInterval(function () {
+        queueOwnerTelemetryFlush(true);
+    }, OWNER_TELEMETRY_INTERVAL_MS);
+    queueOwnerTelemetryFlush(false);
+}
+
+function stopOwnerTelemetry() {
+    ownerTelemetryRunning = false;
+    ownerTelemetryPublishing = false;
+    ownerTelemetryDirty = false;
+    ownerTelemetrySessionId = null;
+    ownerTelemetryPendingPayload = null;
+    ownerTelemetryGeneration++;
+    if (ownerTelemetryAbortController) ownerTelemetryAbortController.abort();
+    ownerTelemetryAbortController = null;
+    if (ownerTelemetryTimer) clearTimeout(ownerTelemetryTimer);
+    if (ownerTelemetryInterval) clearInterval(ownerTelemetryInterval);
+    ownerTelemetryTimer = null;
+    ownerTelemetryInterval = null;
 }
 
 // ============ INIT ============
@@ -456,6 +654,7 @@ function initApp(sessionId) {
     renderClinic();
     renderMessaging();
     if (isMessagingConfigured()) loadMessagingStatus();
+    startOwnerTelemetry(sessionId);
 }
 
 // ============ THEMED CONFIRM / ALERT ============
@@ -766,6 +965,7 @@ function loadProductsBatch(sessionId) {
         renderInventory();
         updateReports();
         updateSyncStatus(true);
+        queueOwnerTelemetryFlush(false);
         // Then subscribe to ALL products in background for real-time updates
         subscribeAllProducts(sessionId);
     }).catch(function () {
@@ -790,6 +990,7 @@ function subscribeAllProducts(sessionId) {
         updateReports();
         updateSyncStatus(true);
         productsLoaded = true;
+        queueOwnerTelemetryFlush(false);
     }, function () {
         if (!isActiveStoreSession(sessionId)) return;
         updateSyncStatus(false);
@@ -875,6 +1076,7 @@ function subscribeBills(sessionId) {
         if (typeof renderStocktakeHistory === 'function') renderStocktakeHistory();
         if (typeof renderHookahGrid === 'function') renderHookahGrid();
         if (typeof renderClinic === 'function') renderClinic();
+        queueOwnerTelemetryFlush(false);
     }, function (err) {
         if (!isActiveStoreSession(sessionId)) return;
         console.error('Bills subscription error:', err);
@@ -897,6 +1099,7 @@ function subscribeDamage(sessionId) {
         });
         renderDamageHistory();
         updateReports();
+        queueOwnerTelemetryFlush(false);
     });
     trackStoreSubscription(unsubscribe);
 }
@@ -918,7 +1121,10 @@ function updateSyncStatus(online) {
 
 // Network detection
 function setupNetworkListeners() {
-    window.addEventListener('online', function () { updateSyncStatus(true); });
+    window.addEventListener('online', function () {
+        updateSyncStatus(true);
+        queueOwnerTelemetryFlush(true);
+    });
     window.addEventListener('offline', function () { updateSyncStatus(false); });
     if (!navigator.onLine) updateSyncStatus(false);
 }

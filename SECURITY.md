@@ -21,6 +21,18 @@ and create the order and stock update in one database transaction. This reposito
 does not contain that backend, so a backend that cannot provide this guarantee blocks
 a safe D1 checkout deployment.
 
+## Owner telemetry
+
+After a D1 cashier session is authenticated, the renderer may publish a bounded,
+best-effort aggregate snapshot to `POST /api/owner-telemetry`. It uses the existing
+cashier bearer token and configured D1 API base; the server must derive the tenant
+solely from that token. The fixed payload contains only the app version, collection
+time, numeric sales/return/inventory/damage aggregates, boolean terminal/network
+state, and numeric audit-category counters. It never includes customer or staff
+details, product names, bill references, notes, reasons, raw logs, or client/terminal
+identifiers. Failed sends retain at most one already-sanitized snapshot and retry when
+the app reconnects or reaches the next interval.
+
 ## Medical files
 
 Medical file content is uploaded to Firebase Storage and Firestore/D1 receives
