@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.8",
+  "version": "4.0.9",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
@@ -15,12 +15,12 @@
   "author": "Royal Technology Solutions",
   "license": "PROPRIETARY",
   "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1"
+    "electron": "41.10.7",
+    "electron-builder": "26.17.0"
   },
   "dependencies": {
-    "electron-updater": "^6.1.7",
-    "firebase": "^9.23.0"
+    "electron-updater": "^6.8.9",
+    "firebase": "12.10.0"
   },
   "build": {
     "appId": "com.rts.business",
@@ -40,7 +40,10 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "src/assets/icon.png"
+      "icon": "src/assets/icon.png",
+      "signtoolOptions": {
+        "publisherName": "RTS Royal Technology Solutions"
+      }
     },
     "nsis": {
       "oneClick": false,
@@ -59,5 +62,9 @@
       "runAfterFinish": true,
       "displayLanguageSelector": false
     }
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.5",
+    "js-yaml": "4.3.2"
   }
 }

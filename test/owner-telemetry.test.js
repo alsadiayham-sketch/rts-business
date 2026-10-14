@@ -1,6 +1,8 @@
 var assert = require('node:assert/strict');
 var test = require('node:test');
 var telemetry = require('../src/renderer/owner-telemetry');
+var fs = require('node:fs');
+var path = require('node:path');
 
 function localTime(year, month, day, hour) {
     return new Date(year, month - 1, day, hour || 12).getTime();
@@ -100,4 +102,35 @@ test('sanitization removes unknown fields and rejects non-version strings', func
             salesCompleted: 2, salesVoided: 0, returnsCompleted: 0, inventoryAdjustments: 0
         }
     });
+});
+
+test('customer messaging is controlled from Settings add-ons and still requires the secure backend', function () {
+    var html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'index.html'), 'utf8');
+    var app = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
+    var backend = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'firebase-config.js'), 'utf8');
+
+    assert.match(html, /id="feat-messaging" data-feature="messaging"/);
+    assert.match(app, /messaging:\s*f\.messaging == null \? isMessagingConfigured\(\) : !!f\.messaging/);
+    assert.match(app, /isAdmin\(\) && isFeatureOn\('messaging'\)/);
+    assert.match(app, /featureEnabled && isMessagingConfigured\(\)/);
+    assert.match(backend, /messaging && messaging\.enabled === false/);
+    assert.match(backend, /Messaging requires an authenticated staff session/);
+});
+
+test('store-wide add-on and tax settings require an authenticated administrator', function () {
+    var app = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
+
+    assert.match(app, /function saveStoreConfig\(cfg, onOk\) \{\s*if \(!isAdmin\(\)\)/);
+    assert.match(app, /function saveAddons\(\) \{\s*if \(!isAdmin\(\)\)/);
+    assert.match(app, /function saveTaxSettings\(\) \{\s*if \(!isAdmin\(\)\)/);
+});
+
+test('inventory adjustments use server-side deltas and reject negative return stock', function () {
+    var app = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'app.js'), 'utf8');
+    var backend = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'firebase-config.js'), 'utf8');
+
+    assert.match(app, /runTransaction\(function \(transaction\)/);
+    assert.match(app, /if \(!variant \|\| nextStock < 0\)/);
+    assert.match(app, /applyD1StockAdjustment\(productId, color, size, -qty\)/);
+    assert.match(backend, /if \(Array\.isArray\(obj\.adjustments\)\) body\.adjustments = obj\.adjustments/);
 });

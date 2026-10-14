@@ -54,8 +54,27 @@ function validateArtifacts() {
   if (expectedHash !== actualHash) throw new Error('Installer SHA-512 does not match latest.yml');
   if (expectedSize !== actualSize) throw new Error('Installer size does not match latest.yml');
   if (fs.statSync(blockmap).size === 0) throw new Error('Blockmap is empty');
+  validateWindowsSignature(installer);
 
   return { output, installer, blockmap, latest };
+}
+
+function validateWindowsSignature(installer) {
+  const publisher = pkg.build?.win?.signtoolOptions?.publisherName || pkg.build?.win?.publisherName;
+  if (!publisher) throw new Error('build.win.publisherName is required for secure updates');
+  const escapedPath = installer.replace(/'/g, "''");
+  const command = [
+    `$signature = Get-AuthenticodeSignature -LiteralPath '${escapedPath}'`,
+    `[Console]::WriteLine($signature.Status)`,
+    `[Console]::WriteLine($signature.SignerCertificate.Subject)`,
+  ].join('; ');
+  const output = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { capture: true });
+  const [status, ...subjectParts] = output.split(/\r?\n/);
+  const subject = subjectParts.join(' ').trim();
+  if (status !== 'Valid') throw new Error(`Installer Authenticode signature is ${status || 'missing'}`);
+  if (!subject.includes(publisher)) {
+    throw new Error(`Installer signer does not match expected publisher: ${publisher}`);
+  }
 }
 
 async function main() {

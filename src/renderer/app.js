@@ -713,7 +713,7 @@ function applyRoleVisibility() {
     var btn = document.getElementById('closeDayBtn');
     if (btn) btn.style.display = isAdmin() ? 'inline-flex' : 'none';
     var messagingNav = document.querySelector('.nav-btn[data-page="messaging"]');
-    if (messagingNav) messagingNav.style.display = isAdmin() ? 'flex' : 'none';
+    if (messagingNav) messagingNav.style.display = isAdmin() && isFeatureOn('messaging') ? 'flex' : 'none';
 }
 
 // ============ WORK DAY / SHIFT (per terminal) ============
@@ -2694,7 +2694,7 @@ function saveAddStock() {
     savBtn.disabled = true;
 
     var doUpdate = isD1()
-        ? db.collection('products').doc(productId).update({ variants: variants })
+        ? applyD1StockAdjustment(productId, color, size, qty)
         : rawDb.collection('projects').doc(getProjectId()).collection('products').doc(productId).update({ variants: variants });
 
     doUpdate.then(function () {
@@ -2827,7 +2827,7 @@ function saveDamage() {
 
     // D1 tenants: adjust stock via /api/pos-stock then record the damage entry.
     if (isD1()) {
-        db.collection('products').doc(productId).update({ variants: variants })
+        applyD1StockAdjustment(productId, color, size, -qty)
             .then(function () { return db.collection('pos_damage').add(damageData); })
             .then(onDamageSuccess)
             .catch(onDamageError);
@@ -4493,24 +4493,57 @@ function applyCombinedStockDeltas(deltas) {
     for (var i = 0; i < deltas.length; i++) {
         var d = deltas[i];
         if (!d.productId || !d.delta) continue;
-        if (!byProduct[d.productId]) {
-            var prod = products.find(function (p) { return p.id === d.productId; });
-            if (!prod) continue;
-            byProduct[d.productId] = JSON.parse(JSON.stringify(prod.variants || []));
-        }
-        var vars = byProduct[d.productId];
-        for (var j = 0; j < vars.length; j++) {
-            if (vars[j].color === d.color && vars[j].size === d.size) {
-                vars[j].stock = Math.max(0, (vars[j].stock || 0) + d.delta);
-            }
-        }
+        if (!byProduct[d.productId]) byProduct[d.productId] = [];
+        var adjustments = byProduct[d.productId];
+        var existing = adjustments.find(function (item) {
+            return item.color === d.color && item.size === d.size;
+        });
+        if (existing) existing.delta += d.delta;
+        else adjustments.push({ color: d.color, size: d.size, delta: d.delta });
     }
-    var promises = [];
     var keys = Object.keys(byProduct);
-    for (var k = 0; k < keys.length; k++) {
-        promises.push(db.collection('products').doc(keys[k]).update({ variants: byProduct[keys[k]] }));
+    if (isD1()) {
+        return Promise.all(keys.map(function (productId) {
+            return db.collection('products').doc(productId).update({ adjustments: byProduct[productId] });
+        }));
     }
-    return Promise.all(promises);
+
+    var projectRef = rawDb.collection('projects').doc(getProjectId());
+    return rawDb.runTransaction(function (transaction) {
+        var snapshots = {};
+        var reads = Promise.resolve();
+        keys.forEach(function (productId) {
+            reads = reads.then(function () {
+                return transaction.get(projectRef.collection('products').doc(productId)).then(function (snapshot) {
+                    snapshots[productId] = snapshot;
+                });
+            });
+        });
+        return reads.then(function () {
+            keys.forEach(function (productId) {
+                var snapshot = snapshots[productId];
+                if (!snapshot || !snapshot.exists) throw checkoutError('insufficient-stock', 'أحد المنتجات لم يعد متاحاً.');
+                var variants = JSON.parse(JSON.stringify((snapshot.data() || {}).variants || []));
+                byProduct[productId].forEach(function (adjustment) {
+                    var variant = variants.find(function (item) {
+                        return item.color === adjustment.color && item.size === adjustment.size;
+                    });
+                    var nextStock = variant ? (Number(variant.stock) || 0) + adjustment.delta : -1;
+                    if (!variant || nextStock < 0) {
+                        throw checkoutError('insufficient-stock', 'المخزون غير كافٍ لإتمام الاستبدال.');
+                    }
+                    variant.stock = nextStock;
+                });
+                transaction.update(projectRef.collection('products').doc(productId), { variants: variants });
+            });
+        });
+    });
+}
+
+function applyD1StockAdjustment(productId, color, size, delta) {
+    return db.collection('products').doc(productId).update({
+        adjustments: [{ color: color, size: size, delta: delta }]
+    });
 }
 function getRegisterBalance() { return registerBalance || 0; }
 
@@ -4659,7 +4692,8 @@ var DEFAULT_STORE_CONFIG = {
         stocktake: false,      // الجرد
         barcodeLabels: false,  // طباعة ملصقات الباركود
         restaurant: false,     // وضع المطاعم (طاولات/طلبات)
-        hookah: false          // الأرجيلة / التبغ
+        hookah: false,         // الأرجيلة / التبغ
+        messaging: false       // رسائل العملاء
     },
     taxPercent: 16,            // admin-configurable tax rate
     taxIncluded: false,        // true = prices already include tax
@@ -4673,7 +4707,8 @@ function getStoreConfig() {
         features: {
             tax: !!f.tax, storeCredit: !!f.storeCredit, suppliers: !!f.suppliers,
             stocktake: !!f.stocktake, barcodeLabels: !!f.barcodeLabels,
-            restaurant: !!f.restaurant, hookah: !!f.hookah
+            restaurant: !!f.restaurant, hookah: !!f.hookah,
+            messaging: f.messaging == null ? isMessagingConfigured() : !!f.messaging
         },
         taxPercent: (c.taxPercent != null && c.taxPercent >= 0) ? c.taxPercent : DEFAULT_STORE_CONFIG.taxPercent,
         taxIncluded: !!c.taxIncluded,
@@ -4689,6 +4724,10 @@ function getTaxPercent() {
     return s.features.tax ? (s.taxPercent || 0) : 0;
 }
 function saveStoreConfig(cfg, onOk) {
+    if (!isAdmin()) {
+        showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
     var rec = {
         recordType: 'store-config',
         features: cfg.features || DEFAULT_STORE_CONFIG.features,
@@ -4729,13 +4768,15 @@ function applyFeatureFlags() {
         if (taxPanel && taxPanel.classList.contains('active') && typeof switchSettingsTab === 'function') {
             switchSettingsTab('addons');
         }
+        applyRoleVisibility();
+        if (!s.features.messaging && currentPage === 'messaging') switchPage('sales');
     }
 }
 var _addonsEdit = null;
 function loadAddonsEditor() {
     var s = getStoreConfig();
     _addonsEdit = { features: Object.assign({}, s.features), taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, businessType: s.businessType };
-    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah'];
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah', 'messaging'];
     for (var i = 0; i < keys.length; i++) {
         var cb = document.getElementById('feat-' + keys[i]);
         if (cb) cb.checked = !!s.features[keys[i]];
@@ -4744,7 +4785,11 @@ function loadAddonsEditor() {
     var ti = document.getElementById('taxIncludedSelect'); if (ti) ti.value = s.taxIncluded ? 'true' : 'false';
 }
 function saveAddons() {
-    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah'];
+    if (!isAdmin()) {
+        showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah', 'messaging'];
     var features = {};
     for (var i = 0; i < keys.length; i++) {
         var cb = document.getElementById('feat-' + keys[i]);
@@ -4771,6 +4816,10 @@ function saveAddons() {
 }
 // Dedicated save for the Tax tab (percent + inclusion method), independent of add-ons.
 function saveTaxSettings() {
+    if (!isAdmin()) {
+        showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
     var s = getStoreConfig();
     var cfg = {
         features: Object.assign({}, s.features, { tax: true }),
@@ -6519,11 +6568,15 @@ function setMessagingPreviewNotice(message, kind) {
 }
 
 function renderMessaging() {
-    var configured = isMessagingConfigured();
+    var featureEnabled = isFeatureOn('messaging');
+    var configured = featureEnabled && isMessagingConfigured();
     var notice = document.getElementById('messagingBackendNotice');
     var backendMessage = '';
     var noticeClass = '';
-    if (!configured) {
+    if (!featureEnabled) {
+        backendMessage = 'تم تعطيل إرسال الرسائل من الإعدادات ← الإضافات. يمكن للمدير تفعيله عند الحاجة.';
+        noticeClass = 'is-info';
+    } else if (!configured) {
         backendMessage = 'خدمة الرسائل غير مفعّلة لهذا المتجر بعد. تواصل مع إدارة RTS لتوصيل مزوّد الرسائل وتخصيص الرصيد؛ ستظهر أدوات المعاينة والإرسال هنا فور التفعيل.';
         noticeClass = 'is-info';
     } else if (messagingState.error) {
@@ -6624,9 +6677,11 @@ function renderMessagingHistory() {
 }
 
 function loadMessagingStatus(filters) {
-    if (!isMessagingConfigured()) {
+    if (!isFeatureOn('messaging') || !isMessagingConfigured()) {
         messagingState = createMessagingState();
-        messagingState.error = 'لم يتم تفعيل خدمة الرسائل الآمنة لهذا المتجر.';
+        messagingState.error = !isFeatureOn('messaging')
+            ? 'إرسال الرسائل معطّل من الإضافات.'
+            : 'لم يتم تفعيل خدمة الرسائل الآمنة لهذا المتجر.';
         renderMessaging();
         return;
     }

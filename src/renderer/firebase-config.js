@@ -64,7 +64,8 @@ function registerD1MessagingBackend(projectId, posSettings) {
     delete D1_MESSAGING_TENANTS[projectId];
     if (!posSettings || posSettings.dataBackend !== 'd1' || !posSettings.apiBaseUrl) return;
     var messaging = posSettings.messaging;
-    if (!messaging || messaging.enabled !== true || Number(messaging.contractVersion) !== MESSAGING_CONTRACT_VERSION) return;
+    if (messaging && messaging.enabled === false) return;
+    if (messaging && Number(messaging.contractVersion) !== MESSAGING_CONTRACT_VERSION) return;
     D1_MESSAGING_TENANTS[projectId] = { contractVersion: MESSAGING_CONTRACT_VERSION };
 }
 
@@ -290,10 +291,14 @@ D1Doc.prototype.set = function (obj) {
 };
 D1Doc.prototype.update = function (obj) {
     if (this.coll === 'products') {
-        // Cashier-scoped stock adjustment (restock / damage). Only variants change.
+        // Cashier-scoped stock adjustment. Delta updates are applied against the
+        // server's current value so concurrent terminals cannot overwrite stock.
+        var body = { productId: this.id };
+        if (Array.isArray(obj.adjustments)) body.adjustments = obj.adjustments;
+        else body.variants = obj.variants;
         return apiFetch('/api/pos-stock', {
             method: 'POST',
-            body: JSON.stringify({ productId: this.id, variants: obj.variants })
+            body: JSON.stringify(body)
         });
     }
     return Promise.reject(new Error('D1 update not supported for ' + this.coll));
