@@ -16,6 +16,54 @@
         return String(value || '').slice(0, 10);
     }
 
+    function businessType(licensedType, legacyConfig) {
+        if (licensedType === 'restaurant' || licensedType === 'shop') return licensedType;
+        var features = legacyConfig && legacyConfig.features || {};
+        return legacyConfig && legacyConfig.businessType === 'restaurant' || features.restaurant === true ? 'restaurant' : 'shop';
+    }
+
+    function menuSections(config, products) {
+        var seen = {}, names = {};
+        var sections = [];
+        ((config && config.restaurantMenuSections) || []).forEach(function (section, index) {
+            var name = String(section && section.name || '').trim();
+            var id = String(section && section.id || '').trim();
+            if (!name || !id || seen[id]) return;
+            seen[id] = true;
+            names[name] = true;
+            sections.push({ id: id, name: name, order: Number.isFinite(Number(section.order)) ? Number(section.order) : index });
+        });
+        sections.sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name, 'ar'); });
+        (products || []).forEach(function (product) {
+            var name = String(product && (product.category || product.type) || '').trim();
+            if (!name) return;
+            var id = 'legacy-' + name.normalize('NFKC').replace(/\s+/g, '-').replace(/[^\w\u0600-\u06FF-]/g, '').toLowerCase();
+            if (!seen[id] && !names[name]) {
+                seen[id] = true;
+                names[name] = true;
+                sections.push({ id: id, name: name, order: sections.length });
+            }
+        });
+        return sections;
+    }
+
+    function foodChoices(product) {
+        return (product && product.variants || []).map(function (variant, index) {
+            return { variant: variant, index: index, label: String(variant && variant.size || '').trim() };
+        }).filter(function (choice) { return Number(choice.variant && choice.variant.stock || 0) > 0; });
+    }
+
+    function foodSelection(product) {
+        var choices = foodChoices(product);
+        if (choices.length === 1) return { kind: 'direct', choice: choices[0] };
+        var labels = {}, configured = choices.length > 1;
+        choices.forEach(function (choice) {
+            if (!choice.label || choice.label === 'افتراضي' || labels[choice.label]) configured = false;
+            labels[choice.label] = true;
+        });
+        return configured ? { kind: 'portions', choices: choices } : { kind: 'configuration-required', choices: choices };
+    }
+
     function validateOffer(offer) {
         var errors = [];
         var discount = number(offer && offer.discountValue);
@@ -127,11 +175,11 @@
         return {
             products: products.map(function (product) { return { id: product.id, data: product }; }),
             records: customers.concat(offers, employeeRecords, attendance, loyalty).map(function (record) { return { id: record.id, data: record }; }),
-            featureSettings: { restaurant: true, businessType: 'restaurant', demoDataVersion: DEMO_VERSION }
+            featureSettings: { demoDataVersion: DEMO_VERSION }
         };
     }
 
-    return { DEMO_VERSION: DEMO_VERSION, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
+    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
         var fixture = buildRestaurantDemo();
         return { version: DEMO_VERSION, products: fixture.products.map(function (item) { return Object.assign({ id: item.id }, item.data); }), records: fixture.records.map(function (item) { return Object.assign({ id: item.id }, item.data); }) };
     } };

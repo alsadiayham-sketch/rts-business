@@ -28,18 +28,19 @@
         var minutes = Math.max(0, Math.floor((new Date(until).getTime() - new Date(from).getTime()) / 60000));
         return Math.floor(minutes / 60) + ' س ' + (minutes % 60) + ' د';
     }
+    function menuSections() { return adapters.menuSections ? adapters.menuSections() : []; }
 
     function renderMenu() {
         var products = (adapters.products ? adapters.products() : []).filter(function (product) {
             return product.status !== 'disabled';
         });
-        var categories = products.reduce(function (set, product) { if (product.category && set.indexOf(product.category) === -1) set.push(product.category); return set; }, []);
+        var categories = menuSections().map(function (section) { return section.name; });
         var query = state.query.toLowerCase();
         products = products.filter(function (product) {
             return (!query || String(product.name || '').toLowerCase().indexOf(query) !== -1) &&
                 (state.category === 'all' || product.category === state.category);
         });
-        var html = '<div class="restaurant-toolbar"><div><h3>قائمة الطعام</h3><p>أصناف البيع وأسعارها ومخزونها الفعلي.</p></div>' +
+        var html = '<div class="restaurant-toolbar"><div><h3>إدارة القائمة</h3><p>أصناف الطعام، الحصص، والتوفر الفعلي.</p></div>' +
             '<button class="btn-primary" data-r-action="menu-new"' + (admin() ? '' : ' disabled') + '>+ صنف في القائمة</button></div>' +
             '<div class="restaurant-filters"><input data-r-input="menu-query" value="' + esc(state.query) + '" placeholder="ابحث باسم الصنف"><select data-r-input="menu-category"><option value="all">كل التصنيفات</option>' +
             categories.map(function (category) { return '<option value="' + esc(category) + '"' + (state.category === category ? ' selected' : '') + '>' + esc(category) + '</option>'; }).join('') + '</select></div>' +
@@ -48,6 +49,16 @@
                 return '<article class="restaurant-menu-row"><div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span></div><div class="restaurant-price">' + money(variant.price) + '<small>المخزون ' + Number(variant.stock || 0) + '</small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
             }).join('') + (products.length ? '' : '<div class="restaurant-empty">لا توجد أصناف مطابقة. أضف صنفًا من القائمة أو غيّر البحث.</div>') + '</div>';
         return html;
+    }
+
+    function renderSections() {
+        var sections = menuSections();
+        var products = adapters.products ? adapters.products() : [];
+        return '<div class="restaurant-toolbar"><div><h3>أقسام القائمة</h3><p>رتّب الأقسام كما تريد أن تظهر للكاشير. لا يمكن حذف قسم يحتوي أصنافًا.</p></div><button class="btn-primary" data-r-action="section-new"' + (admin() ? '' : ' disabled') + '>+ قسم جديد</button></div>' +
+            '<div class="restaurant-section-list">' + sections.map(function (section, index) {
+                var count = products.filter(function (product) { return (product.category || product.type) === section.name; }).length;
+                return '<article class="restaurant-section-row"><div><strong>' + esc(section.name) + '</strong><span>' + count + ' أصناف · الترتيب ' + (index + 1) + '</span></div><div class="restaurant-section-actions"><button class="btn-secondary btn-small" data-r-action="section-up" data-id="' + esc(section.id) + '"' + (admin() && index ? '' : ' disabled') + '>أعلى</button><button class="btn-secondary btn-small" data-r-action="section-down" data-id="' + esc(section.id) + '"' + (admin() && index < sections.length - 1 ? '' : ' disabled') + '>أسفل</button><button class="btn-quiet" data-r-action="section-edit" data-id="' + esc(section.id) + '"' + (admin() ? '' : ' disabled') + '>إعادة تسمية</button><button class="btn-quiet" data-r-action="section-delete" data-id="' + esc(section.id) + '"' + (admin() && !count ? '' : ' disabled') + '>حذف</button></div></article>';
+            }).join('') + (sections.length ? '' : '<div class="restaurant-empty">أنشئ أول قسم، مثل «الوجبات الرئيسية» أو «المشروبات».</div>') + '</div>';
     }
 
     function renderOffers() {
@@ -95,10 +106,10 @@
     function render() {
         var host = document.getElementById('restaurantWorkspace');
         if (!host) return;
-        var content = state.tab === 'menu' ? renderMenu() : state.tab === 'offers' ? renderOffers() : state.tab === 'customers' ? renderCustomers() : state.tab === 'attendance' ? renderAttendance() : renderTables();
-        host.innerHTML = '<header class="restaurant-workspace-header"><div><h2>إدارة المطعم</h2><p>تشغيل القائمة والعروض والعملاء والحضور التجريبي من مساحة واحدة.</p></div></header>' +
+        var content = state.tab === 'menu' ? renderMenu() : state.tab === 'sections' ? renderSections() : state.tab === 'offers' ? renderOffers() : state.tab === 'customers' ? renderCustomers() : state.tab === 'attendance' ? renderAttendance() : renderTables();
+        host.innerHTML = '<header class="restaurant-workspace-header"><div><h2>إدارة المطعم</h2><p>القائمة والعروض والعملاء والطاولات في مساحة تشغيل واحدة.</p></div></header>' +
             '<div class="restaurant-tabs" role="tablist">' +
-            [['menu', 'القائمة'], ['offers', 'العروض'], ['customers', 'العملاء والولاء'], ['attendance', 'الحضور التجريبي'], ['tables', 'الطاولات']].map(function (tab) { return '<button role="tab" class="' + (state.tab === tab[0] ? 'active' : '') + '" data-r-tab="' + tab[0] + '">' + tab[1] + '</button>'; }).join('') +
+            [['menu', 'إدارة القائمة'], ['sections', 'الأقسام'], ['offers', 'العروض'], ['customers', 'العملاء والولاء'], ['attendance', 'الحضور التجريبي'], ['tables', 'الطاولات']].map(function (tab) { return '<button role="tab" class="' + (state.tab === tab[0] ? 'active' : '') + '" data-r-tab="' + tab[0] + '">' + tab[1] + '</button>'; }).join('') +
             '</div><div id="restaurantWorkspaceNotice" class="restaurant-notice"></div><section class="restaurant-panel">' + content + '</section>';
         if (state.tab === 'tables' && adapters.renderTables) adapters.renderTables();
     }
@@ -107,7 +118,12 @@
         var modal = document.createElement('div');
         modal.className = 'modal-overlay restaurant-editor'; modal.style.display = 'flex';
         modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>' + esc(title) + '</h3><button class="modal-close" data-r-close>&times;</button></div><form class="modal-body restaurant-form">' +
-            fields.map(function (field) { return '<label>' + esc(field.label) + '<input name="' + esc(field.name) + '" type="' + esc(field.type || 'text') + '" value="' + esc(field.value || '') + '"' + (field.min != null ? ' min="' + field.min + '"' : '') + (field.step ? ' step="' + field.step + '"' : '') + (field.required ? ' required' : '') + '></label>'; }).join('') +
+            fields.map(function (field) {
+                var name = esc(field.name), value = field.value == null ? '' : String(field.value);
+                if (field.type === 'select') return '<label>' + esc(field.label) + '<select name="' + name + '">' + (field.options || []).map(function (option) { return '<option value="' + esc(option.value) + '"' + (String(option.value) === value ? ' selected' : '') + '>' + esc(option.label) + '</option>'; }).join('') + '</select></label>';
+                if (field.type === 'textarea') return '<label>' + esc(field.label) + '<textarea name="' + name + '"' + (field.required ? ' required' : '') + '>' + esc(value) + '</textarea></label>';
+                return '<label>' + esc(field.label) + '<input name="' + name + '" type="' + esc(field.type || 'text') + '" value="' + esc(value) + '"' + (field.min != null ? ' min="' + field.min + '"' : '') + (field.step ? ' step="' + field.step + '"' : '') + (field.required ? ' required' : '') + '></label>';
+            }).join('') +
             '<div class="modal-footer"><button class="btn-primary">حفظ</button><button type="button" class="btn-secondary" data-r-close>إلغاء</button></div></form></div>';
         document.body.appendChild(modal);
         modal.addEventListener('click', function (event) { if (event.target === modal || event.target.closest('[data-r-close]')) modal.remove(); });
@@ -122,25 +138,70 @@
         adapters.saveRecord(record, prefix, function () { setMessage(success, 'success'); render(); });
     }
 
+    function editSection(id) {
+        if (!requireAdmin()) return;
+        var sections = menuSections();
+        var section = sections.find(function (item) { return item.id === id; });
+        promptFields(section ? 'إعادة تسمية القسم' : 'قسم جديد', [{ name: 'name', label: 'اسم القسم', value: section && section.name, required: true }], function (value, fail) {
+            if (!value.name) return fail('اسم القسم مطلوب.');
+            if (sections.some(function (item) { return item.name === value.name && item.id !== (section && section.id); })) return fail('يوجد قسم بهذا الاسم.');
+            var next = sections.map(function (item) { return Object.assign({}, item); });
+            if (section && section.name !== value.name && adapters.renameMenuSection) {
+                adapters.renameMenuSection(section.id, value.name, function () { setMessage('تم حفظ القسم وإعادة تعيين أصنافه.', 'success'); render(); }, function () { setMessage('تعذر حفظ القسم.', 'error'); });
+                return;
+            }
+            if (section) next.forEach(function (item) { if (item.id === section.id) item.name = value.name; });
+            else next.push({ id: 'menu-section-' + Date.now(), name: value.name, order: next.length });
+            adapters.saveMenuSections(next, function () { setMessage('تم حفظ القسم.', 'success'); render(); }, function () { setMessage('تعذر حفظ القسم.', 'error'); });
+        });
+    }
+
+    function moveSection(id, direction) {
+        if (!requireAdmin()) return;
+        var sections = menuSections().map(function (section) { return Object.assign({}, section); });
+        var index = sections.findIndex(function (section) { return section.id === id; });
+        var target = index + direction;
+        if (index < 0 || target < 0 || target >= sections.length) return;
+        var swap = sections[index]; sections[index] = sections[target]; sections[target] = swap;
+        sections.forEach(function (section, position) { section.order = position; });
+        adapters.saveMenuSections(sections, function () { setMessage('تم تحديث الترتيب.', 'success'); render(); }, function () { setMessage('تعذر تحديث الترتيب.', 'error'); });
+    }
+
+    function deleteSection(id) {
+        if (!requireAdmin()) return;
+        var section = menuSections().find(function (item) { return item.id === id; });
+        var populated = (adapters.products ? adapters.products() : []).some(function (product) { return section && (product.category || product.type) === section.name; });
+        if (populated) return setMessage('انقل الأصناف إلى قسم آخر قبل حذف هذا القسم.', 'error');
+        var next = menuSections().filter(function (item) { return item.id !== id; }).map(function (item, index) { return Object.assign({}, item, { order: index }); });
+        adapters.saveMenuSections(next, function () { setMessage('تم حذف القسم.', 'success'); render(); }, function () { setMessage('تعذر حذف القسم.', 'error'); });
+    }
+
     function editMenu(id) {
         if (!requireAdmin()) return;
         var product = id && adapters.products().find(function (item) { return String(item.id) === String(id); });
         var variant = product && product.variants && product.variants[0] || {};
+        var sectionOptions = menuSections().map(function (section) { return { value: section.name, label: section.name }; });
+        if (!sectionOptions.length) return setMessage('أنشئ قسمًا للقائمة قبل إضافة صنف.', 'error');
+        var portions = (product && product.variants || []).map(function (item) { return (item.size || '') + ':' + Number(item.price || 0) + ':' + Number(item.stock || 0) + ':' + Number(item.cost || 0); }).join('\\n');
         promptFields(product ? 'تعديل صنف القائمة' : 'صنف جديد في القائمة', [
             { name: 'name', label: 'اسم الصنف', value: product && product.name, required: true },
-            { name: 'category', label: 'التصنيف', value: product && product.category || 'أطباق رئيسية', required: true },
+            { name: 'category', label: 'القسم', type: 'select', options: sectionOptions, value: product && product.category || sectionOptions[0].value, required: true },
             { name: 'price', label: 'السعر', type: 'number', min: 0, step: '0.5', value: variant.price || '', required: true },
-            { name: 'stock', label: 'المخزون', type: 'number', min: 0, step: '1', value: variant.stock == null ? 0 : variant.stock, required: true },
-            { name: 'cost', label: 'التكلفة', type: 'number', min: 0, step: '0.5', value: variant.cost || 0, required: true }
+            { name: 'available', label: 'متاح للبيع', type: 'select', options: [{ value: 'true', label: 'متاح' }, { value: 'false', label: 'غير متاح' }], value: product && product.status === 'disabled' ? 'false' : 'true' },
+            { name: 'portions', label: 'الحصص (اختياري: الاسم:السعر:المخزون:التكلفة، سطر لكل حصة)', type: 'textarea', value: portions }
         ], function (value, fail) {
-            if (Number(value.price) < 0 || Number(value.stock) < 0 || Number(value.cost) < 0) return fail('تحقق من السعر والمخزون والتكلفة.');
-            var variants = product ? (product.variants || []).map(function (item, index) {
-                return index === 0 ? Object.assign({}, item, { price: Number(value.price), stock: Number(value.stock), cost: Number(value.cost) }) : item;
-            }) : [{ color: 'افتراضي', size: 'حصة', price: Number(value.price), stock: Number(value.stock), cost: Number(value.cost) }];
-            if (!variants.length) variants.push({ color: 'افتراضي', size: 'حصة', price: Number(value.price), stock: Number(value.stock), cost: Number(value.cost) });
+            if (Number(value.price) < 0) return fail('تحقق من السعر.');
+            var lines = value.portions.split(/\\r?\\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+            var existing = product && product.variants || [];
+            var variants = lines.length ? lines.map(function (line, index) {
+                var parts = line.split(':').map(function (part) { return part.trim(); });
+                if (!parts[0] || parts.length < 4 || Number(parts[1]) < 0 || Number(parts[2]) < 0 || Number(parts[3]) < 0) return null;
+                return Object.assign({}, existing[index] || {}, { color: (existing[index] || {}).color || 'افتراضي', size: parts[0], price: Number(parts[1]), stock: Number(parts[2]), cost: Number(parts[3]) });
+            }) : [Object.assign({}, existing[0] || {}, { color: (existing[0] || {}).color || 'افتراضي', size: (existing[0] || {}).size || 'حصة', price: Number(value.price), stock: Number((existing[0] || {}).stock || 0), cost: Number((existing[0] || {}).cost || 0) })];
+            if (variants.some(function (item) { return !item; })) return fail('اكتب كل حصة بالشكل: الاسم:السعر:المخزون:التكلفة.');
             adapters.saveProduct({
                 id: product ? product.id : 'restaurant-' + Date.now(), name: value.name, category: value.category, type: value.category, brand: 'مطعم',
-                restaurantMenu: true, status: 'active', variants: variants
+                restaurantMenu: true, status: value.available === 'true' ? 'active' : 'disabled', variants: variants
             }, function () { setMessage('تم حفظ صنف القائمة.', 'success'); render(); });
         });
     }
@@ -196,6 +257,8 @@
         var button = event.target.closest('[data-r-action]'); if (!button || button.disabled) return;
         var id = button.dataset.id, action = button.dataset.rAction;
         if (action === 'menu-new') editMenu(); else if (action === 'menu-edit') editMenu(id);
+        else if (action === 'section-new') editSection(); else if (action === 'section-edit') editSection(id);
+        else if (action === 'section-up') moveSection(id, -1); else if (action === 'section-down') moveSection(id, 1); else if (action === 'section-delete') deleteSection(id);
         else if (action === 'offer-new') editOffer(); else if (action === 'offer-edit') editOffer(id); else if (action === 'offer-apply') applyOffer(id);
         else if (action === 'customer-new') adapters.openNewCustomer(); else if (action === 'customer-open') adapters.openCustomer(decodeURIComponent(button.dataset.key));
         else if (action === 'employee-new') saveEmployee(); else if (action === 'employee-edit') saveEmployee(id);

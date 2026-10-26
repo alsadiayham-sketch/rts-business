@@ -60,6 +60,7 @@ var appliedRewardIds = []; // reward ids currently selected for this sale (prize
 var currentPage = 'sales';
 var currentUser = null;
 var licenseValid = false;
+var licensedBusinessType = null;
 var storeSessionId = 0;
 var storeUnsubscribers = [];
 var appEventsInitialized = false;
@@ -139,6 +140,8 @@ function resetStoreState() {
     registerBalance = 0;
     productsLoaded = false;
     licenseValid = false;
+    licensedBusinessType = null;
+    document.body.classList.remove('restaurant-mode');
     messagingState = createMessagingState();
     messagingPreview = null;
     messagingPreviewInFlight = false;
@@ -162,6 +165,31 @@ function isActiveStoreSession(sessionId) {
     return sessionId === storeSessionId;
 }
 
+function setLicensedBusinessType(data) {
+    licensedBusinessType = data && (data.businessType === 'restaurant' || data.businessType === 'shop') ? data.businessType : null;
+}
+function businessMode() {
+    var model = window.RestaurantModel;
+    return model && model.businessType ? model.businessType(licensedBusinessType, storeConfig) : (licensedBusinessType || 'shop');
+}
+function isRestaurantMode() { return businessMode() === 'restaurant'; }
+function applyBusinessSurface() {
+    var restaurant = isRestaurantMode();
+    document.body.classList.toggle('restaurant-mode', restaurant);
+    var salesNav = document.querySelector('.nav-btn[data-page="sales"] .nav-label');
+    if (salesNav) salesNav.textContent = restaurant ? 'طلبات المطعم' : 'المبيعات';
+    var restaurantNavLabel = document.querySelector('.nav-btn[data-page="restaurant"] .nav-label');
+    if (restaurantNavLabel) restaurantNavLabel.textContent = restaurant ? 'إدارة المطعم' : 'الطاولات';
+    var salesTitle = document.getElementById('salesPanelTitle');
+    if (salesTitle) salesTitle.textContent = restaurant ? 'قائمة الطلبات' : 'المنتجات';
+    var restaurantNav = document.querySelector('.nav-btn[data-page="restaurant"]');
+    if (restaurantNav) restaurantNav.style.display = restaurant ? 'flex' : 'none';
+    var restaurantPage = document.getElementById('page-restaurant');
+    if (restaurantPage) restaurantPage.style.display = restaurant && currentPage === 'restaurant' ? '' : (currentPage === 'restaurant' ? 'none' : restaurantPage.style.display);
+    if (!restaurant && currentPage === 'restaurant') switchPage('sales');
+    renderProducts();
+}
+
 // ============ SECURITY: LICENSE CHECK ============
 function checkLicense() {
     var storeId = getProjectId();
@@ -175,6 +203,7 @@ function checkLicense() {
             return;
         }
         var data = doc.data();
+        setLicensedBusinessType(data);
         if (data.dataBackend === 'd1' && data.apiBaseUrl) {
             registerD1Tenant(storeId, data.apiBaseUrl);
             registerD1MessagingBackend(storeId, data);
@@ -244,6 +273,7 @@ function attemptLogin() {
             return;
         }
         var data = doc.data();
+        setLicensedBusinessType(data);
         // Stores linked to a web-designer project's secure backend declare a D1
         // data source in their license doc. Register it before any product/order
         // routing so the shared live catalog resolves to the right tenant.
@@ -646,6 +676,7 @@ function initApp(sessionId) {
         appEventsInitialized = true;
     }
     applyRoleVisibility();
+    applyBusinessSurface();
     loadShortcuts();
     renderShortcutsEditor();
     initGeneralNotes();
@@ -968,7 +999,7 @@ function loadProductsBatch(sessionId) {
         renderProducts();
         renderInventory();
         updateReports();
-        if (currentPage === 'restaurant') syncRestaurantWorkspace();
+        if (currentPage === 'restaurant' && isRestaurantMode()) syncRestaurantWorkspace();
         updateSyncStatus(true);
         queueOwnerTelemetryFlush(false);
         // Then subscribe to ALL products in background for real-time updates
@@ -993,7 +1024,7 @@ function subscribeAllProducts(sessionId) {
         renderProducts();
         renderInventory();
         updateReports();
-        if (currentPage === 'restaurant') syncRestaurantWorkspace();
+        if (currentPage === 'restaurant' && isRestaurantMode()) syncRestaurantWorkspace();
         updateSyncStatus(true);
         productsLoaded = true;
         queueOwnerTelemetryFlush(false);
@@ -1054,6 +1085,7 @@ function subscribeBills(sessionId) {
         });
         loyaltyConfig = newLoyaltyConfig;
         storeConfig = newStoreConfig;
+        applyBusinessSurface();
         syncRestaurantWorkspace();
         bills.sort(billSortDesc);
         withdrawals.sort(billSortDesc);
@@ -1139,8 +1171,53 @@ function setupNetworkListeners() {
 }
 
 // ============ RENDER PRODUCTS ============
+function renderRestaurantOrder() {
+    var grid = document.getElementById('productsGrid');
+    if (!grid) return;
+    var query = (document.getElementById('productSearch').value || '').trim().toLowerCase();
+    var sections = getMenuSections();
+    var grouped = {};
+    for (var i = 0; i < sections.length; i++) grouped[sections[i].name] = [];
+    products.forEach(function (product) {
+        var section = product.category || product.type || '';
+        if (product.status === 'disabled' || !grouped.hasOwnProperty(section)) return;
+        if (query && String(product.name || '').toLowerCase().indexOf(query) === -1 && String(product.id || '').indexOf(query) === -1) return;
+        grouped[section].push(product);
+    });
+    var html = '<div class="restaurant-order-intro"><div><strong>طلبات سريعة</strong><span>اختر صنفًا لإضافته فورًا، أو اختر الحصة عند إعدادها.</span></div><span class="restaurant-order-count">' + products.filter(function (p) { return p.status !== 'disabled'; }).length + ' صنف</span></div>';
+    var shown = 0;
+    sections.forEach(function (section) {
+        var items = grouped[section.name] || [];
+        if (!items.length && query) return;
+        html += '<section class="restaurant-menu-section"><div class="restaurant-menu-section-title"><h3>' + escapeHtml(section.name) + '</h3><span>' + items.length + '</span></div><div class="restaurant-item-grid">';
+        items.forEach(function (product) {
+            var selection = window.RestaurantModel.foodSelection(product);
+            var available = selection.kind !== 'configuration-required' && getTotalStock(product) > 0;
+            var price = getMinPrice(product);
+            html += '<button type="button" class="restaurant-food-item' + (available ? '' : ' unavailable') + '" data-id="' + escapeHtml(product.id) + '" aria-label="إضافة ' + escapeHtml(product.name || '') + ' إلى الطلب"' + (available ? '' : ' disabled') + '><strong>' + escapeHtml(product.name || '') + '</strong><span>' + (selection.kind === 'portions' ? 'اختر الحصة' : 'إضافة مباشرة') + '</span><b>₪' + Number(price).toFixed(2) + '</b></button>';
+            shown++;
+        });
+        html += '</div></section>';
+    });
+    if (!shown) html += '<div class="restaurant-empty">لا توجد أصناف متاحة في القائمة. يستطيع المدير إنشاء أقسام وأصناف من «إدارة القائمة».</div>';
+    grid.innerHTML = html;
+}
+
 function renderProducts() {
     var grid = document.getElementById('productsGrid');
+    if (!grid) return;
+    if (isRestaurantMode()) {
+        var boxesTitle = document.getElementById('categoryBoxesTitle');
+        var boxes = document.getElementById('categoryBoxes');
+        var filter = document.getElementById('categoryFilter');
+        if (boxesTitle) boxesTitle.style.display = 'none';
+        if (boxes) boxes.style.display = 'none';
+        if (filter && filter.parentElement) filter.parentElement.style.display = 'none';
+        renderRestaurantOrder();
+        return;
+    }
+    var retailFilter = document.getElementById('categoryFilter');
+    if (retailFilter && retailFilter.parentElement) retailFilter.parentElement.style.display = '';
     var searchVal = (document.getElementById('productSearch').value || '').toLowerCase();
     syncCategoryFilterOptions();
     var catFilter = document.getElementById('categoryFilter').value;
@@ -1446,9 +1523,48 @@ function getMinPrice(product) {
 }
 
 // ============ VARIANT MODAL ============
+var varModalFoodChoice = null;
+function restaurantFoodSelection(product) {
+    return window.RestaurantModel && window.RestaurantModel.foodSelection
+        ? window.RestaurantModel.foodSelection(product)
+        : { kind: 'configuration-required', choices: [] };
+}
+function openRestaurantFoodModal(product, target) {
+    var selection = restaurantFoodSelection(product);
+    if (selection.kind === 'direct') {
+        addVariantToCart(product, selection.choice.variant.color, selection.choice.variant.size, 1, target);
+        return;
+    }
+    if (selection.kind !== 'portions') {
+        showAlert('لا يمكن إضافة هذا الصنف قبل أن يضبط المدير حصصه بوضوح.', { icon: '⚠️', title: 'الحصص غير مضبوطة' });
+        return;
+    }
+    varModalTarget = target || 'sale';
+    varModalProduct = product;
+    varModalColor = null;
+    varModalSize = null;
+    varModalFoodChoice = null;
+    document.getElementById('variantModalTitle').textContent = product.name;
+    document.getElementById('varQtyInput').value = 1;
+    document.getElementById('variantColors').innerHTML = '';
+    document.getElementById('variantSizes').innerHTML = selection.choices.map(function (choice) {
+        return '<button type="button" class="size-option restaurant-portion-option" data-food-choice="' + choice.index + '" aria-pressed="false">' +
+            escapeHtml(choice.label) + ' · ₪' + Number(choice.variant.price || 0).toFixed(2) + '</button>';
+    }).join('');
+    document.getElementById('varStockInfo').textContent = 'اختر الحصة المطلوبة';
+    document.getElementById('variantModal').classList.add('restaurant-portion-modal');
+    updateVariantAddBtn();
+    document.getElementById('variantModal').style.display = 'flex';
+}
+
 function openVariantModal(productId, target) {
     var product = products.find(function (p) { return p.id === productId; });
     if (!product) return;
+    if (isRestaurantMode()) {
+        openRestaurantFoodModal(product, target);
+        return;
+    }
+    document.getElementById('variantModal').classList.remove('restaurant-portion-modal');
     varModalTarget = target || 'sale';
     varModalProduct = product;
     varModalColor = null;
@@ -1484,6 +1600,10 @@ function autoSelectSingleSize() {
 function updateVariantAddBtn() {
     var btn = document.getElementById('addToCartFromModal');
     if (!btn) return;
+    if (isRestaurantMode()) {
+        btn.disabled = !varModalFoodChoice;
+        return;
+    }
     btn.disabled = !(varModalColor && varModalSize);
 }
 
@@ -1555,7 +1675,7 @@ function findVariant(product, color, size) {
     return null;
 }
 
-function addVariantToCart(product, color, size, qty) {
+function addVariantToCart(product, color, size, qty, target) {
     var variant = findVariant(product, color, size);
     if (!variant || (variant.stock || 0) <= 0) return false;
     qty = parseInt(qty) || 1;
@@ -1563,7 +1683,7 @@ function addVariantToCart(product, color, size, qty) {
 
     var cartKey = product.id + '_' + color + '_' + size;
 
-    if (varModalTarget === 'return') {
+    if ((target || varModalTarget) === 'return') {
         var ex = returnReplaceCart.find(function (item) { return item.key === cartKey; });
         if (ex) { ex.qty = Math.min(ex.qty + qty, variant.stock); }
         else {
@@ -1599,6 +1719,14 @@ function addVariantToCart(product, color, size, qty) {
 }
 
 function addToCartFromModal() {
+    if (isRestaurantMode()) {
+        if (!varModalProduct || !varModalFoodChoice) return;
+        var foodQty = parseInt(document.getElementById('varQtyInput').value) || 1;
+        if (addVariantToCart(varModalProduct, varModalFoodChoice.variant.color, varModalFoodChoice.variant.size, foodQty)) {
+            document.getElementById('variantModal').style.display = 'none';
+        }
+        return;
+    }
     if (!varModalProduct || !varModalColor || !varModalSize) return;
     var qty = parseInt(document.getElementById('varQtyInput').value) || 1;
     if (addVariantToCart(varModalProduct, varModalColor, varModalSize, qty)) {
@@ -1623,6 +1751,11 @@ function addByCode(code) {
     }
 }
 
+function addRestaurantFoodToCart(productId) {
+    if (!isRestaurantMode()) return;
+    openVariantModal(productId, 'sale');
+}
+
 // ============ CART ============
 function renderCart() {
     refreshActiveRestaurantOfferAfterCartChange();
@@ -1643,7 +1776,7 @@ function renderCart() {
         html += '<div class="cart-item" data-key="' + ek + '">';
         html += '<div class="cart-item-info">';
         html += '<div class="cart-item-name">' + escapeHtml(item.name) + '</div>';
-        html += '<div class="cart-item-variant">' + escapeHtml(item.color) + ' - ' + escapeHtml(item.size) + '</div>';
+        html += '<div class="cart-item-variant">' + (isRestaurantMode() ? 'الحصة: ' + escapeHtml(item.size || 'قياسية') : escapeHtml(item.color) + ' - ' + escapeHtml(item.size)) + '</div>';
         html += '<div class="cart-item-price">\u20AA' + item.price + '</div>';
         html += '</div>';
         html += '<div class="cart-item-qty">';
@@ -3493,6 +3626,23 @@ function setupEventListeners() {
     });
 
     document.getElementById('variantSizes').addEventListener('click', function (e) {
+        var foodOption = e.target.closest('[data-food-choice]');
+        if (foodOption && isRestaurantMode()) {
+            var choices = restaurantFoodSelection(varModalProduct).choices || [];
+            var choiceIndex = Number(foodOption.getAttribute('data-food-choice'));
+            var picked = choices.filter(function (choice) { return choice.index === choiceIndex; })[0];
+            if (!picked) return;
+            varModalFoodChoice = picked;
+            var sizeOptions = document.querySelectorAll('#variantSizes [data-food-choice]');
+            for (var si = 0; si < sizeOptions.length; si++) {
+                var selected = Number(sizeOptions[si].getAttribute('data-food-choice')) === picked.index;
+                sizeOptions[si].classList.toggle('selected', selected);
+                sizeOptions[si].setAttribute('aria-pressed', selected ? 'true' : 'false');
+            }
+            document.getElementById('varStockInfo').textContent = 'المتوفر: ' + (picked.variant.stock || 0);
+            updateVariantAddBtn();
+            return;
+        }
         var opt = e.target.closest('.size-option');
         if (opt && !opt.classList.contains('disabled')) {
             varModalSize = opt.getAttribute('data-size');
@@ -4539,7 +4689,7 @@ function saveRestaurantRecord(record, idPrefix, onOk, onErr) {
     savePosRecord(record, idPrefix, onOk, onErr);
 }
 function syncRestaurantWorkspace() {
-    if (!window.RestaurantWorkspace || !isFeatureOn('restaurant')) return;
+    if (!window.RestaurantWorkspace || !isRestaurantMode()) return;
     window.RestaurantWorkspace.init({
         records: function () { return restaurantRecords.slice(); },
         products: function () { return products.slice(); },
@@ -4559,7 +4709,11 @@ function syncRestaurantWorkspace() {
         openCustomer: function (key) { openCustomerProfile(encodeURIComponent(key)); },
         tableCount: getTableCount,
         saveTables: saveTableCount,
-        renderTables: renderTables
+        renderTables: renderTables,
+        menuSections: function () { return getMenuSections(); },
+        saveMenuSections: saveMenuSections,
+        renameMenuSection: renameMenuSection,
+        addFoodProduct: addRestaurantFoodToCart
     });
 }
 
@@ -4780,13 +4934,11 @@ var DEFAULT_STORE_CONFIG = {
         suppliers: false,      // الموردون وأوامر الشراء
         stocktake: false,      // الجرد
         barcodeLabels: false,  // طباعة ملصقات الباركود
-        restaurant: false,     // وضع المطاعم (طاولات/طلبات)
         hookah: false,         // الأرجيلة / التبغ
         messaging: false       // رسائل العملاء
     },
     taxPercent: 16,            // admin-configurable tax rate
-    taxIncluded: false,        // true = prices already include tax
-    businessType: 'retail'     // retail | restaurant | cafe
+    taxIncluded: false         // true = prices already include tax
 };
 function getStoreConfig() {
     var c = storeConfig || {};
@@ -4796,17 +4948,46 @@ function getStoreConfig() {
         features: {
             tax: !!f.tax, storeCredit: !!f.storeCredit, suppliers: !!f.suppliers,
             stocktake: !!f.stocktake, barcodeLabels: !!f.barcodeLabels,
-            restaurant: !!f.restaurant, hookah: !!f.hookah,
+            hookah: !!f.hookah,
             messaging: f.messaging == null ? isMessagingConfigured() : !!f.messaging
         },
         taxPercent: (c.taxPercent != null && c.taxPercent >= 0) ? c.taxPercent : DEFAULT_STORE_CONFIG.taxPercent,
         taxIncluded: !!c.taxIncluded,
-        businessType: c.businessType || DEFAULT_STORE_CONFIG.businessType
+        restaurantMenuSections: Array.isArray(c.restaurantMenuSections) ? c.restaurantMenuSections : []
     };
 }
 function isFeatureOn(name) {
+    if (name === 'restaurant') return isRestaurantMode();
     var f = getStoreConfig().features;
     return !!f[name];
+}
+function getMenuSections() {
+    var model = window.RestaurantModel;
+    var config = getStoreConfig();
+    return model && model.menuSections ? model.menuSections(config, products) : [];
+}
+function saveMenuSections(sections, onOk, onErr) {
+    if (!isAdmin()) { if (onErr) onErr(); return; }
+    var s = getStoreConfig();
+    saveStoreConfig({ features: s.features, taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, restaurantMenuSections: sections }, function () {
+        storeConfig = Object.assign({ recordType: 'store-config' }, s, { restaurantMenuSections: sections });
+        if (onOk) onOk();
+    });
+}
+function renameMenuSection(sectionId, nextName, onOk, onErr) {
+    if (!isAdmin()) { if (onErr) onErr(); return; }
+    var sections = getMenuSections().map(function (section) { return Object.assign({}, section); });
+    var section = sections.find(function (item) { return item.id === sectionId; });
+    if (!section || !nextName || section.name === nextName) { if (onOk) onOk(); return; }
+    var previousName = section.name;
+    var affected = products.filter(function (product) { return (product.category || product.type) === previousName; });
+    Promise.all(affected.map(function (product) {
+        var next = Object.assign({}, product, { category: nextName, type: nextName, updatedAtIso: new Date().toISOString() });
+        return db.collection('products').doc(product.id).set(next);
+    })).then(function () {
+        section.name = nextName;
+        saveMenuSections(sections, onOk, onErr);
+    }).catch(function (error) { if (onErr) onErr(error); });
 }
 function getTaxPercent() {
     var s = getStoreConfig();
@@ -4821,7 +5002,7 @@ function saveStoreConfig(cfg, onOk) {
         recordType: 'store-config',
         features: cfg.features || DEFAULT_STORE_CONFIG.features,
         taxPercent: cfg.taxPercent, taxIncluded: !!cfg.taxIncluded,
-        businessType: cfg.businessType || 'retail',
+        restaurantMenuSections: Array.isArray(cfg.restaurantMenuSections) ? cfg.restaurantMenuSections : [],
         cashier: currentUser ? currentUser.username : '', total: 0, status: 'store-config'
     };
     savePosRecord(rec, 'SC', function () { if (onOk) onOk(); });
@@ -4835,7 +5016,6 @@ function applyFeatureFlags() {
         storeCredit: ['feature-storecredit'],
         tax: ['feature-tax'],
         barcodeLabels: ['feature-barcode'],
-        restaurant: ['feature-restaurant'],
         hookah: ['feature-hookah']
     };
     for (var key in map) {
@@ -4864,8 +5044,8 @@ function applyFeatureFlags() {
 var _addonsEdit = null;
 function loadAddonsEditor() {
     var s = getStoreConfig();
-    _addonsEdit = { features: Object.assign({}, s.features), taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, businessType: s.businessType };
-    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah', 'messaging'];
+    _addonsEdit = { features: Object.assign({}, s.features), taxPercent: s.taxPercent, taxIncluded: s.taxIncluded };
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'hookah', 'messaging'];
     for (var i = 0; i < keys.length; i++) {
         var cb = document.getElementById('feat-' + keys[i]);
         if (cb) cb.checked = !!s.features[keys[i]];
@@ -4878,7 +5058,7 @@ function saveAddons() {
         showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
         return;
     }
-    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'restaurant', 'hookah', 'messaging'];
+    var keys = ['tax', 'storeCredit', 'barcodeLabels', 'suppliers', 'stocktake', 'hookah', 'messaging'];
     var features = {};
     for (var i = 0; i < keys.length; i++) {
         var cb = document.getElementById('feat-' + keys[i]);
@@ -4889,7 +5069,7 @@ function saveAddons() {
         features: features,
         taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || s0.taxPercent || 0,
         taxIncluded: (document.getElementById('taxIncludedSelect') || {}).value === 'true',
-        businessType: features.restaurant ? 'restaurant' : 'retail'
+        restaurantMenuSections: s0.restaurantMenuSections
     };
     var hint = document.getElementById('addonsSavedHint');
     saveStoreConfig(cfg, function () {
@@ -4914,7 +5094,7 @@ function saveTaxSettings() {
         features: Object.assign({}, s.features, { tax: true }),
         taxPercent: parseFloat((document.getElementById('taxPercentInput') || {}).value) || 0,
         taxIncluded: (document.getElementById('taxIncludedSelect') || {}).value === 'true',
-        businessType: s.businessType
+        restaurantMenuSections: s.restaurantMenuSections
     };
     var hint = document.getElementById('taxSavedHint');
     saveStoreConfig(cfg, function () {
