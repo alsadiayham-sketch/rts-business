@@ -16,6 +16,7 @@ var messagingSend = fbConfig.messagingSend;
 var messagingUpdatePricing = fbConfig.messagingUpdatePricing;
 var serverTimestamp = fbConfig.serverTimestamp;
 var posAuthenticate = fbConfig.posAuthenticate;
+var configurePosAuth = fbConfig.configurePosAuth;
 var publishOwnerTelemetry = fbConfig.publishOwnerTelemetry;
 var ownerTelemetryHelper = require('./owner-telemetry');
 var electron = require('electron');
@@ -46,6 +47,7 @@ var purchaseOrders = [];
 var stocktakeRecords = [];
 var hookahItems = [];
 var clinicRecords = [];
+var restaurantRecords = [];
 var registerBalance = 0;
 var heldSales = [];
 var damageRecords = [];
@@ -132,6 +134,7 @@ function resetStoreState() {
     stocktakeRecords = [];
     hookahItems = [];
     clinicRecords = [];
+    restaurantRecords = [];
     damageRecords = [];
     registerBalance = 0;
     productsLoaded = false;
@@ -143,6 +146,7 @@ function resetStoreState() {
     messagingCreditRequestInFlight = false;
     messagingPricingInFlight = false;
     pendingMessagingCreditRequest = null;
+    activeRestaurantOffer = null;
 }
 
 function beginStoreSession(storeId) {
@@ -263,8 +267,8 @@ function attemptLogin() {
 
         // Password verification is server-side only. Reading a legacy credential
         // document would expose credential material to every renderer, so Firestore-only stores are
-        // deliberately blocked until they implement this backend contract.
-        if (isD1()) {
+        // deliberately blocked until they declare a server authentication contract.
+        if (configurePosAuth(data)) {
             return posAuthenticate(username, password, storeName).then(function (user) {
                 return { __d1user: user };
             }).catch(function (e) {
@@ -278,13 +282,13 @@ function attemptLogin() {
         var found = null;
         if (doc.__serverAuthRequired) {
             document.getElementById('loginPassword').value = '';
-            errorEl.textContent = 'هذا المتجر يحتاج مصادقة خادم مؤمّنة قبل تسجيل الدخول. راجع SECURITY.md.';
+            errorEl.textContent = 'لم يكتمل ربط المتجر بخادم تسجيل الدخول الآمن. اطلب من مسؤول RTS تفعيل مصادقة المتجر وتأكد من تحديث التطبيق.';
             loginBtn.textContent = 'دخول';
             loginBtn.disabled = false;
             return;
         }
         if (doc.__d1user || doc.__authFailed) {
-            // D1 server-side auth result
+            // Server-side auth result, independent of the data-storage backend.
             if (doc.__authFailed || !doc.__d1user) {
                 errorEl.textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة';
                 loginBtn.textContent = 'دخول';
@@ -964,6 +968,7 @@ function loadProductsBatch(sessionId) {
         renderProducts();
         renderInventory();
         updateReports();
+        if (currentPage === 'restaurant') syncRestaurantWorkspace();
         updateSyncStatus(true);
         queueOwnerTelemetryFlush(false);
         // Then subscribe to ALL products in background for real-time updates
@@ -988,6 +993,7 @@ function subscribeAllProducts(sessionId) {
         renderProducts();
         renderInventory();
         updateReports();
+        if (currentPage === 'restaurant') syncRestaurantWorkspace();
         updateSyncStatus(true);
         productsLoaded = true;
         queueOwnerTelemetryFlush(false);
@@ -1016,6 +1022,7 @@ function subscribeBills(sessionId) {
         stocktakeRecords = [];
         hookahItems = [];
         clinicRecords = [];
+        restaurantRecords = [];
         var newLoyaltyConfig = null;
         var newStoreConfig = null;
         snapshot.forEach(function (doc) {
@@ -1042,10 +1049,12 @@ function subscribeBills(sessionId) {
             else if (rt === 'stocktake') stocktakeRecords.push(b);
             else if (rt === 'hookah-item') hookahItems.push(b);
             else if (rt === 'clinic') clinicRecords.push(b);
+            else if (rt && rt.indexOf('restaurant-') === 0) restaurantRecords.push(b);
             else bills.push(b); // normal or debt sale
         });
         loyaltyConfig = newLoyaltyConfig;
         storeConfig = newStoreConfig;
+        syncRestaurantWorkspace();
         bills.sort(billSortDesc);
         withdrawals.sort(billSortDesc);
         deposits.sort(billSortDesc);
@@ -1616,6 +1625,7 @@ function addByCode(code) {
 
 // ============ CART ============
 function renderCart() {
+    refreshActiveRestaurantOfferAfterCartChange();
     var container = document.getElementById('cartItems');
     var checkoutBtn = document.getElementById('checkoutBtn');
 
@@ -1745,6 +1755,8 @@ function updateTotals() {
 function checkout() {
     if (cart.length === 0 && pendingPrizes.length === 0) return;
     if (!licenseValid) { showAlert('الترخيص منتهي', { icon: '⛔', title: 'تنبيه' }); return; }
+    var offerCheck = revalidateActiveRestaurantOffer();
+    if (!offerCheck.ok) { showAlert((offerCheck.errors || ['لم يعد العرض صالحاً.'])[0], { icon: '⚠️', title: 'تعذر تطبيق العرض' }); updateTotals(); return; }
 
     var st = computeSaleTotals();
     var subtotal = st.subtotal;
@@ -1793,6 +1805,8 @@ function checkout() {
 function doCheckout() {
     if (cart.length === 0 && pendingPrizes.length === 0) return;
     if (!licenseValid) { alert('الترخيص منتهي'); return; }
+    var offerCheck = revalidateActiveRestaurantOffer();
+    if (!offerCheck.ok) { showAlert((offerCheck.errors || ['لم يعد العرض صالحاً.'])[0], { icon: '⚠️', title: 'تعذر تطبيق العرض' }); updateTotals(); return; }
 
     var st = computeSaleTotals();
     var subtotal = st.subtotal;
@@ -1855,6 +1869,9 @@ function doCheckout() {
         createdAt: serverTimestamp(),
         createdAtIso: new Date().toISOString()
     };
+    if (offerCheck.offer) {
+        billData.restaurantOffer = { id: offerCheck.offer.id, name: offerCheck.offer.name || '', discount: offerCheck.discount };
+    }
 
     if (selectedPayment === 'debt' && pendingCustomer) {
         billData.customer = pendingCustomer;
@@ -1904,6 +1921,7 @@ function doCheckout() {
         }
         pendingPrizes = [];
         appliedRewardIds = [];
+        resetActiveRestaurantOffer();
         cart = [];
         renderCart();
         document.getElementById('discountInput').value = 0;
@@ -3429,7 +3447,7 @@ function switchPage(page) {
     }
     else if (page === 'suppliers') { renderSuppliers(); renderSupplierOptions(); renderPurchaseOrders(); }
     else if (page === 'stocktake') { renderStocktakeRows(); renderStocktakeHistory(); }
-    else if (page === 'restaurant') renderTables();
+    else if (page === 'restaurant') syncRestaurantWorkspace();
     else if (page === 'hookah') renderHookahGrid();
     else if (page === 'clinic') renderClinic();
 }
@@ -3498,9 +3516,9 @@ function setupEventListeners() {
         document.getElementById('variantModal').style.display = 'none';
     });
 
-    document.getElementById('clearCartBtn').addEventListener('click', function () { cart = []; renderCart(); });
-    document.getElementById('discountInput').addEventListener('input', function () { updateTotals(); recomputeChange(); });
-    document.getElementById('discountType').addEventListener('change', function () { updateTotals(); recomputeChange(); });
+    document.getElementById('clearCartBtn').addEventListener('click', function () { resetActiveRestaurantOffer(); cart = []; renderCart(); });
+    document.getElementById('discountInput').addEventListener('input', function () { resetActiveRestaurantOffer(); updateTotals(); recomputeChange(); });
+    document.getElementById('discountType').addEventListener('change', function () { resetActiveRestaurantOffer(); updateTotals(); recomputeChange(); });
 
     var payBtns = document.querySelectorAll('.pay-btn');
     for (var i = 0; i < payBtns.length; i++) {
@@ -4474,6 +4492,77 @@ function initGeneralNotes() {
 function newRecordId(prefix) {
     return (prefix || 'REC') + '-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
 }
+// ============ RESTAURANT WORKSPACE ADAPTER ============
+// Auxiliary restaurant records stay in the shared orders collection but are routed
+// away from bills and revenue calculations by their restaurant-* record type.
+function resetActiveRestaurantOffer() {
+    activeRestaurantOffer = null;
+}
+function revalidateActiveRestaurantOffer() {
+    if (!activeRestaurantOffer) return { ok: true, offer: null };
+    var restaurantModel = window.RestaurantModel;
+    var result = restaurantModel && restaurantModel.revalidateAppliedOffer
+        ? restaurantModel.revalidateAppliedOffer(restaurantRecords, activeRestaurantOffer.id, cart, new Date().toISOString())
+        : { ok: false, errors: ['تعذر التحقق من العرض المطبّق.'] };
+    if (!result.ok) {
+        resetActiveRestaurantOffer();
+        var discountInput = document.getElementById('discountInput');
+        var discountType = document.getElementById('discountType');
+        if (discountInput) discountInput.value = 0;
+        if (discountType) discountType.value = 'amount';
+        return result;
+    }
+    var activeDiscountInput = document.getElementById('discountInput');
+    var activeDiscountType = document.getElementById('discountType');
+    if (activeDiscountType) activeDiscountType.value = 'amount';
+    if (activeDiscountInput) activeDiscountInput.value = Number(result.discount).toFixed(2);
+    return result;
+}
+function refreshActiveRestaurantOfferAfterCartChange() {
+    var result = revalidateActiveRestaurantOffer();
+    if (!result.ok) showAlert((result.errors || ['لم يعد العرض صالحاً للسلة الحالية.'])[0], { icon: '⚠️', title: 'تمت إزالة العرض' });
+    return result;
+}
+
+function saveRestaurantMenuProduct(product, onOk, onErr) {
+    if (!isAdmin()) { showAlert('هذه العملية متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' }); return; }
+    var existing = products.find(function (item) { return String(item.id) === String(product.id); }) || {};
+    var next = Object.assign({}, existing, product, { id: product.id, updatedAtIso: new Date().toISOString() });
+    db.collection('products').doc(product.id).set(next)
+        .then(function () { if (onOk) onOk(product.id); })
+        .catch(function (error) { if (onErr) onErr(error); else showAlert('تعذر حفظ صنف القائمة', { icon: '⚠️', title: 'خطأ' }); });
+}
+function saveRestaurantRecord(record, idPrefix, onOk, onErr) {
+    record.total = 0;
+    record.status = record.status || record.recordType;
+    record.cashier = currentUser ? currentUser.username : '';
+    savePosRecord(record, idPrefix, onOk, onErr);
+}
+function syncRestaurantWorkspace() {
+    if (!window.RestaurantWorkspace || !isFeatureOn('restaurant')) return;
+    window.RestaurantWorkspace.init({
+        records: function () { return restaurantRecords.slice(); },
+        products: function () { return products.slice(); },
+        customers: function () { return customerList(); },
+        cart: function () { return cart.slice(); },
+        isAdmin: isAdmin,
+        saveRecord: saveRestaurantRecord,
+        saveProduct: saveRestaurantMenuProduct,
+        applyOffer: function (offer, discount) {
+            activeRestaurantOffer = { id: offer.id };
+            document.getElementById('discountType').value = 'amount';
+            document.getElementById('discountInput').value = Number(discount).toFixed(2);
+            updateTotals(); recomputeChange();
+            switchPage('sales');
+        },
+        openNewCustomer: openNewCustomer,
+        openCustomer: function (key) { openCustomerProfile(encodeURIComponent(key)); },
+        tableCount: getTableCount,
+        saveTables: saveTableCount,
+        renderTables: renderTables
+    });
+}
+
 function savePosRecord(record, idPrefix, onOk, onErr) {
     var id = record.id || newRecordId(idPrefix);
     record.id = id;
@@ -7472,6 +7561,7 @@ function holdSale() {
     var note = (document.getElementById('billNote') || {}).value || '';
     heldSales.push({ at: Date.now(), cart: JSON.parse(JSON.stringify(cart)), note: note, table: currentTableNo });
     saveHeldSales();
+    resetActiveRestaurantOffer();
     cart = []; renderCart();
     var bn = document.getElementById('billNote'); if (bn) bn.value = '';
     var tmsg = currentTableNo ? ('تم حفظ طلب طاولة ' + currentTableNo) : 'تم تعليق الفاتورة';
@@ -7496,6 +7586,7 @@ function openHeldModal() {
 function resumeHeld(i) {
     var h = heldSales[i];
     if (!h) return;
+    resetActiveRestaurantOffer();
     if (cart.length) { for (var j = 0; j < h.cart.length; j++) cart.push(h.cart[j]); }
     else cart = h.cart;
     var bn = document.getElementById('billNote'); if (bn && h.note) bn.value = h.note;

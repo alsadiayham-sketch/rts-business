@@ -2022,6 +2022,62 @@ body {
 .table-card .table-state { font-size: 12px; }
 .table-card.free { background: #eafaf0; border-color: #2ecc71; color: #1e7e44; }
 .table-card.occupied { background: #fdecec; border-color: #e74c3c; color: #b03a2e; }
+
+/* Restaurant management workspace */
+#restaurantWorkspace { max-width: 1180px; }
+.restaurant-workspace-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
+.restaurant-workspace-header h2, .restaurant-toolbar h3 { margin:0; color:#2f1238; font-size:22px; }
+.restaurant-workspace-header p, .restaurant-toolbar p { margin:6px 0 0; color:#6f6371; font-size:14px; }
+.restaurant-tabs { display:flex; gap:4px; flex-wrap:wrap; border-bottom:1px solid #ddd5df; margin-bottom:16px; }
+.restaurant-tabs button { border:0; background:transparent; color:#4b3b4e; padding:10px 14px; font:600 14px inherit; border-radius:8px 8px 0 0; cursor:pointer; }
+.restaurant-tabs button:hover { background:#faf6fb; }
+.restaurant-tabs button.active { background:#f2e8f5; color:#48115b; box-shadow:inset 0 -2px #48115b; }
+.restaurant-tabs button:focus-visible, .restaurant-panel input:focus-visible, .restaurant-panel select:focus-visible { outline:2px solid #642279; outline-offset:2px; }
+.restaurant-panel { background:#fff; border:1px solid #ddd5df; border-radius:12px; padding:20px; }
+.restaurant-toolbar { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.restaurant-filters, .restaurant-attendance-controls { display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:14px; }
+.restaurant-filters input, .restaurant-filters select, .restaurant-attendance-controls input { min-height:38px; border:1px solid #cfc5d1; border-radius:8px; padding:7px 10px; font:inherit; background:#fff; color:#211523; }
+.restaurant-filters input { min-width:260px; }
+.restaurant-attendance-controls label { display:grid; gap:5px; color:#4b3b4e; font-weight:600; font-size:13px; }
+.restaurant-menu-list, .restaurant-offer-list, .restaurant-customer-list, .restaurant-employee-list { display:grid; gap:8px; }
+.restaurant-menu-row, .restaurant-offer-row, .restaurant-customer-row, .restaurant-employee-row { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; align-items:center; gap:14px; padding:12px 0; border-bottom:1px solid #eee8ef; }
+.restaurant-menu-row:last-child, .restaurant-offer-row:last-child, .restaurant-customer-row:last-child, .restaurant-employee-row:last-child { border-bottom:0; }
+.restaurant-menu-row strong, .restaurant-offer-row strong, .restaurant-customer-row strong, .restaurant-employee-row strong { display:block; color:#211523; }
+.restaurant-menu-row span, .restaurant-offer-row span, .restaurant-customer-row span, .restaurant-employee-row span { display:block; color:#6f6371; font-size:13px; margin-top:3px; }
+.restaurant-price { text-align:left; color:#48115b; font-weight:700; font-variant-numeric:tabular-nums; }
+.restaurant-price small, .restaurant-customer-row small { display:block; color:#6f6371; font-weight:400; margin-top:3px; }
+.restaurant-offer-row { grid-template-columns:minmax(180px,1fr) auto auto auto; }
+.restaurant-employee-row { grid-template-columns:minmax(180px,1fr) auto auto auto; }
+.restaurant-status { padding:4px 8px; border-radius:999px; font-size:12px; white-space:nowrap; }
+.restaurant-status.success { color:#176344; background:#e4f6ed; }
+.restaurant-status.warning { color:#89500f; background:#fff3dd; }
+.restaurant-status.muted { color:#5f5361; background:#f1edf2; }
+.restaurant-notice { min-height:0; margin-bottom:0; color:#5f5361; font-size:14px; }
+.restaurant-notice:not(:empty) { min-height:20px; margin-bottom:12px; padding:9px 11px; background:#f1edf2; border-radius:8px; }
+.restaurant-notice.success { color:#176344; background:#e4f6ed; }
+.restaurant-notice.error { color:#9e2639; background:#fdecef; }
+.restaurant-empty { padding:28px 12px; text-align:center; color:#6f6371; }
+.restaurant-demo-banner { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; padding:10px 12px; color:#613b11; background:#fff3dd; border:1px solid #edc677; border-radius:8px; font-size:13px; }
+.restaurant-demo-banner strong { font-size:14px; }
+.restaurant-history { margin-top:20px; padding-top:16px; border-top:1px solid #ddd5df; }
+.restaurant-history h4 { margin:0 0 9px; color:#2f1238; }
+.restaurant-history > div { display:grid; grid-template-columns:1fr auto auto; gap:16px; padding:8px 0; border-bottom:1px solid #eee8ef; font-size:14px; }
+.restaurant-history p { color:#6f6371; }
+.btn-quiet { border:0; background:transparent; color:#642279; cursor:pointer; font:600 13px inherit; padding:6px; }
+.btn-quiet:disabled { opacity:.45; cursor:not-allowed; }
+.restaurant-form { display:grid; gap:12px; }
+.restaurant-form label { display:grid; gap:5px; color:#4b3b4e; font-weight:600; font-size:13px; }
+.restaurant-form input { min-height:40px; border:1px solid #cfc5d1; border-radius:8px; padding:7px 10px; font:inherit; }
+.restaurant-editor .modal-content { max-width:460px; }
+@media (max-width:720px) {
+    .restaurant-toolbar { flex-direction:column; }
+    .restaurant-menu-row, .restaurant-offer-row, .restaurant-customer-row, .restaurant-employee-row { grid-template-columns:1fr auto; }
+    .restaurant-menu-row .btn-small, .restaurant-offer-row .btn-small, .restaurant-customer-row .btn-small, .restaurant-employee-row .btn-small, .restaurant-employee-row .btn-quiet { grid-column:auto; }
+    .restaurant-filters input { min-width:0; width:100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .restaurant-tabs button, .restaurant-panel * { transition:none !important; }
+}
 .hookah-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
 .hookah-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px 10px; border: 2px solid #d0d7de; border-radius: 12px; cursor: pointer; font-family: inherit; background: #fff; transition: transform .1s, box-shadow .1s; }
 .hookah-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.12); border-color: #6c5ce7; }

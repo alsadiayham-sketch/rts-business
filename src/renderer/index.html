@@ -1319,18 +1319,9 @@
                 </div>
             </section>
 
-            <!-- ===== Restaurant tables ===== -->
+            <!-- ===== Restaurant management workspace ===== -->
             <section class="page feature-restaurant" id="page-restaurant">
-                <div class="page-header"><h2>🍽️ الطاولات والطلبات</h2></div>
-                <div class="stats-block">
-                    <div class="reward-add-row">
-                        <label>عدد الطاولات:</label>
-                        <input type="number" id="tableCount" min="1" max="60" step="1" value="12" style="width:90px;">
-                        <button class="btn-secondary" id="saveTableCountBtn">حفظ</button>
-                        <span class="stats-hint">اضغط على طاولة لبدء/متابعة طلبها. الطاولة المشغولة تظهر بلون مختلف.</span>
-                    </div>
-                    <div class="tables-grid" id="tablesGrid"></div>
-                </div>
+                <div id="restaurantWorkspace" aria-live="polite"></div>
             </section>
 
             <!-- ===== Hookah menu ===== -->
@@ -1696,6 +1687,8 @@
     </div>
 
     <script src="firebase-config.js"></script>
+    <script src="restaurant-model.js"></script>
+    <script src="restaurant-workspace.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

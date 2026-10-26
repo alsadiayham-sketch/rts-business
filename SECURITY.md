@@ -2,8 +2,16 @@
 
 ## Cashier authentication
 
-RTS Business accepts cashier authentication only through a store's configured D1
-backend (`settings/pos.dataBackend = "d1"` and `apiBaseUrl`). The application sends
+RTS Business accepts cashier authentication only through a configured server:
+the store's D1 backend (`settings/pos.dataBackend = "d1"` and `apiBaseUrl`), or
+the RTS platform authentication service for Firestore-backed Business stores
+(`authBackend = "rts"`, `authContractVersion = 1`, and
+`authApiBaseUrl = "https://rts-royal.pages.dev"` on `settings/pos`).
+Authentication routing does not change where business records are stored.
+The desktop uses the Node HTTPS transport for login, with normal certificate
+verification, a bounded response and timeout, and no redirects. It does not
+disable browser web security or require permissive CORS on the platform API.
+The application sends
 the entered password only to `POST /api/pos-login`; the backend must validate it,
 return a short-lived bearer token and user role, and reject invalid or disabled
 accounts with 401 or 403.

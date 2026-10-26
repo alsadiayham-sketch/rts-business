@@ -20,6 +20,9 @@ var rawDb = firebase.firestore();
 var storage = firebase.storage();
 var PROJECT_ID = null;
 var ownerTelemetry = require('./owner-telemetry');
+var serverAuth = require('./server-auth');
+var posAuthBase = null;
+var posAuthGeneration = 0;
 
 // =====================================================================
 //  D1 TENANTS
@@ -337,6 +340,13 @@ var db = {
 function setProjectId(id) {
     PROJECT_ID = id;
     posToken = null; // new store -> drop any old cashier token
+    posAuthBase = null;
+    posAuthGeneration++;
+}
+
+function configurePosAuth(settings) {
+    posAuthBase = serverAuth.resolveAuthBase(settings, isD1() ? d1Base() : null);
+    return !!posAuthBase;
 }
 
 // Returns the right "now" token for the active backend.
@@ -344,29 +354,21 @@ function serverTimestamp() {
     return isD1() ? Date.now() : firebase.firestore.FieldValue.serverTimestamp();
 }
 
-// Server-side cashier authentication for D1 tenants. Never receives a hash.
+// Server-side cashier authentication, independent of data storage. Never receives a hash.
 // Resolves with { username, name, role } on success; rejects with err.status
 // 401/403 on bad/disabled credentials.
 function posAuthenticate(username, password, storeId) {
-    return fetch(d1Base() + '/api/pos-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId: storeId || PROJECT_ID, username: username, password: password })
-    }).then(function (res) {
-        return res.text().then(function (t) {
-            var data = t ? JSON.parse(t) : {};
-            if (!res.ok) {
-                var err = new Error(data.error || ('HTTP ' + res.status));
-                err.status = res.status;
-                throw err;
-            }
-            posToken = data.token;
-            return data.user;
-        });
+    var generation = posAuthGeneration;
+    return serverAuth.authenticate(serverAuth.nodeRequest, posAuthBase, {
+        storeId: storeId || PROJECT_ID, username: username, password: password
+    }).then(function (result) {
+        if (generation !== posAuthGeneration) throw new Error('تم تغيير المتجر. سجّل الدخول مجدداً.');
+        posToken = result.token;
+        return result.user;
     });
 }
 
-function clearPosToken() { posToken = null; }
+function clearPosToken() { posToken = null; posAuthGeneration++; }
 
 module.exports = {
     db: db,
@@ -388,5 +390,6 @@ module.exports = {
     publishOwnerTelemetry: publishOwnerTelemetry,
     serverTimestamp: serverTimestamp,
     posAuthenticate: posAuthenticate,
+    configurePosAuth: configurePosAuth,
     clearPosToken: clearPosToken
 };
