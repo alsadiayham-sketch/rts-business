@@ -83,7 +83,7 @@ app.whenReady().then(async () => {
             window.fixtureDismiss = function () { document.getElementById('confirmYesBtn').click(); };
             ['loadingScreen', 'loginScreen', 'licenseOverlay'].forEach(id => document.getElementById(id).style.display = 'none');
             document.getElementById('appContainer').style.display = 'flex';
-            setupEventListeners(); applyBusinessSurface(); renderProducts(); renderCart();
+            setupEventListeners(); initShortcutsUI(); applyBusinessSurface(); renderProducts(); renderCart();
         `);
         assert.equal(await evaluate('document.querySelector(".restaurant-menu-section").open'), false);
         await evaluate(`
@@ -303,7 +303,37 @@ app.whenReady().then(async () => {
 
         await evaluate(`
             closeModal('receiptModal');
+            window.fixtureCartBeforeEdit = JSON.stringify(cart);
+            document.querySelector('[data-edit-menu-id="hummus"]').click();
+        `);
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor [name=name]").value'), 'صحن حمص');
+        assert.equal(await evaluate('JSON.stringify(cart)'), await evaluate('fixtureCartBeforeEdit'), 'Editing beside a food item must not add it to the ticket.');
+        assert.equal(await evaluate('currentPage'), 'sales');
+        assert.ok(await evaluate(`
+            (() => {
+                const style = getComputedStyle(document.querySelector('[data-edit-menu-id="hummus"]'));
+                const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+                const a = luminance(style.color), b = luminance(style.backgroundColor);
+                return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5;
+            })()
+        `), 'The per-item edit label must be readable, not white on white.');
+        await evaluate(`
+            document.querySelector('.restaurant-editor [data-r-close]').click();
             document.getElementById('restaurantManageMenuBtn').click();
+            window.fixtureMenuSearch = document.querySelector('[data-r-input="menu-query"]');
+            fixtureMenuSearch.focus();
+        `);
+        for (const character of 'حمص') {
+            await win.webContents.insertText(character);
+            assert.equal(await evaluate('document.activeElement === fixtureMenuSearch && fixtureMenuSearch.isConnected'), true, 'Search must retain the same focused input after every character.');
+        }
+        assert.equal(await evaluate('fixtureMenuSearch.value'), 'حمص');
+        assert.equal(await evaluate('document.querySelectorAll(".restaurant-menu-row").length'), 1);
+        await evaluate(`fixtureMenuSearch.setSelectionRange(0, 1);`);
+        await win.webContents.insertText('ح');
+        assert.equal(await evaluate('fixtureMenuSearch.value'), 'حمص', 'Selection replacement must retain the cursor.');
+        await evaluate(`
+            fixtureMenuSearch.value = ''; fixtureMenuSearch.dispatchEvent(new Event('input', {bubbles:true}));
             document.querySelector('[data-r-action="menu-edit"][data-id="hummus"]').click();
         `);
         assert.equal(await evaluate('document.querySelectorAll(".restaurant-editor [data-row]").length'), 3);
@@ -461,7 +491,40 @@ app.whenReady().then(async () => {
         `);
         assert.equal(await evaluate('document.querySelector("[data-r-action=menu-new]").disabled'), true);
         assert.equal(await evaluate('document.getElementById("restaurantManageMenuBtn").style.display'), 'none');
+        await evaluate(`renderProducts();`);
+        assert.equal(await evaluate('document.querySelectorAll("[data-edit-menu-id]").length'), 0);
         console.log('PASS: existing item name/description/photo upload and removal, size add/edit/remove, save retry, metadata preservation and role restrictions.');
+
+        await evaluate(`
+            currentUser.role = 'admin';
+            shortcuts.drawerKey = 'Control';
+            localStorage.setItem(printerDeviceKey(), 'Isolated fixture printer');
+            window.fixtureDrawerStart = __fixture.prints.length;
+            window.fixtureKey = function (type, key, options) {
+                document.dispatchEvent(new KeyboardEvent(type, Object.assign({key, bubbles:true, cancelable:true}, options)));
+            };
+            fixtureKey('keydown', 'Control', {ctrlKey:true});
+            fixtureKey('keydown', 'Control', {ctrlKey:true, repeat:true});
+        `);
+        assert.equal(await evaluate('__fixture.prints.length - fixtureDrawerStart'), 0, 'A modifier must wait for release to distinguish Ctrl alone from shortcuts.');
+        await evaluate(`fixtureKey('keyup', 'Control');`);
+        await waitFor('!cashDrawerInFlight');
+        assert.deepEqual(await evaluate('__fixture.prints.slice(fixtureDrawerStart).map(p => p.channel)'), ['open-cash-drawer'], 'Ctrl must send only the drawer command, never a receipt print.');
+        await evaluate(`
+            fixtureKey('keydown', 'Control', {ctrlKey:true});
+            fixtureKey('keydown', 'c', {ctrlKey:true});
+            fixtureKey('keyup', 'c', {ctrlKey:true});
+            fixtureKey('keyup', 'Control');
+        `);
+        assert.equal(await evaluate('__fixture.prints.length - fixtureDrawerStart'), 1, 'Ctrl+C must not open the drawer.');
+        await evaluate(`
+            localStorage.removeItem(printerDeviceKey());
+            fixtureKey('keydown', 'Control', {ctrlKey:true}); fixtureKey('keyup', 'Control');
+        `);
+        assert.match(await evaluate('document.body.textContent'), /فتح الدرج لا يطبع إيصالاً/);
+        assert.equal(await evaluate('__fixture.prints.length - fixtureDrawerStart'), 1, 'No printer selected must not submit any print job.');
+        await evaluate(`fixtureDismiss();`);
+        console.log('PASS: per-item edit, continuous Arabic search and drawer-only Ctrl without repeat or Ctrl+C side effects.');
 
         await evaluate(`
             document.querySelector('.cart-payment-details').open = false;

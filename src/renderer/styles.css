@@ -2099,6 +2099,10 @@ body.restaurant-mode .products-grid { display:block; }
 .restaurant-menu-section-title h3 { margin:0; color:#2f1238; font-size:1rem; }
 .restaurant-menu-section-title span { min-width:28px; padding:3px 8px; color:#5f5361; background:#eee8ef; border-radius:999px; font-size:12px; text-align:center; }
 .restaurant-item-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+.restaurant-food-entry { display:grid; gap:6px; min-width:0; }
+.restaurant-food-entry .restaurant-food-edit { justify-self:end; min-height:36px; margin:0; padding:6px 10px; color:#48115b; background:#fff; border:1px solid #d8cddd; }
+.restaurant-food-entry .restaurant-food-edit:hover { color:#48115b; background:#f2e8f5; border-color:#642279; }
+.restaurant-food-entry .restaurant-food-edit:focus-visible { outline:3px solid #642279; outline-offset:2px; }
 .restaurant-food-item { display:grid; grid-template-columns:1fr auto; gap:7px 10px; min-height:96px; padding:13px; border:1px solid #d8cddd; border-radius:10px; color:#211523; background:#fff; text-align:right; cursor:pointer; font:inherit; transition:transform 150ms ease-out, border-color 150ms ease-out, background-color 150ms ease-out; }
 .restaurant-food-item strong { align-self:end; font-size:15px; }
 .restaurant-food-item span { grid-column:1; color:#6f6371; font-size:12px; }

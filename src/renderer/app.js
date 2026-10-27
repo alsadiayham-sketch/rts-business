@@ -1217,10 +1217,11 @@ function renderRestaurantOrder() {
             var available = selection.kind !== 'configuration-required' && availableChoices.length > 0;
             var price = available ? Math.min.apply(null, availableChoices.map(function (choice) { return Number(choice.variant.price); })) : 0;
             var image = window.RestaurantModel.menuImageSource(product.image);
-            html += '<button type="button" class="restaurant-food-item' + (available ? '' : ' unavailable') + (image ? ' has-photo' : '') + '" data-id="' + escapeHtml(product.id) + '" aria-label="إضافة ' + escapeHtml(product.name || '') + ' إلى الطلب"' + (available ? '' : ' disabled') + '>' +
+            html += '<div class="restaurant-food-entry"><button type="button" class="restaurant-food-item' + (available ? '' : ' unavailable') + (image ? ' has-photo' : '') + '" data-id="' + escapeHtml(product.id) + '" aria-label="إضافة ' + escapeHtml(product.name || '') + ' إلى الطلب"' + (available ? '' : ' disabled') + '>' +
                 (image ? '<img class="restaurant-food-photo" data-menu-image src="' + escapeHtml(image) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
                 '<strong>' + escapeHtml(product.name || '') + '</strong><span>' + (selection.kind === 'portions' ? 'اختر الحصة' : 'إضافة مباشرة') + '</span><b>' + (available ? (selection.kind === 'portions' ? 'من ' : '') + '₪' + Number(price).toFixed(2) : 'غير متاح') + '</b>' +
-                (product.description ? '<small class="restaurant-food-description" title="' + escapeHtml(product.description) + '">' + escapeHtml(product.description) + '</small>' : '') + '</button>';
+                (product.description ? '<small class="restaurant-food-description" title="' + escapeHtml(product.description) + '">' + escapeHtml(product.description) + '</small>' : '') + '</button>' +
+                (isAdmin() ? '<button type="button" class="btn-secondary btn-small restaurant-food-edit" data-edit-menu-id="' + escapeHtml(product.id) + '" aria-label="تعديل ' + escapeHtml(product.name || '') + '">تعديل الصنف</button>' : '') + '</div>';
             shown++;
         });
         html += '</div></details>';
@@ -2482,15 +2483,21 @@ function posPrintHtml(html, options) {
 
 // Sends just the ESC/POS drawer-kick to the printer the cash drawer is wired to. Used by
 // the manual "open cash drawer" hotkey (and could be called anywhere a drawer-open is needed).
+var cashDrawerInFlight = false;
 function openCashDrawer() {
     if (!(ipcRenderer && ipcRenderer.invoke)) return;
+    if (cashDrawerInFlight) return;
     var dev = getSavedPrinterDevice();
-    if (!dev) { showAlert('اختر الطابعة من الإعدادات أولاً (درج الكاش موصول بها)', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (!dev) { showAlert('فتح الدرج لا يطبع إيصالاً. الاتصال الحالي يرسل نبضة عبر طابعة الإيصالات الموصولة بالدرج؛ اخترها من الإعدادات وتأكد من توصيلها وتشغيلها.', { icon: '⚠️', title: 'إعداد اتصال درج الكاش' }); return; }
+    cashDrawerInFlight = true;
+    var drawerSession = storeSessionId;
     ipcRenderer.invoke('open-cash-drawer', dev).then(function (res) {
-        if (!(res && res.success)) {
-            showAlert('تعذّر فتح الدرج: ' + ((res && res.reason) || 'تحقق من توصيل الطابعة'), { icon: '⚠️', title: 'درج الكاش' });
+        if (isActiveStoreSession(drawerSession) && !(res && res.success)) {
+            showAlert('تعذّر إرسال نبضة فتح الدرج عبر الطابعة (بدون طباعة إيصال): ' + ((res && res.reason) || 'تحقق من توصيل الطابعة'), { icon: '⚠️', title: 'درج الكاش' });
         }
-    }, function () {});
+    }, function () {
+        if (isActiveStoreSession(drawerSession)) showAlert('تعذّر الاتصال بطابعة درج الكاش. تحقق من اتصالها ثم أعد المحاولة؛ لم تُطلب طباعة إيصال.', { icon: '⚠️', title: 'درج الكاش' });
+    }).finally(function () { cashDrawerInFlight = false; });
 }
 
 // ---- Printer activity log (kept locally so it can be exported and sent to support) ----
@@ -3793,6 +3800,13 @@ function setupEventListeners() {
     document.getElementById('categoryFilter').addEventListener('change', renderProducts);
 
     document.getElementById('productsGrid').addEventListener('click', function (e) {
+        var edit = e.target.closest('[data-edit-menu-id]');
+        if (edit) {
+            if (!isRestaurantMode() || !isAdmin() || checkoutInFlight) return;
+            syncRestaurantWorkspace();
+            window.RestaurantWorkspace.editMenu(edit.getAttribute('data-edit-menu-id'));
+            return;
+        }
         var food = e.target.closest('.restaurant-food-item');
         if (food && isRestaurantMode()) {
             if (!food.disabled) openVariantModal(food.getAttribute('data-id'), 'sale');
@@ -4766,7 +4780,9 @@ function isEditableTarget(el) {
     var tag = (el.tagName || '').toLowerCase();
     return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
 }
+var pendingDrawerModifier = null;
 function handleShortcutKey(e) {
+    if (pendingDrawerModifier && e.key !== pendingDrawerModifier) pendingDrawerModifier = null;
     // Escape closes the top-most open modal (accessibility / quick dismiss).
     if (e.key === 'Escape') {
         if (closeTopModal()) e.preventDefault();
@@ -4774,6 +4790,13 @@ function handleShortcutKey(e) {
     }
     // Reverse-style drawer shortcut: fixed action, user-chosen key (default Ctrl).
     if (shortcuts.drawerKey && shortcuts.drawerKey !== 'none' && e.key === shortcuts.drawerKey) {
+        if (e.repeat) return;
+        if (['Control', 'Alt', 'Shift', 'Meta'].indexOf(e.key) !== -1) {
+            if (!e.getModifierState || !['Control', 'Alt', 'Shift', 'Meta'].some(function (key) { return key !== e.key && e.getModifierState(key); })) {
+                pendingDrawerModifier = e.key;
+            }
+            return;
+        }
         // Avoid hijacking text entry when the chosen key is a printable character.
         if (!(shortcuts.drawerKey.length === 1 && isEditableTarget(e.target))) {
             e.preventDefault();
@@ -4786,6 +4809,12 @@ function handleShortcutKey(e) {
     if (!action || action === 'none') return;
     e.preventDefault();
     runShortcutAction(action);
+}
+function handleShortcutKeyUp(e) {
+    if (e.key !== pendingDrawerModifier) return;
+    pendingDrawerModifier = null;
+    e.preventDefault();
+    openCashDrawer();
 }
 function renderShortcutsEditor() {
     var grid = document.getElementById('shortcutsGrid');
@@ -4847,6 +4876,8 @@ function initShortcutsUI() {
         });
     }
     document.addEventListener('keydown', handleShortcutKey);
+    document.addEventListener('keyup', handleShortcutKeyUp);
+    window.addEventListener('blur', function () { pendingDrawerModifier = null; });
 }
 
 // ============ GENERAL NOTES (per-terminal notepad) ============

@@ -50,19 +50,14 @@
         };
     }
 
-    function renderMenu() {
+    function renderMenuRows() {
         var products = adapters.products ? adapters.products() : [];
-        var categories = menuSections().map(function (section) { return section.name; });
         var query = state.query.toLowerCase();
         products = products.filter(function (product) {
             return (!query || String(product.name || '').toLowerCase().indexOf(query) !== -1) &&
                 (state.category === 'all' || product.category === state.category);
         });
-        var html = '<div class="restaurant-toolbar"><div><h3>إدارة القائمة</h3><p>أصناف الطعام، الحصص، والتوفر الفعلي.</p></div>' +
-            '<button class="btn-primary" data-r-action="menu-new"' + (admin() ? '' : ' disabled') + '>+ صنف في القائمة</button></div>' +
-            '<div class="restaurant-filters"><input data-r-input="menu-query" value="' + esc(state.query) + '" placeholder="ابحث باسم الصنف"><select data-r-input="menu-category"><option value="all">كل التصنيفات</option>' +
-            categories.map(function (category) { return '<option value="' + esc(category) + '"' + (state.category === category ? ' selected' : '') + '>' + esc(category) + '</option>'; }).join('') + '</select></div>' +
-            '<div class="restaurant-menu-list">' + products.map(function (product) {
+        return products.map(function (product) {
                 var summary = menuVariantSummary(product);
                 var image = model.menuImageSource(product.image);
                 return '<article class="restaurant-menu-row"><div class="restaurant-menu-identity">' +
@@ -70,8 +65,16 @@
                     '<div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + ' · ' + esc(summary.details) + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span>' +
                     (product.description ? '<p class="restaurant-menu-description">' + esc(product.description) + '</p>' : '') +
                     '</div></div><div class="restaurant-price">' + summary.price + '<small>المخزون ' + Number(summary.totalStock || 0) + ' · <span class="restaurant-status ' + menuStatusClass(product) + '">' + menuStatus(product) + '</span></small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
-            }).join('') + (products.length ? '' : '<div class="restaurant-empty">لا توجد أصناف مطابقة. أضف صنفًا من القائمة أو غيّر البحث.</div>') + '</div>';
-        return html;
+            }).join('') + (products.length ? '' : '<div class="restaurant-empty">لا توجد أصناف مطابقة. أضف صنفًا من القائمة أو غيّر البحث.</div>');
+    }
+
+    function renderMenu() {
+        var categories = menuSections().map(function (section) { return section.name; });
+        return '<div class="restaurant-toolbar"><div><h3>إدارة القائمة</h3><p>أصناف الطعام، الحصص، والتوفر الفعلي.</p></div>' +
+            '<button class="btn-primary" data-r-action="menu-new"' + (admin() ? '' : ' disabled') + '>+ صنف في القائمة</button></div>' +
+            '<div class="restaurant-filters"><input data-r-input="menu-query" value="' + esc(state.query) + '" placeholder="ابحث باسم الصنف"><select data-r-input="menu-category"><option value="all">كل التصنيفات</option>' +
+            categories.map(function (category) { return '<option value="' + esc(category) + '"' + (state.category === category ? ' selected' : '') + '>' + esc(category) + '</option>'; }).join('') + '</select></div>' +
+            '<div class="restaurant-menu-list">' + renderMenuRows() + '</div>';
     }
 
     function renderSections() {
@@ -619,8 +622,12 @@
         else if (action === 'tables-save') adapters.saveTables();
     }
     function input(event) {
-        if (event.target.dataset.rInput === 'menu-query') { state.query = event.target.value; render(); }
-        if (event.target.dataset.rInput === 'menu-category') { state.category = event.target.value; render(); }
+        if (event.target.dataset.rInput === 'menu-query' || event.target.dataset.rInput === 'menu-category') {
+            if (event.target.dataset.rInput === 'menu-query') state.query = event.target.value;
+            else state.category = event.target.value;
+            var list = document.querySelector('#restaurantWorkspace .restaurant-menu-list');
+            if (list) list.innerHTML = renderMenuRows();
+        }
         if (event.target.dataset.rInput === 'attendance-date') { state.attendanceDate = event.target.value; render(); }
     }
     function init(options) {
@@ -631,5 +638,5 @@
         host.addEventListener('error', function (event) { if (event.target.matches('img[data-menu-image]')) event.target.hidden = true; }, true);
         host.addEventListener('click', click); host.addEventListener('input', input); host.addEventListener('change', input); render();
     }
-    root.RestaurantWorkspace = { init: init, render: render, showMenu: function () { state.tab = 'menu'; state.category = 'all'; state.query = ''; render(); } };
+    root.RestaurantWorkspace = { init: init, render: render, editMenu: editMenu, showMenu: function () { state.tab = 'menu'; state.category = 'all'; state.query = ''; render(); } };
 }(window));
