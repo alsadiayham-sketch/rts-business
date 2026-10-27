@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
             storeConfig = { features: {}, restaurantMenuSections: [{ id: 'mains', name: 'وجبات', order: 0 }] };
             products = [
                 { id: 'burger', name: 'برغر تجريبي', category: 'وجبات', type: 'وجبات', variants: [{ color: 'افتراضي', size: 'قياسية', price: 25, cost: 8, stock: 10 }] },
-                { id: 'hummus', name: 'صحن حمص', category: 'وجبات', type: 'وجبات', variants: [
+                { id: 'hummus', name: 'صحن حمص', category: 'وجبات', type: 'وجبات', fixtureMetadata: 'preserve-me', variants: [
                     { color: 'افتراضي', size: 'صغير', price: 10, cost: 2, stock: 10 },
                     { color: 'افتراضي', size: 'وسط', price: 15, cost: 3, stock: 10 },
                     { color: 'افتراضي', size: 'كبير', price: 20, cost: 4, stock: 10 }
@@ -303,10 +303,26 @@ app.whenReady().then(async () => {
 
         await evaluate(`
             closeModal('receiptModal');
-            document.querySelector('.nav-btn[data-page="restaurant"]').click();
+            document.getElementById('restaurantManageMenuBtn').click();
             document.querySelector('[data-r-action="menu-edit"][data-id="hummus"]').click();
         `);
         assert.equal(await evaluate('document.querySelectorAll(".restaurant-editor [data-row]").length'), 3);
+        await evaluate(`
+            document.querySelector('.restaurant-editor [name="name"]').value = 'حمص بالطحينة';
+            document.querySelector('.restaurant-editor [name="description"]').value = 'حمص وطحينة <img src=x onerror="window.descriptionExecuted=1">';
+            var photoCanvas = document.createElement('canvas');
+            photoCanvas.width = 1200; photoCanvas.height = 800;
+            photoCanvas.getContext('2d').fillStyle = '#48115b';
+            photoCanvas.getContext('2d').fillRect(0, 0, 1200, 800);
+            var photoBytes = Uint8Array.from(atob(photoCanvas.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
+            var files = new DataTransfer();
+            files.items.add(new File([photoBytes], 'fixture-menu.png', {type:'image/png'}));
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = files.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('document.querySelector("[data-image-status]").textContent.includes("جاهزة")');
+        assert.equal(await evaluate('document.querySelector("[data-image-preview]").hidden'), false);
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor button[type=submit]").disabled'), false);
         await evaluate(`
             var rows = document.querySelectorAll('.restaurant-editor [data-row]');
             rows[1].querySelector('[data-row-field="label"]').value = 'صغير';
@@ -330,25 +346,122 @@ app.whenReady().then(async () => {
         await waitFor('document.querySelector(".restaurant-inline-error")?.textContent.length > 0');
         assert.equal(await evaluate('document.querySelectorAll(".restaurant-editor [data-row]").length'), 4);
         assert.equal(await evaluate('document.querySelector(".restaurant-editor button[type=submit]").disabled'), false);
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor [name=name]").value'), 'حمص بالطحينة');
+        assert.match(await evaluate('document.querySelector("[data-image-preview]").src'), /^data:image\/webp;base64,/);
         await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click()`);
         await waitFor('!document.querySelector(".restaurant-editor")');
         assert.deepEqual(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').variants.map(v => v.price)`), [10, 18, 20, 30]);
+        const edited = await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus')`);
+        assert.equal(edited.name, 'حمص بالطحينة');
+        assert.equal(edited.fixtureMetadata, 'preserve-me');
+        assert.match(edited.description, /<img/);
+        assert.match(edited.image, /^data:image\/webp;base64,/);
+        assert.ok(edited.image.length < 400000);
+        assert.equal(await evaluate('!!window.descriptionExecuted'), false);
+        assert.match(await evaluate('document.getElementById("restaurantWorkspace").textContent'), /حمص بالطحينة/);
         await evaluate(`
-            products = products.map(p => p.id === 'hummus' ? __fixture.read('projects/isolated-restaurant-fixture/products/hummus') : p);
-            syncRestaurantWorkspace();
             document.querySelector('[data-r-action="menu-edit"][data-id="hummus"]').click();
             document.querySelector('.restaurant-editor [data-row-field="label"]').focus();
         `);
         assert.equal(await evaluate('!!window.pwned'), false);
         assert.equal(await evaluate('document.querySelector(".restaurant-editor [data-row-field=label]").hasAttribute("onfocus")'), false);
         assert.equal(await evaluate('document.querySelector(".restaurant-editor [data-row-field=label]").value'), 'x" onfocus="window.pwned=1');
-        await screenshot('restaurant-portions-editor', 1440, 1000);
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor [name=name]").value'), 'حمص بالطحينة');
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor [name=description]").value'), edited.description);
+        assert.equal(await evaluate('document.querySelector("[data-image-preview]").src'), edited.image);
+        await evaluate(`document.querySelector('.restaurant-editor [name="name"]').focus();`);
+        await screenshot('restaurant-item-details-desktop', 1440, 1000);
+        await screenshot('restaurant-item-details-compact', 1024, 700);
         await evaluate(`
+            var invalidPhotos = new DataTransfer();
+            invalidPhotos.items.add(new File(['not a PNG image'], 'invalid.png', {type:'image/png'}));
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = invalidPhotos.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('document.querySelector("[data-image-status]").textContent.includes("تعذر قراءة")');
+        await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click();`);
+        assert.match(await evaluate('document.querySelector(".restaurant-inline-error").textContent'), /تعذر قراءة/);
+        assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), edited.image);
+        await evaluate(`
+            window.fixtureOriginalBitmap = window.createImageBitmap;
+            window.fixtureBitmapCalls = 0;
+            window.createImageBitmap = function (...args) { fixtureBitmapCalls++; return fixtureOriginalBitmap(...args); };
+            var largeHeader = photoBytes.slice();
+            new DataView(largeHeader.buffer).setUint32(16, 20000);
+            new DataView(largeHeader.buffer).setUint32(20, 20000);
+            var oversizedPhotos = new DataTransfer();
+            oversizedPhotos.items.add(new File([largeHeader], 'oversized.png', {type:'image/png'}));
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = oversizedPhotos.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('document.querySelector("[data-image-status]").textContent.includes("24 مليون")');
+        assert.equal(await evaluate('fixtureBitmapCalls'), 0, 'Oversized dimensions must be rejected before bitmap decoding.');
+        await evaluate(`
+            window.createImageBitmap = async function (...args) {
+                window.fixtureDelayedBitmap = await fixtureOriginalBitmap(...args);
+                return new Promise(resolve => { window.fixtureReleaseBitmap = () => resolve(fixtureDelayedBitmap); });
+            };
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = files.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('typeof fixtureReleaseBitmap === "function"');
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor button[type=submit]").disabled'), true);
+        await evaluate(`
+            document.querySelector('[data-r-action="image-remove"]').click();
+            fixtureReleaseBitmap();
+            window.createImageBitmap = fixtureOriginalBitmap;
+            void 0;
+        `);
+        await waitFor('fixtureDelayedBitmap.width === 0');
+        assert.equal(await evaluate('document.querySelector("[data-image-preview]").hasAttribute("src")'), false, 'An obsolete decoded image cannot replace a newer draft.');
+        assert.equal(await evaluate('document.querySelector(".restaurant-editor button[type=submit]").disabled'), false);
+        await evaluate(`
+            document.querySelector('[data-r-action="image-remove"]').click();
             document.querySelector('.restaurant-editor [data-r-close]').click();
+        `);
+        assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), edited.image, 'Cancel must preserve the saved photo.');
+        await evaluate(`
+            switchPage('sales'); renderProducts();
+        `);
+        assert.match(await evaluate('document.querySelector(".restaurant-food-item[data-id=hummus]").textContent'), /حمص وطحينة/);
+        assert.equal(await evaluate('document.querySelector(".restaurant-food-item[data-id=hummus] img").src'), edited.image);
+        assert.equal(await evaluate('!!window.descriptionExecuted'), false);
+        await screenshot('restaurant-photo-menu', 1440, 1000);
+        await evaluate(`
+            document.getElementById('restaurantManageMenuBtn').click();
+            document.querySelector('[data-r-action="menu-edit"][data-id="hummus"]').click();
+            var photoUrl = document.querySelector('.restaurant-editor [name="imageUrl"]');
+            photoUrl.value = 'javascript:window.imageExecuted=1';
+            photoUrl.dispatchEvent(new Event('input', {bubbles:true}));
+        `);
+        assert.equal(await evaluate('document.querySelector("[data-image-preview]").hasAttribute("src")'), false);
+        assert.equal(await evaluate('!!window.imageExecuted'), false);
+        assert.equal(await evaluate(`
+            photoUrl.value = 'https://127.0.0.1:1/missing.png';
+            photoUrl.dispatchEvent(new Event('input', {bubbles:true}));
+            document.querySelector('.restaurant-editor form').dispatchEvent(new Event('submit', {bubbles:true, cancelable:true}));
+            document.querySelector('.restaurant-editor button[type=submit]').disabled;
+        `), true, 'An immediate submit must wait for URL preview validation.');
+        await waitFor('document.querySelector("[data-image-status]").textContent.includes("تعذر عرض")');
+        assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), edited.image);
+        await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click();`);
+        assert.match(await evaluate('document.querySelector(".restaurant-inline-error").textContent'), /تعذر عرض/);
+        await evaluate(`
+            document.querySelector('[data-r-action="image-remove"]').click();
+            document.querySelectorAll('.restaurant-editor [data-r-action="portion-remove"]')[2].click();
+            document.querySelector('.restaurant-editor button[type="submit"]').click();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), '');
+        assert.deepEqual(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').variants.map(v => v.price)`), [10, 18, 30]);
+        assert.equal(await evaluate(`products.find(p => p.id === 'hummus').fixtureMetadata`), 'preserve-me');
+        await evaluate(`
             currentUser.role = 'cashier'; syncRestaurantWorkspace();
+            applyBusinessSurface();
         `);
         assert.equal(await evaluate('document.querySelector("[data-r-action=menu-new]").disabled'), true);
-        console.log('PASS: real multi-size editor validates, preserves input after save failure, saves all portions and restricts cashier edits.');
+        assert.equal(await evaluate('document.getElementById("restaurantManageMenuBtn").style.display'), 'none');
+        console.log('PASS: existing item name/description/photo upload and removal, size add/edit/remove, save retry, metadata preservation and role restrictions.');
 
         await evaluate(`
             document.querySelector('.cart-payment-details').open = false;

@@ -56,6 +56,17 @@
         });
     }
 
+    function menuImageSource(value) {
+        var source = String(value || '').trim();
+        if (!source || source.length > 400000) return '';
+        if (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)) return source;
+        if (source.length > 4096) return '';
+        try {
+            var url = new URL(source);
+            return url.protocol === 'https:' && !url.username && !url.password ? url.href : '';
+        } catch (_error) { return ''; }
+    }
+
     function foodSelection(product) {
         var choices = foodChoices(product);
         var inStock = choices.filter(function (choice) { return Number(choice.variant && choice.variant.stock || 0) > 0; });
@@ -267,7 +278,7 @@
         };
     }
 
-    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, buildFoodVariants: buildFoodVariants, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
+    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, menuImageSource: menuImageSource, buildFoodVariants: buildFoodVariants, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
         var fixture = buildRestaurantDemo();
         return { version: DEMO_VERSION, products: fixture.products.map(function (item) { return Object.assign({ id: item.id }, item.data); }), records: fixture.records.map(function (item) { return Object.assign({ id: item.id }, item.data); }) };
     } };

@@ -192,6 +192,8 @@ function applyBusinessSurface() {
     document.body.classList.toggle('restaurant-mode', restaurant);
     var paymentDetails = document.querySelector('.cart-payment-details');
     if (!restaurant && paymentDetails) paymentDetails.open = true;
+    var manageMenu = document.getElementById('restaurantManageMenuBtn');
+    if (manageMenu) manageMenu.style.display = restaurant && isAdmin() ? 'inline-flex' : 'none';
     var salesNav = document.querySelector('.nav-btn[data-page="sales"] .nav-label');
     if (salesNav) salesNav.textContent = restaurant ? 'طلبات المطعم' : 'المبيعات';
     var restaurantNavLabel = document.querySelector('.nav-btn[data-page="restaurant"] .nav-label');
@@ -1214,7 +1216,11 @@ function renderRestaurantOrder() {
             var availableChoices = window.RestaurantModel.foodChoices(product).filter(function (choice) { return Number(choice.variant.stock) > 0 && Number.isFinite(Number(choice.variant.price)); });
             var available = selection.kind !== 'configuration-required' && availableChoices.length > 0;
             var price = available ? Math.min.apply(null, availableChoices.map(function (choice) { return Number(choice.variant.price); })) : 0;
-            html += '<button type="button" class="restaurant-food-item' + (available ? '' : ' unavailable') + '" data-id="' + escapeHtml(product.id) + '" aria-label="إضافة ' + escapeHtml(product.name || '') + ' إلى الطلب"' + (available ? '' : ' disabled') + '><strong>' + escapeHtml(product.name || '') + '</strong><span>' + (selection.kind === 'portions' ? 'اختر الحصة' : 'إضافة مباشرة') + '</span><b>' + (available ? (selection.kind === 'portions' ? 'من ' : '') + '₪' + Number(price).toFixed(2) : 'غير متاح') + '</b></button>';
+            var image = window.RestaurantModel.menuImageSource(product.image);
+            html += '<button type="button" class="restaurant-food-item' + (available ? '' : ' unavailable') + (image ? ' has-photo' : '') + '" data-id="' + escapeHtml(product.id) + '" aria-label="إضافة ' + escapeHtml(product.name || '') + ' إلى الطلب"' + (available ? '' : ' disabled') + '>' +
+                (image ? '<img class="restaurant-food-photo" data-menu-image src="' + escapeHtml(image) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
+                '<strong>' + escapeHtml(product.name || '') + '</strong><span>' + (selection.kind === 'portions' ? 'اختر الحصة' : 'إضافة مباشرة') + '</span><b>' + (available ? (selection.kind === 'portions' ? 'من ' : '') + '₪' + Number(price).toFixed(2) : 'غير متاح') + '</b>' +
+                (product.description ? '<small class="restaurant-food-description" title="' + escapeHtml(product.description) + '">' + escapeHtml(product.description) + '</small>' : '') + '</button>';
             shown++;
         });
         html += '</div></details>';
@@ -3800,6 +3806,14 @@ function setupEventListeners() {
             restaurantExpandedSections[e.target.getAttribute('data-section-id')] = e.target.open;
         }
     }, true);
+    document.getElementById('productsGrid').addEventListener('error', function (e) {
+        if (e.target.matches('img[data-menu-image]')) e.target.hidden = true;
+    }, true);
+    document.getElementById('restaurantManageMenuBtn').addEventListener('click', function () {
+        if (!isRestaurantMode() || !isAdmin() || checkoutInFlight) return;
+        switchPage('restaurant');
+        window.RestaurantWorkspace.showMenu();
+    });
 
     document.getElementById('variantColors').addEventListener('click', function (e) {
         var opt = e.target.closest('.color-option');
@@ -4893,12 +4907,28 @@ function refreshActiveRestaurantOfferAfterCartChange() {
 }
 
 function saveRestaurantMenuProduct(product, onOk, onErr) {
-    if (!isAdmin()) { showAlert('هذه العملية متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' }); return; }
+    if (!isAdmin()) {
+        if (onErr) onErr(new Error('هذه العملية متاحة للمدير فقط'));
+        else showAlert('هذه العملية متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
     var existing = products.find(function (item) { return String(item.id) === String(product.id); }) || {};
     var next = Object.assign({}, existing, product, { id: product.id, updatedAtIso: new Date().toISOString() });
+    var saveSession = storeSessionId;
     db.collection('products').doc(product.id).set(next)
-        .then(function () { if (onOk) onOk(product.id); })
-        .catch(function (error) { if (onErr) onErr(error); else showAlert('تعذر حفظ صنف القائمة', { icon: '⚠️', title: 'خطأ' }); });
+        .then(function () {
+            if (!isActiveStoreSession(saveSession)) return;
+            var index = products.findIndex(function (item) { return String(item.id) === String(product.id); });
+            if (index < 0) products.push(next);
+            else if (products[index] === existing) products[index] = next;
+            renderProducts();
+            if (onOk) onOk(product.id);
+        })
+        .catch(function (error) {
+            if (!isActiveStoreSession(saveSession)) return;
+            if (onErr) onErr(error);
+            else showAlert('تعذر حفظ صنف القائمة', { icon: '⚠️', title: 'خطأ' });
+        });
 }
 function saveRestaurantRecord(record, idPrefix, onOk, onErr) {
     record.total = 0;

@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.12",
+  "version": "4.0.13",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
-    "firebase": "12.10.0"
+    "firebase": "12.10.0",
+    "image-size": "2.0.4"
   },
   "build": {
     "appId": "com.rts.business",

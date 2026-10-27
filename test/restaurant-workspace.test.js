@@ -155,6 +155,20 @@ test('a standard burger with no configured color selector resolves directly to i
     assert.equal(selection.choice.variant, burger.variants[0]);
 });
 
+test('a late menu save cannot insert a prior store item into the newly active store', async () => {
+    const { sandbox } = appHarness();
+    sandbox.currentUser = { role: 'admin' };
+    sandbox.storeSessionId = 1;
+    sandbox.products = [{ id: 'old-food', name: 'Old store food', variants: [] }];
+    let completed = false;
+    sandbox.saveRestaurantMenuProduct({ id: 'old-food', name: 'Edited old food' }, () => { completed = true; });
+    sandbox.storeSessionId = 2;
+    sandbox.products = [{ id: 'new-food', name: 'New store food' }];
+    await Promise.resolve();
+    assert.deepEqual(sandbox.products.map(p => p.id), ['new-food']);
+    assert.equal(completed, false);
+});
+
 test('food portions are shown only for explicit distinct portion labels', () => {
     const portions = model.foodSelection({ variants: [
         { color: 'افتراضي', size: 'صغير', price: 20, stock: 3 },

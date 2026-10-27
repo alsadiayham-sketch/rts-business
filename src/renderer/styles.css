@@ -2129,6 +2129,33 @@ body.restaurant-mode .restaurant-only { display:block; }
 .restaurant-editor form { min-height:0; overflow:auto; }
 .restaurant-editor .modal-footer { position:sticky; bottom:0; background:#fff; padding:12px 0; }
 .restaurant-editor .btn-quiet { background:#fff; color:#48115b; border:1px solid #b9a8bf; }
+.restaurant-menu-editor .modal-footer { position:static; flex-shrink:0; margin:0; padding:12px 24px; }
+.restaurant-item-grid { align-items:start; }
+.restaurant-food-item.has-photo { grid-template-columns:1fr; }
+body.restaurant-mode .restaurant-panel-title { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.restaurant-panel-title button { flex-shrink:0; }
+.restaurant-image-editor { min-width:0; border:1px solid #ddd5df; border-radius:8px; padding:12px; }
+.restaurant-image-editor legend { padding:0 6px; font-size:14px; font-weight:700; }
+.restaurant-image-fields { display:grid; grid-template-columns:144px minmax(0,1fr); gap:16px; }
+.restaurant-image-preview { min-height:128px; display:flex; align-items:center; justify-content:center; background:#f3eff4; border-radius:6px; color:#5f5361; font-size:13px; overflow:hidden; }
+.restaurant-image-preview img { width:100%; max-height:180px; object-fit:contain; }
+.restaurant-image-preview [hidden] { display:none; }
+.restaurant-image-editor input[type=file] { max-width:100%; font-size:12px; padding:8px 0; }
+.restaurant-image-editor small, .restaurant-image-status { color:#5f5361; font-size:12px; margin:6px 0; }
+.restaurant-image-editor label { margin-bottom:8px; }
+.restaurant-editor textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:80px; font:inherit; }
+.restaurant-menu-identity { display:flex; gap:12px; align-items:center; min-width:0; }
+.restaurant-menu-identity > div { min-width:0; }
+.restaurant-menu-thumb { width:64px; height:64px; flex-shrink:0; object-fit:cover; border-radius:6px; }
+.restaurant-menu-description, .restaurant-food-description { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; color:#5f5361; font-size:12px; line-height:1.5; margin:4px 0 0; }
+.restaurant-food-photo { grid-column:1 / -1; width:100%; height:110px; object-fit:cover; border-radius:6px; }
+.restaurant-food-item.has-photo b { grid-column:1; grid-row:auto; }
+.restaurant-food-description { grid-column:1 / -1; font-weight:400; }
+.restaurant-food-item strong { min-width:0; overflow-wrap:anywhere; }
+@media (max-width:600px) {
+    .restaurant-image-fields { grid-template-columns:1fr; }
+    .restaurant-image-preview { max-width:220px; }
+}
 .restaurant-line-note { width:100%; min-width:0; margin-top:6px; padding:5px; box-sizing:border-box; border:1px solid #b9a8bf; border-radius:4px; background:#fff; color:#211523; font:inherit; font-size:12px; }
 .restaurant-line-note::placeholder { color:#65536a; }
 .restaurant-ticket-scroll { display:contents; }

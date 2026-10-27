@@ -89,3 +89,13 @@ test('editing numbers preserves original blank-color and whitespace size invento
     assert.equal(result.variants[0].size, ' صغير ');
     assert.equal(result.variants[0].sku, 'keep');
 });
+
+test('menu photos accept HTTPS and bounded raster data, never active or local-file schemes', () => {
+    assert.equal(model.menuImageSource('https://images.example.test/menu.png'), 'https://images.example.test/menu.png');
+    assert.equal(model.menuImageSource('data:image/webp;base64,AAAA'), 'data:image/webp;base64,AAAA');
+    for (const unsafe of ['javascript:alert(1)', 'file:///C:/private.png', 'http://example.test/a.png',
+        'data:image/svg+xml;base64,AAAA', 'https://user:password@example.test/a.png',
+        'data:image/png;base64,' + 'A'.repeat(400000)]) {
+        assert.equal(model.menuImageSource(unsafe), '');
+    }
+});

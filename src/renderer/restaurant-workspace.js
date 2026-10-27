@@ -64,7 +64,12 @@
             categories.map(function (category) { return '<option value="' + esc(category) + '"' + (state.category === category ? ' selected' : '') + '>' + esc(category) + '</option>'; }).join('') + '</select></div>' +
             '<div class="restaurant-menu-list">' + products.map(function (product) {
                 var summary = menuVariantSummary(product);
-                return '<article class="restaurant-menu-row"><div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + ' · ' + esc(summary.details) + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span></div><div class="restaurant-price">' + summary.price + '<small>المخزون ' + Number(summary.totalStock || 0) + ' · <span class="restaurant-status ' + menuStatusClass(product) + '">' + menuStatus(product) + '</span></small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
+                var image = model.menuImageSource(product.image);
+                return '<article class="restaurant-menu-row"><div class="restaurant-menu-identity">' +
+                    (image ? '<img data-menu-image class="restaurant-menu-thumb" src="' + esc(image) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
+                    '<div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + ' · ' + esc(summary.details) + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span>' +
+                    (product.description ? '<p class="restaurant-menu-description">' + esc(product.description) + '</p>' : '') +
+                    '</div></div><div class="restaurant-price">' + summary.price + '<small>المخزون ' + Number(summary.totalStock || 0) + ' · <span class="restaurant-status ' + menuStatusClass(product) + '">' + menuStatus(product) + '</span></small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
             }).join('') + (products.length ? '' : '<div class="restaurant-empty">لا توجد أصناف مطابقة. أضف صنفًا من القائمة أو غيّر البحث.</div>') + '</div>';
         return html;
     }
@@ -256,6 +261,7 @@
 
     function editMenu(id) {
         if (!requireAdmin()) return;
+        if (document.querySelector('.restaurant-editor')) return;
         var product = id && adapters.products().find(function (item) { return String(item.id) === String(id); });
         var sectionOptions = menuSections().map(function (section) { return { value: section.name, label: section.name }; });
         if (!sectionOptions.length) return setMessage('أنشئ قسمًا للقائمة قبل إضافة صنف.', 'error');
@@ -276,27 +282,147 @@
         if (!sectionOptions.some(function (option) { return option.value === selectedCategory; })) selectedCategory = sectionOptions[0].value;
 
         var previousFocus = document.activeElement;
+        var draftImage = String(product && product.image || '');
+        var imageBusy = false;
+        var previewBusy = false;
+        var imageError = '';
+        var imageRevision = 0;
+        var closed = false;
         var modal = document.createElement('div');
-        modal.className = 'modal-overlay restaurant-editor';
+        modal.className = 'modal-overlay restaurant-editor restaurant-menu-editor';
         modal.style.display = 'flex';
-        modal.innerHTML = '<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="restaurantMenuEditorTitle"><div class="modal-header"><h3 id="restaurantMenuEditorTitle">' + esc(product ? 'تعديل صنف القائمة' : 'صنف جديد في القائمة') + '</h3><button class="modal-close" type="button" data-r-close>&times;</button></div><form class="modal-body restaurant-form">' +
-            '<label>اسم الصنف<input name="name" required value="' + esc(product && product.name || '') + '"></label>' +
+        modal.innerHTML = '<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="restaurantMenuEditorTitle"><div class="modal-header"><h3 id="restaurantMenuEditorTitle">' + esc(product ? 'تعديل صنف القائمة' : 'صنف جديد في القائمة') + '</h3><button class="modal-close" type="button" data-r-close>&times;</button></div><form id="restaurantMenuEditorForm" class="modal-body restaurant-form">' +
+            '<label>اسم الصنف<input name="name" required maxlength="120" value="' + esc(product && product.name || '') + '"></label>' +
+            '<label>وصف الصنف<textarea name="description" rows="3" maxlength="2000" placeholder="المكونات وطريقة التحضير وأي تفاصيل مهمة">' + esc(product && product.description || '') + '</textarea></label>' +
+            '<fieldset class="restaurant-image-editor"><legend>صورة الصنف</legend><div class="restaurant-image-fields"><div class="restaurant-image-preview"><img data-image-preview alt="معاينة صورة الصنف" hidden><span data-image-empty>بدون صورة</span></div><div>' +
+            '<label>رفع صورة<input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp"></label><small>JPG أو PNG أو WebP حتى 10MB و24 مليون بكسل (8192 بكسل لكل جانب). تُصغّر الصورة تلقائياً قبل الحفظ.</small>' +
+            '<label>أو رابط صورة HTTPS<input name="imageUrl" type="url" dir="ltr" placeholder="https://…" value="' + esc(/^https:/i.test(draftImage) ? draftImage : '') + '"></label>' +
+            '<button type="button" class="btn-quiet" data-r-action="image-remove">إزالة الصورة</button><p class="restaurant-image-status" data-image-status role="status"></p></div></div></fieldset>' +
             '<label>القسم<select name="category">' + sectionOptions.map(function (option) { return '<option value="' + esc(option.value) + '"' + (option.value === selectedCategory ? ' selected' : '') + '>' + esc(option.label) + '</option>'; }).join('') + '</select></label>' +
             '<label>حالة الصنف<select name="available"><option value="true"' + (product && product.status === 'disabled' ? '' : ' selected') + '>متاح</option><option value="false"' + (product && product.status === 'disabled' ? ' selected' : '') + '>غير متاح</option></select></label>' +
-            '<div class="restaurant-portions-editor"><label>الأحجام والتسعير</label><small>أدخل كل حجم بسعره وتكلفته ومخزونه (مثال: 100غ، 150غ، 300غ)</small><div data-r-portions></div><button type="button" class="btn-secondary" data-r-action="portion-add">+ إضافة حجم</button></div>' +
-            '<div class="restaurant-inline-error" aria-live="polite"></div>' +
-            '<div class="modal-footer"><button class="btn-primary" type="submit">حفظ</button><button class="btn-secondary" type="button" data-r-close>إلغاء</button></div></form></div>';
+            '<div class="restaurant-portions-editor"><label>الأحجام والتسعير</label><small>عدّل السعر لكل حجم، وأضف أو احذف الأحجام. للصنف بدون أحجام متعددة، اترك حصة واحدة باسم «قياسية».</small><div data-r-portions></div><button type="button" class="btn-secondary" data-r-action="portion-add">+ إضافة حجم</button></div>' +
+            '<div class="restaurant-inline-error" aria-live="polite"></div></form>' +
+            '<div class="modal-footer"><button class="btn-primary" type="submit" form="restaurantMenuEditorForm">حفظ</button><button class="btn-secondary" type="button" data-r-close>إلغاء</button></div></div>';
         document.body.appendChild(modal);
 
         var form = modal.querySelector('form');
         var rowHost = form.querySelector('[data-r-portions]');
         var errorEl = form.querySelector('.restaurant-inline-error');
-        var saveButton = form.querySelector('.btn-primary');
+        var saveButton = modal.querySelector('.modal-footer .btn-primary');
         var pending = false;
+        var imagePreview = form.querySelector('[data-image-preview]');
+        var imageStatus = form.querySelector('[data-image-status]');
+        var imageInput = form.querySelector('[name="imageFile"]');
+        var imageUrl = form.querySelector('[name="imageUrl"]');
+
+        function updatePreview() {
+            var source = model.menuImageSource(draftImage);
+            var revision = imageRevision;
+            previewBusy = !!source;
+            if (source) imageStatus.textContent = 'جارٍ تحميل معاينة الصورة...';
+            setPending(pending);
+            imagePreview.onload = function () {
+                if (!closed && revision === imageRevision) {
+                    previewBusy = false;
+                    imageError = '';
+                    imageStatus.textContent = 'الصورة جاهزة. اضغط حفظ لتطبيق التغيير.';
+                    setPending(pending);
+                }
+            };
+            imagePreview.onerror = function () {
+                if (closed || revision !== imageRevision) return;
+                previewBusy = false;
+                imageError = 'تعذر عرض الصورة. تحقق من الرابط أو ارفع صورة من الجهاز.';
+                imageStatus.textContent = imageError;
+                imagePreview.hidden = true;
+                form.querySelector('[data-image-empty]').hidden = false;
+                setPending(pending);
+            };
+            imagePreview.hidden = !source;
+            form.querySelector('[data-image-empty]').hidden = !!source;
+            if (source) imagePreview.src = source;
+            else imagePreview.removeAttribute('src');
+        }
+        imagePreview.referrerPolicy = 'no-referrer';
+        imageUrl.addEventListener('input', function () {
+            if (pending) return;
+            imageRevision++;
+            imageBusy = false;
+            imageInput.value = '';
+            draftImage = imageUrl.value.trim();
+            imageError = draftImage && !model.menuImageSource(draftImage) ? 'استخدم رابط صورة HTTPS صالحاً.' : '';
+            imageStatus.textContent = imageError;
+            setPending(false);
+            updatePreview();
+        });
+        imageInput.addEventListener('change', async function () {
+            if (pending) return;
+            var file = imageInput.files && imageInput.files[0];
+            if (!file) return;
+            var revision = ++imageRevision;
+            imageBusy = false;
+            previewBusy = false;
+            setPending(false);
+            if (['image/jpeg', 'image/png', 'image/webp'].indexOf(file.type) < 0 || !file.size || file.size > 10 * 1024 * 1024) {
+                imageInput.value = '';
+                imageError = 'اختر صورة JPG أو PNG أو WebP لا تتجاوز 10MB.';
+                imageStatus.textContent = imageError;
+                return;
+            }
+            imageBusy = true;
+            imageError = '';
+            saveButton.disabled = true;
+            imageStatus.textContent = 'جارٍ تجهيز الصورة...';
+            var bitmap;
+            try {
+                var bytes = new Uint8Array(await file.arrayBuffer());
+                if (closed || revision !== imageRevision) return;
+                var dimensions = require('image-size').imageSize(bytes);
+                if (['jpg', 'png', 'webp'].indexOf(dimensions.type) < 0 || !dimensions.width || !dimensions.height) {
+                    throw new Error('Unsupported image');
+                }
+                if (dimensions.width > 8192 || dimensions.height > 8192 || dimensions.width * dimensions.height > 24000000) {
+                    throw new Error('الصورة كبيرة جداً: الحد 24 مليون بكسل و8192 بكسل لكل جانب. صغّرها ثم أعد المحاولة.');
+                }
+                var rotated = dimensions.orientation >= 5 && dimensions.orientation <= 8;
+                var width = rotated ? dimensions.height : dimensions.width;
+                var height = rotated ? dimensions.width : dimensions.height;
+                var decodeScale = Math.min(1, 960 / Math.max(width, height));
+                bitmap = await createImageBitmap(file, {
+                    resizeWidth: Math.max(1, Math.round(width * decodeScale)),
+                    resizeHeight: Math.max(1, Math.round(height * decodeScale)),
+                    resizeQuality: 'high'
+                });
+                if (closed || revision !== imageRevision) return;
+                var scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
+                var canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+                canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+                canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                var prepared = canvas.toDataURL('image/webp', 0.82);
+                if (!model.menuImageSource(prepared)) throw new Error('الصورة كبيرة بعد التصغير؛ اختر صورة أصغر أو استخدم رابط HTTPS.');
+                if (closed || revision !== imageRevision) return;
+                draftImage = prepared;
+                imageUrl.value = '';
+                imageStatus.textContent = 'الصورة جاهزة. اضغط حفظ لتطبيق التغيير.';
+                updatePreview();
+            } catch (error) {
+                if (!closed && revision === imageRevision) {
+                    imageError = error.message && error.message.indexOf('الصورة كبيرة') === 0 ? error.message : 'تعذر قراءة الصورة. اختر ملف صورة صالحاً آخر.';
+                    imageStatus.textContent = imageError;
+                    imageInput.value = '';
+                }
+            } finally {
+                if (bitmap) bitmap.close();
+                if (!closed && revision === imageRevision) { imageBusy = false; setPending(false); }
+            }
+        });
+        updatePreview();
 
         function setPending(next) {
             pending = !!next;
-            saveButton.disabled = pending;
+            saveButton.disabled = pending || imageBusy || previewBusy;
+            form.querySelectorAll('input,textarea,select').forEach(function (field) { field.disabled = pending; });
             saveButton.textContent = pending ? 'جارٍ الحفظ...' : 'حفظ';
         }
         function fail(message) {
@@ -304,6 +430,8 @@
             errorEl.textContent = message || 'تعذر حفظ الصنف.';
         }
         function close() {
+            closed = true;
+            imageRevision++;
             document.removeEventListener('keydown', onKeydown, true);
             modal.remove();
             if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
@@ -332,6 +460,7 @@
         function onKeydown(event) {
             if (event.key === 'Escape' && !pending) {
                 event.preventDefault();
+                event.stopPropagation();
                 close();
             }
         }
@@ -339,6 +468,17 @@
         modal.addEventListener('click', function (event) {
             if (pending) return;
             if (event.target === modal || event.target.closest('[data-r-close]')) close();
+            if (event.target.closest('[data-r-action="image-remove"]')) {
+                imageRevision++;
+                imageBusy = false;
+                draftImage = '';
+                imageError = '';
+                imageInput.value = '';
+                imageUrl.value = '';
+                imageStatus.textContent = 'ستُزال الصورة عند حفظ الصنف.';
+                setPending(false);
+                updatePreview();
+            }
             if (event.target.closest('[data-r-action="portion-add"]')) {
                 var rows = currentRows();
                 rows.push({ sourceIndex: null, label: '', price: '', cost: '0', stock: '0' });
@@ -370,16 +510,21 @@
 
         form.addEventListener('submit', function (event) {
             event.preventDefault();
-            if (pending) return;
+            if (pending || imageBusy || previewBusy) return;
             errorEl.textContent = '';
+            if (!admin()) return fail('هذه العملية متاحة للمدير فقط.');
+            if (imageError) return fail(imageError);
             var name = String(form.querySelector('[name="name"]').value || '').trim();
+            var description = String(form.querySelector('[name="description"]').value || '').trim();
             var category = String(form.querySelector('[name="category"]').value || '').trim();
             var available = form.querySelector('[name="available"]').value === 'true';
             if (!name) return fail('اسم الصنف مطلوب.');
+            if (name.length > 120 || description.length > 2000) return fail('الاسم أو الوصف أطول من الحد المسموح.');
+            if (draftImage && !model.menuImageSource(draftImage)) return fail('اختر صورة صالحة أو رابط HTTPS، أو أزل الصورة.');
             if (!category) return fail('القسم مطلوب.');
             var rows = readVariantRows(rowHost);
             if (!rows.length) return fail('أضف حجمًا واحدًا على الأقل.');
-            var labels = {};
+            var labels = Object.create(null);
             for (var i = 0; i < rows.length; i += 1) {
                 var row = rows[i];
                 var label = normalizeLabel(row.label);
@@ -391,6 +536,8 @@
             var next = {
                 id: product ? product.id : 'restaurant-' + Date.now(),
                 name: name,
+                description: description,
+                image: model.menuImageSource(draftImage),
                 category: category,
                 type: category,
                 brand: product && product.brand || 'مطعم',
@@ -481,7 +628,8 @@
         var host = document.getElementById('restaurantWorkspace');
         if (!host || state.initialized) { render(); return; }
         state.initialized = true;
+        host.addEventListener('error', function (event) { if (event.target.matches('img[data-menu-image]')) event.target.hidden = true; }, true);
         host.addEventListener('click', click); host.addEventListener('input', input); host.addEventListener('change', input); render();
     }
-    root.RestaurantWorkspace = { init: init, render: render };
+    root.RestaurantWorkspace = { init: init, render: render, showMenu: function () { state.tab = 'menu'; state.category = 'all'; state.query = ''; render(); } };
 }(window));
