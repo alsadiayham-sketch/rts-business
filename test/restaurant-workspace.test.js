@@ -30,6 +30,7 @@ function appHarness() {
         localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
         navigator: { onLine: true }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
         require(request) {
+            if (request === './restaurant-service') return require('../src/renderer/restaurant-service');
             if (request === './firebase-config') return {
                 db, rawDb: {}, firebase, storage: {}, setProjectId() {}, getProjectId() { return 'test'; }, isD1() { return false; },
                 registerD1Tenant() {}, registerD1MessagingBackend() {}, isMessagingConfigured() { return false; },

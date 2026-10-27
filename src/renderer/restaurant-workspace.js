@@ -4,7 +4,7 @@
     var state = { tab: 'menu', query: '', category: 'all', attendanceDate: '', initialized: false };
     var adapters = {};
 
-    function esc(value) { var div = document.createElement('div'); div.textContent = value == null ? '' : String(value); return div.innerHTML; }
+    function esc(value) { var div = document.createElement('div'); div.textContent = value == null ? '' : String(value); return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     function money(value) { return '₪' + Number(value || 0).toFixed(2); }
     function admin() { return !!(adapters.isAdmin && adapters.isAdmin()); }
     function allRecords() { return adapters.records ? adapters.records() : []; }
@@ -29,11 +29,29 @@
         return Math.floor(minutes / 60) + ' س ' + (minutes % 60) + ' د';
     }
     function menuSections() { return adapters.menuSections ? adapters.menuSections() : []; }
+    function toNumber(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; }
+    function normalizeLabel(value) { return String(value || '').trim().normalize('NFKC').toLocaleLowerCase('ar'); }
+    function menuStatus(product) { return product && product.status === 'disabled' ? 'غير متاح' : 'متاح'; }
+    function menuStatusClass(product) { return product && product.status === 'disabled' ? 'muted' : 'success'; }
+    function menuVariantSummary(product) {
+        var variants = model.foodChoices(product).map(function (choice) { return choice.variant; }).filter(function (variant) { return variant && Number.isFinite(Number(variant.price)); });
+        if (!variants.length) return { price: money(0), details: 'لا توجد حصص', totalStock: 0 };
+        var prices = variants.map(function (variant) { return Number(variant.price); });
+        var min = Math.min.apply(null, prices);
+        var max = Math.max.apply(null, prices);
+        var totalStock = variants.reduce(function (sum, variant) { return sum + Math.max(0, toNumber(variant.stock)); }, 0);
+        var labels = variants.map(function (variant) { return String(variant.size || '').trim(); }).filter(Boolean);
+        var unique = [];
+        labels.forEach(function (label) { if (unique.indexOf(label) === -1) unique.push(label); });
+        return {
+            price: min === max ? money(min) : money(min) + ' - ' + money(max),
+            details: unique.length ? unique.join('، ') : 'حصص غير معرّفة',
+            totalStock: totalStock
+        };
+    }
 
     function renderMenu() {
-        var products = (adapters.products ? adapters.products() : []).filter(function (product) {
-            return product.status !== 'disabled';
-        });
+        var products = adapters.products ? adapters.products() : [];
         var categories = menuSections().map(function (section) { return section.name; });
         var query = state.query.toLowerCase();
         products = products.filter(function (product) {
@@ -45,8 +63,8 @@
             '<div class="restaurant-filters"><input data-r-input="menu-query" value="' + esc(state.query) + '" placeholder="ابحث باسم الصنف"><select data-r-input="menu-category"><option value="all">كل التصنيفات</option>' +
             categories.map(function (category) { return '<option value="' + esc(category) + '"' + (state.category === category ? ' selected' : '') + '>' + esc(category) + '</option>'; }).join('') + '</select></div>' +
             '<div class="restaurant-menu-list">' + products.map(function (product) {
-                var variant = (product.variants || [])[0] || {};
-                return '<article class="restaurant-menu-row"><div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span></div><div class="restaurant-price">' + money(variant.price) + '<small>المخزون ' + Number(variant.stock || 0) + '</small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
+                var summary = menuVariantSummary(product);
+                return '<article class="restaurant-menu-row"><div><strong>' + esc(product.name) + '</strong><span>' + esc(product.category || 'غير مصنف') + ' · ' + esc(summary.details) + (product.demoDataVersion ? ' · بيانات تجريبية' : '') + '</span></div><div class="restaurant-price">' + summary.price + '<small>المخزون ' + Number(summary.totalStock || 0) + ' · <span class="restaurant-status ' + menuStatusClass(product) + '">' + menuStatus(product) + '</span></small></div><button class="btn-secondary btn-small" data-r-action="menu-edit" data-id="' + esc(product.id) + '"' + (admin() ? '' : ' disabled') + '>تعديل</button></article>';
             }).join('') + (products.length ? '' : '<div class="restaurant-empty">لا توجد أصناف مطابقة. أضف صنفًا من القائمة أو غيّر البحث.</div>') + '</div>';
         return html;
     }
@@ -115,23 +133,59 @@
     }
 
     function promptFields(title, fields, submit) {
+        var previousFocus = document.activeElement;
         var modal = document.createElement('div');
         modal.className = 'modal-overlay restaurant-editor'; modal.style.display = 'flex';
-        modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>' + esc(title) + '</h3><button class="modal-close" data-r-close>&times;</button></div><form class="modal-body restaurant-form">' +
+        modal.innerHTML = '<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="restaurantEditorTitle"><div class="modal-header"><h3 id="restaurantEditorTitle">' + esc(title) + '</h3><button class="modal-close" data-r-close>&times;</button></div><form class="modal-body restaurant-form">' +
             fields.map(function (field) {
                 var name = esc(field.name), value = field.value == null ? '' : String(field.value);
                 if (field.type === 'select') return '<label>' + esc(field.label) + '<select name="' + name + '">' + (field.options || []).map(function (option) { return '<option value="' + esc(option.value) + '"' + (String(option.value) === value ? ' selected' : '') + '>' + esc(option.label) + '</option>'; }).join('') + '</select></label>';
                 if (field.type === 'textarea') return '<label>' + esc(field.label) + '<textarea name="' + name + '"' + (field.required ? ' required' : '') + '>' + esc(value) + '</textarea></label>';
                 return '<label>' + esc(field.label) + '<input name="' + name + '" type="' + esc(field.type || 'text') + '" value="' + esc(value) + '"' + (field.min != null ? ' min="' + field.min + '"' : '') + (field.step ? ' step="' + field.step + '"' : '') + (field.required ? ' required' : '') + '></label>';
             }).join('') +
+            '<div class="restaurant-inline-error" aria-live="polite"></div>' +
             '<div class="modal-footer"><button class="btn-primary">حفظ</button><button type="button" class="btn-secondary" data-r-close>إلغاء</button></div></form></div>';
         document.body.appendChild(modal);
-        modal.addEventListener('click', function (event) { if (event.target === modal || event.target.closest('[data-r-close]')) modal.remove(); });
-        modal.querySelector('form').addEventListener('submit', function (event) {
-            event.preventDefault(); var values = {}; fields.forEach(function (field) { values[field.name] = modal.querySelector('[name="' + field.name + '"]').value.trim(); });
-            submit(values, function (error) { setMessage(error, 'error'); }); modal.remove();
+        var form = modal.querySelector('form');
+        var saveButton = form.querySelector('.btn-primary');
+        var errorEl = form.querySelector('.restaurant-inline-error');
+        var pending = false;
+        function setPending(next) {
+            pending = !!next;
+            saveButton.disabled = pending;
+            saveButton.textContent = pending ? 'جارٍ الحفظ...' : 'حفظ';
+        }
+        function fail(message) {
+            setPending(false);
+            errorEl.textContent = message || 'تعذر حفظ البيانات.';
+        }
+        function close() {
+            document.removeEventListener('keydown', onKeydown, true);
+            modal.remove();
+            if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+        }
+        function onKeydown(event) {
+            if (event.key === 'Escape' && !pending) {
+                event.preventDefault();
+                close();
+            }
+        }
+        document.addEventListener('keydown', onKeydown, true);
+        modal.addEventListener('click', function (event) {
+            if (pending) return;
+            if (event.target === modal || event.target.closest('[data-r-close]')) close();
         });
-        modal.querySelector('input').focus();
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            if (pending) return;
+            errorEl.textContent = '';
+            var values = {};
+            fields.forEach(function (field) { values[field.name] = form.querySelector('[name="' + field.name + '"]').value.trim(); });
+            setPending(true);
+            submit(values, { fail: fail, close: close, setPending: setPending });
+        });
+        var firstInput = modal.querySelector('input,select,textarea,button');
+        if (firstInput) firstInput.focus();
     }
 
     function saveRecord(record, prefix, success) {
@@ -142,17 +196,17 @@
         if (!requireAdmin()) return;
         var sections = menuSections();
         var section = sections.find(function (item) { return item.id === id; });
-        promptFields(section ? 'إعادة تسمية القسم' : 'قسم جديد', [{ name: 'name', label: 'اسم القسم', value: section && section.name, required: true }], function (value, fail) {
-            if (!value.name) return fail('اسم القسم مطلوب.');
-            if (sections.some(function (item) { return item.name === value.name && item.id !== (section && section.id); })) return fail('يوجد قسم بهذا الاسم.');
+        promptFields(section ? 'إعادة تسمية القسم' : 'قسم جديد', [{ name: 'name', label: 'اسم القسم', value: section && section.name, required: true }], function (value, ui) {
+            if (!value.name) return ui.fail('اسم القسم مطلوب.');
+            if (sections.some(function (item) { return item.name === value.name && item.id !== (section && section.id); })) return ui.fail('يوجد قسم بهذا الاسم.');
             var next = sections.map(function (item) { return Object.assign({}, item); });
             if (section && section.name !== value.name && adapters.renameMenuSection) {
-                adapters.renameMenuSection(section.id, value.name, function () { setMessage('تم حفظ القسم وإعادة تعيين أصنافه.', 'success'); render(); }, function () { setMessage('تعذر حفظ القسم.', 'error'); });
+                adapters.renameMenuSection(section.id, value.name, function () { ui.close(); setMessage('تم حفظ القسم وإعادة تعيين أصنافه.', 'success'); render(); }, function () { ui.fail('تعذر حفظ القسم.'); });
                 return;
             }
             if (section) next.forEach(function (item) { if (item.id === section.id) item.name = value.name; });
             else next.push({ id: 'menu-section-' + Date.now(), name: value.name, order: next.length });
-            adapters.saveMenuSections(next, function () { setMessage('تم حفظ القسم.', 'success'); render(); }, function () { setMessage('تعذر حفظ القسم.', 'error'); });
+            adapters.saveMenuSections(next, function () { ui.close(); setMessage('تم حفظ القسم.', 'success'); render(); }, function () { ui.fail('تعذر حفظ القسم.'); });
         });
     }
 
@@ -176,34 +230,187 @@
         adapters.saveMenuSections(next, function () { setMessage('تم حذف القسم.', 'success'); render(); }, function () { setMessage('تعذر حذف القسم.', 'error'); });
     }
 
+    function managedVariantIndexes(product) {
+        return model.foodChoices(product).map(function (choice) { return choice.index; });
+    }
+
+    function variantRowTemplate(row, canRemove) {
+        return '<div class="restaurant-portion-row" data-row data-source-index="' + (row.sourceIndex == null ? '' : String(row.sourceIndex)) + '"><label>الحصة / الوزن<input data-row-field="label" placeholder="مثال: 100غ أو صغير" value="' + esc(row.label || '') + '"></label>' +
+            '<label>السعر<input data-row-field="price" type="number" step="0.01" min="0.01" value="' + esc(row.price) + '" placeholder="السعر"></label>' +
+            '<label>التكلفة<input data-row-field="cost" type="number" step="0.01" min="0" value="' + esc(row.cost) + '" placeholder="التكلفة"></label>' +
+            '<label>المخزون<input data-row-field="stock" type="number" step="1" min="0" value="' + esc(row.stock) + '" placeholder="المخزون"></label>' +
+            '<button type="button" class="btn-quiet btn-small" data-r-action="portion-remove"' + (canRemove ? '' : ' disabled') + '>حذف</button></div>';
+    }
+
+    function readVariantRows(container) {
+        return Array.prototype.map.call(container.querySelectorAll('[data-row]'), function (row) {
+            return {
+                sourceIndex: row.dataset.sourceIndex ? Number(row.dataset.sourceIndex) : null,
+                label: row.querySelector('[data-row-field="label"]').value.trim(),
+                price: row.querySelector('[data-row-field="price"]').value.trim(),
+                cost: row.querySelector('[data-row-field="cost"]').value.trim(),
+                stock: row.querySelector('[data-row-field="stock"]').value.trim()
+            };
+        });
+    }
+
     function editMenu(id) {
         if (!requireAdmin()) return;
         var product = id && adapters.products().find(function (item) { return String(item.id) === String(id); });
-        var variant = product && product.variants && product.variants[0] || {};
         var sectionOptions = menuSections().map(function (section) { return { value: section.name, label: section.name }; });
         if (!sectionOptions.length) return setMessage('أنشئ قسمًا للقائمة قبل إضافة صنف.', 'error');
-        var portions = (product && product.variants || []).map(function (item) { return (item.size || '') + ':' + Number(item.price || 0) + ':' + Number(item.stock || 0) + ':' + Number(item.cost || 0); }).join('\\n');
-        promptFields(product ? 'تعديل صنف القائمة' : 'صنف جديد في القائمة', [
-            { name: 'name', label: 'اسم الصنف', value: product && product.name, required: true },
-            { name: 'category', label: 'القسم', type: 'select', options: sectionOptions, value: product && product.category || sectionOptions[0].value, required: true },
-            { name: 'price', label: 'السعر', type: 'number', min: 0, step: '0.5', value: variant.price || '', required: true },
-            { name: 'available', label: 'متاح للبيع', type: 'select', options: [{ value: 'true', label: 'متاح' }, { value: 'false', label: 'غير متاح' }], value: product && product.status === 'disabled' ? 'false' : 'true' },
-            { name: 'portions', label: 'الحصص (اختياري: الاسم:السعر:المخزون:التكلفة، سطر لكل حصة)', type: 'textarea', value: portions }
-        ], function (value, fail) {
-            if (Number(value.price) < 0) return fail('تحقق من السعر.');
-            var lines = value.portions.split(/\\r?\\n/).map(function (line) { return line.trim(); }).filter(Boolean);
-            var existing = product && product.variants || [];
-            var variants = lines.length ? lines.map(function (line, index) {
-                var parts = line.split(':').map(function (part) { return part.trim(); });
-                if (!parts[0] || parts.length < 4 || Number(parts[1]) < 0 || Number(parts[2]) < 0 || Number(parts[3]) < 0) return null;
-                return Object.assign({}, existing[index] || {}, { color: (existing[index] || {}).color || 'افتراضي', size: parts[0], price: Number(parts[1]), stock: Number(parts[2]), cost: Number(parts[3]) });
-            }) : [Object.assign({}, existing[0] || {}, { color: (existing[0] || {}).color || 'افتراضي', size: (existing[0] || {}).size || 'حصة', price: Number(value.price), stock: Number((existing[0] || {}).stock || 0), cost: Number((existing[0] || {}).cost || 0) })];
-            if (variants.some(function (item) { return !item; })) return fail('اكتب كل حصة بالشكل: الاسم:السعر:المخزون:التكلفة.');
-            adapters.saveProduct({
-                id: product ? product.id : 'restaurant-' + Date.now(), name: value.name, category: value.category, type: value.category, brand: 'مطعم',
-                restaurantMenu: true, status: value.available === 'true' ? 'active' : 'disabled', variants: variants
-            }, function () { setMessage('تم حفظ صنف القائمة.', 'success'); render(); });
+        var existing = product && product.variants || [];
+        var editableIndexes = managedVariantIndexes(product);
+        var defaultRows = editableIndexes.map(function (index) {
+            var variant = existing[index] || {};
+            return {
+                sourceIndex: index,
+                label: String(variant.size || '').trim() || 'قياسية',
+                price: String(variant.price == null ? '' : variant.price),
+                cost: String(variant.cost == null ? '' : variant.cost),
+                stock: String(variant.stock == null ? '' : variant.stock)
+            };
         });
+        if (!defaultRows.length) defaultRows.push({ sourceIndex: null, label: 'قياسية', price: '', cost: '0', stock: '0' });
+        var selectedCategory = product && product.category || (state.category !== 'all' ? state.category : sectionOptions[0].value);
+        if (!sectionOptions.some(function (option) { return option.value === selectedCategory; })) selectedCategory = sectionOptions[0].value;
+
+        var previousFocus = document.activeElement;
+        var modal = document.createElement('div');
+        modal.className = 'modal-overlay restaurant-editor';
+        modal.style.display = 'flex';
+        modal.innerHTML = '<div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="restaurantMenuEditorTitle"><div class="modal-header"><h3 id="restaurantMenuEditorTitle">' + esc(product ? 'تعديل صنف القائمة' : 'صنف جديد في القائمة') + '</h3><button class="modal-close" type="button" data-r-close>&times;</button></div><form class="modal-body restaurant-form">' +
+            '<label>اسم الصنف<input name="name" required value="' + esc(product && product.name || '') + '"></label>' +
+            '<label>القسم<select name="category">' + sectionOptions.map(function (option) { return '<option value="' + esc(option.value) + '"' + (option.value === selectedCategory ? ' selected' : '') + '>' + esc(option.label) + '</option>'; }).join('') + '</select></label>' +
+            '<label>حالة الصنف<select name="available"><option value="true"' + (product && product.status === 'disabled' ? '' : ' selected') + '>متاح</option><option value="false"' + (product && product.status === 'disabled' ? ' selected' : '') + '>غير متاح</option></select></label>' +
+            '<div class="restaurant-portions-editor"><label>الأحجام والتسعير</label><small>أدخل كل حجم بسعره وتكلفته ومخزونه (مثال: 100غ، 150غ، 300غ)</small><div data-r-portions></div><button type="button" class="btn-secondary" data-r-action="portion-add">+ إضافة حجم</button></div>' +
+            '<div class="restaurant-inline-error" aria-live="polite"></div>' +
+            '<div class="modal-footer"><button class="btn-primary" type="submit">حفظ</button><button class="btn-secondary" type="button" data-r-close>إلغاء</button></div></form></div>';
+        document.body.appendChild(modal);
+
+        var form = modal.querySelector('form');
+        var rowHost = form.querySelector('[data-r-portions]');
+        var errorEl = form.querySelector('.restaurant-inline-error');
+        var saveButton = form.querySelector('.btn-primary');
+        var pending = false;
+
+        function setPending(next) {
+            pending = !!next;
+            saveButton.disabled = pending;
+            saveButton.textContent = pending ? 'جارٍ الحفظ...' : 'حفظ';
+        }
+        function fail(message) {
+            setPending(false);
+            errorEl.textContent = message || 'تعذر حفظ الصنف.';
+        }
+        function close() {
+            document.removeEventListener('keydown', onKeydown, true);
+            modal.remove();
+            if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+        }
+        function renderRows(rows) {
+            rowHost.innerHTML = rows.map(function (row) { return variantRowTemplate(row, rows.length > 1); }).join('');
+        }
+        function currentRows() {
+            return Array.prototype.map.call(rowHost.querySelectorAll('[data-row]'), function (row) {
+                return {
+                    sourceIndex: row.dataset.sourceIndex ? Number(row.dataset.sourceIndex) : null,
+                    label: row.querySelector('[data-row-field="label"]').value,
+                    price: row.querySelector('[data-row-field="price"]').value,
+                    cost: row.querySelector('[data-row-field="cost"]').value,
+                    stock: row.querySelector('[data-row-field="stock"]').value
+                };
+            });
+        }
+        function refreshRemoveButtons() {
+            var rows = rowHost.querySelectorAll('[data-row]');
+            Array.prototype.forEach.call(rows, function (row) {
+                var remove = row.querySelector('[data-r-action="portion-remove"]');
+                if (remove) remove.disabled = rows.length <= 1;
+            });
+        }
+        function onKeydown(event) {
+            if (event.key === 'Escape' && !pending) {
+                event.preventDefault();
+                close();
+            }
+        }
+        document.addEventListener('keydown', onKeydown, true);
+        modal.addEventListener('click', function (event) {
+            if (pending) return;
+            if (event.target === modal || event.target.closest('[data-r-close]')) close();
+            if (event.target.closest('[data-r-action="portion-add"]')) {
+                var rows = currentRows();
+                rows.push({ sourceIndex: null, label: '', price: '', cost: '0', stock: '0' });
+                renderRows(rows);
+                refreshRemoveButtons();
+                var inputs = rowHost.querySelectorAll('[data-row]');
+                var last = inputs[inputs.length - 1];
+                if (last) {
+                    var field = last.querySelector('[data-row-field="label"]');
+                    if (field) field.focus();
+                }
+            }
+            var removeButton = event.target.closest('[data-r-action="portion-remove"]');
+            if (removeButton) {
+                var rows = currentRows();
+                if (rows.length <= 1) return;
+                var rowNode = removeButton.closest('[data-row]');
+                var wrappers = Array.prototype.slice.call(rowHost.querySelectorAll('[data-row]'));
+                var removeIndex = wrappers.indexOf(rowNode);
+                if (removeIndex < 0) return;
+                rows.splice(removeIndex, 1);
+                renderRows(rows);
+                refreshRemoveButtons();
+            }
+        });
+
+        renderRows(defaultRows);
+        refreshRemoveButtons();
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            if (pending) return;
+            errorEl.textContent = '';
+            var name = String(form.querySelector('[name="name"]').value || '').trim();
+            var category = String(form.querySelector('[name="category"]').value || '').trim();
+            var available = form.querySelector('[name="available"]').value === 'true';
+            if (!name) return fail('اسم الصنف مطلوب.');
+            if (!category) return fail('القسم مطلوب.');
+            var rows = readVariantRows(rowHost);
+            if (!rows.length) return fail('أضف حجمًا واحدًا على الأقل.');
+            var labels = {};
+            for (var i = 0; i < rows.length; i += 1) {
+                var row = rows[i];
+                var label = normalizeLabel(row.label);
+                if (label && labels[label]) return fail('أسماء الأحجام يجب أن تكون فريدة.');
+                labels[label] = true;
+            }
+            var build = model.buildFoodVariants(existing, rows, editableIndexes);
+            if (!build.ok) return fail(build.errors[0]);
+            var next = {
+                id: product ? product.id : 'restaurant-' + Date.now(),
+                name: name,
+                category: category,
+                type: category,
+                brand: product && product.brand || 'مطعم',
+                restaurantMenu: true,
+                status: available ? 'active' : 'disabled',
+                variants: build.variants
+            };
+            setPending(true);
+            adapters.saveProduct(next, function () {
+                state.category = category;
+                close();
+                setMessage('تم حفظ صنف القائمة.', 'success');
+                render();
+            }, function () {
+                fail('تعذر حفظ صنف القائمة.');
+            });
+        });
+
+        var firstInput = form.querySelector('input,select,textarea,button');
+        if (firstInput) firstInput.focus();
     }
 
     function editOffer(id) {
@@ -211,17 +418,16 @@
         var offer = records('restaurant-offer').find(function (item) { return String(item.id) === String(id); }) || {};
         promptFields(offer.id ? 'تعديل العرض' : 'عرض جديد', [
             { name: 'name', label: 'اسم العرض', value: offer.name, required: true },
-            { name: 'discountType', label: 'نوع الخصم (percent أو amount)', value: offer.discountType || 'percent', required: true },
+            { name: 'discountType', label: 'نوع الخصم', type: 'select', options: [{ value: 'percent', label: 'نسبة %' }, { value: 'amount', label: 'مبلغ ثابت' }], value: offer.discountType || 'percent', required: true },
             { name: 'discountValue', label: 'قيمة الخصم', type: 'number', min: 0.01, step: '0.5', value: offer.discountValue || '', required: true },
             { name: 'maxDiscount', label: 'الحد الأقصى للخصم (0 بلا حد)', type: 'number', min: 0, step: '0.5', value: offer.maxDiscount || 0, required: true },
             { name: 'minQty', label: 'الحد الأدنى للكمية', type: 'number', min: 1, step: '1', value: offer.minQty || 1, required: true },
             { name: 'expiresOn', label: 'تاريخ الانتهاء (اختياري)', type: 'date', value: offer.expiresOn || '' },
-            { name: 'enabled', label: 'مفعّل؟ (true أو false)', value: offer.enabled === false ? 'false' : 'true', required: true }
-        ], function (value, fail) {
-            if (value.enabled !== 'true' && value.enabled !== 'false') return fail('حالة التفعيل يجب أن تكون true أو false.');
+            { name: 'enabled', label: 'حالة العرض', type: 'select', options: [{ value: 'true', label: 'مفعّل' }, { value: 'false', label: 'غير مفعّل' }], value: offer.enabled === false ? 'false' : 'true', required: true }
+        ], function (value, ui) {
             var next = { id: offer.id, recordType: 'restaurant-offer', name: value.name, discountType: value.discountType, discountValue: Number(value.discountValue), maxDiscount: Number(value.maxDiscount), minQty: Number(value.minQty), expiresOn: value.expiresOn, enabled: value.enabled === 'true' };
-            var errors = model.validateOffer(next); if (errors.length) return fail(errors[0]);
-            saveRecord(next, 'RO', 'تم حفظ العرض.');
+            var errors = model.validateOffer(next); if (errors.length) return ui.fail(errors[0]);
+            adapters.saveRecord(next, 'RO', function () { ui.close(); setMessage('تم حفظ العرض.', 'success'); render(); }, function () { ui.fail('تعذر حفظ العرض.'); });
         });
     }
 
@@ -236,8 +442,8 @@
     function saveEmployee(id) {
         if (!requireAdmin()) return;
         var employee = employeeRecords().find(function (item) { return String(item.id) === String(id); }) || {};
-        promptFields(employee.id ? 'تعديل موظف تجريبي' : 'موظف تجريبي جديد', [{ name: 'name', label: 'الاسم', value: employee.name, required: true }, { name: 'role', label: 'الدور', value: employee.role || 'طاقم خدمة', required: true }], function (value) {
-            saveRecord({ id: employee.id, recordType: 'restaurant-employee', name: value.name, role: value.role, demoDataVersion: model.DEMO_VERSION }, 'RE', 'تم حفظ الموظف التجريبي.');
+        promptFields(employee.id ? 'تعديل موظف تجريبي' : 'موظف تجريبي جديد', [{ name: 'name', label: 'الاسم', value: employee.name, required: true }, { name: 'role', label: 'الدور', value: employee.role || 'طاقم خدمة', required: true }], function (value, ui) {
+            adapters.saveRecord({ id: employee.id, recordType: 'restaurant-employee', name: value.name, role: value.role, demoDataVersion: model.DEMO_VERSION }, 'RE', function () { ui.close(); setMessage('تم حفظ الموظف التجريبي.', 'success'); render(); }, function () { ui.fail('تعذر حفظ الموظف التجريبي.'); });
         });
     }
 

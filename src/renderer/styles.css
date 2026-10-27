@@ -2078,18 +2078,24 @@ body {
 .restaurant-section-actions { display:flex; gap:6px; flex-wrap:wrap; }
 
 /* Restaurant order surface: a cashier workbench, not a reskinned retail catalog. */
-body.restaurant-mode .sales-layout { grid-template-columns:minmax(0, 1fr) minmax(292px, 360px); gap:14px; }
+body.restaurant-mode .sales-layout { display:grid; grid-template-columns:minmax(0, 1fr) minmax(292px, 360px); gap:14px; }
 body.restaurant-mode .products-panel { background:#faf6fb; border:1px solid #ddd5df; border-radius:12px; overflow:hidden; }
 body.restaurant-mode .panel-header { padding:16px 18px 10px; background:#fff; border-bottom:1px solid #e8dfeb; }
 body.restaurant-mode .panel-header h2 { color:#2f1238; }
-body.restaurant-mode .code-add-row { margin-top:10px; }
+body.restaurant-mode .code-add-row { display:none; }
 body.restaurant-mode .products-scroll { padding:14px; }
-.restaurant-order-intro { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 16px; padding:12px 14px; color:#3e1a4a; background:#f2e8f5; border-radius:10px; }
+body.restaurant-mode .products-grid { display:block; }
+.restaurant-order-intro { margin:0 0 12px; color:#674d6d; font-size:13px; }
 .restaurant-order-intro strong, .restaurant-order-intro span { display:block; }
 .restaurant-order-intro span { margin-top:3px; color:#674d6d; font-size:13px; }
 .restaurant-order-count { white-space:nowrap; font-weight:700; color:#48115b !important; }
-.restaurant-menu-section { margin:0 0 22px; }
-.restaurant-menu-section-title { display:flex; align-items:center; justify-content:space-between; margin:0 0 9px; }
+.restaurant-menu-section { margin:0 0 10px; border-bottom:1px solid #d8cddd; }
+.restaurant-menu-section-title { display:flex; align-items:center; gap:12px; padding:16px 8px; cursor:pointer; color:#2f1238; }
+.restaurant-menu-section-title::before { content:'›'; font-size:22px; transform:rotate(180deg); }
+.restaurant-menu-section[open] > summary::before { transform:rotate(90deg); }
+.restaurant-menu-section-title strong { flex:1; }
+.restaurant-menu-section .restaurant-item-grid { padding:0 0 16px; }
+.restaurant-menu-section-title:focus-visible, .restaurant-food-item:focus-visible { outline:3px solid #642279; outline-offset:2px; }
 .restaurant-menu-section-title h3 { margin:0; color:#2f1238; font-size:1rem; }
 .restaurant-menu-section-title span { min-width:28px; padding:3px 8px; color:#5f5361; background:#eee8ef; border-radius:999px; font-size:12px; text-align:center; }
 .restaurant-item-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
@@ -2104,6 +2110,48 @@ body.restaurant-mode .products-scroll { padding:14px; }
 .restaurant-portion-modal .variant-sizes { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:8px; }
 .restaurant-portion-option { min-height:52px; text-align:right; }
 body.restaurant-mode .cart-panel { border-color:#cdbbd2; }
+.restaurant-only { display:none; }
+body.restaurant-mode .restaurant-only { display:block; }
+.restaurant-service-panel { padding:12px 16px; background:#faf6fb; border-bottom:1px solid #ddd5df; }
+.restaurant-service-panel label { display:block; margin:6px 0 4px; color:#3e1a4a; font-size:12px; font-weight:700; }
+.restaurant-service-panel input, .restaurant-service-panel select, .restaurant-service-panel textarea { width:100%; min-height:36px; border:1px solid #b9a8bf; border-radius:6px; padding:6px 8px; font:inherit; font-size:13px; color:#211523; background:#fff; box-sizing:border-box; }
+.restaurant-service-panel summary { cursor:pointer; padding:10px 0 0; font-size:12px; font-weight:700; color:#48115b; }
+.restaurant-service-panel small { display:block; color:#5f5361; font-size:11px; margin-top:5px; }
+.restaurant-service-panel [hidden], #restaurantDeliveryRow[hidden] { display:none !important; }
+#restaurantServiceError { color:#9c1c22; font-size:12px; margin:8px 0 0; }
+.restaurant-portion-option:disabled { color:#6f6371; background:#eee8ef; cursor:not-allowed; }
+.restaurant-portions-editor, .restaurant-portions-editor [data-r-portions] { display:grid; gap:8px; }
+.restaurant-portion-row { display:grid; grid-template-columns:1.3fr repeat(3,minmax(75px,1fr)) auto; gap:8px; align-items:end; }
+.restaurant-portion-row input { min-width:0; width:100%; box-sizing:border-box; }
+.restaurant-inline-error { color:#a51d24; font-size:13px; min-height:18px; }
+.restaurant-editor .modal-content { width:min(760px, calc(100vw - 32px)); max-width:760px; max-height:calc(100vh - 40px); display:flex; flex-direction:column; overflow:hidden; }
+.restaurant-editor .modal-header { flex-shrink:0; }
+.restaurant-editor form { min-height:0; overflow:auto; }
+.restaurant-editor .modal-footer { position:sticky; bottom:0; background:#fff; padding:12px 0; }
+.restaurant-editor .btn-quiet { background:#fff; color:#48115b; border:1px solid #b9a8bf; }
+.restaurant-line-note { width:100%; min-width:0; margin-top:6px; padding:5px; box-sizing:border-box; border:1px solid #b9a8bf; border-radius:4px; background:#fff; color:#211523; font:inherit; font-size:12px; }
+.restaurant-line-note::placeholder { color:#65536a; }
+.restaurant-ticket-scroll { display:contents; }
+.cart-payment-details { display:contents; }
+body.restaurant-mode .cart-payment-details { display:block; max-height:240px; overflow:auto; margin-bottom:8px; }
+body.restaurant-mode .cart-payment-details > summary { cursor:pointer; padding:4px 0 8px; font-size:12px; color:#48115b; font-weight:700; }
+body.restaurant-mode .cart-panel { width:auto; min-width:0; min-height:0; overflow:hidden; }
+body.restaurant-mode .restaurant-ticket-scroll { display:block; flex:1; min-height:100px; overflow:auto; }
+body.restaurant-mode .cart-items { overflow:visible; }
+body.restaurant-mode .cart-header, body.restaurant-mode .cart-summary, body.restaurant-mode .cart-actions { flex-shrink:0; }
+body.restaurant-mode .cart-actions { padding:8px 12px; }
+body.restaurant-mode .cart-summary { padding:6px 12px; }
+body.restaurant-mode .cart-actions .bill-note-row, body.restaurant-mode .cart-actions .customer-attach-row { margin-bottom:6px; }
+body.restaurant-mode .cart-header { padding:10px 12px; }
+@media (max-height:800px) {
+    body.restaurant-mode .cart-payment-details { max-height:140px; }
+    body.restaurant-mode .cart-summary .summary-row { padding:3px 0; font-size:12px; }
+    body.restaurant-mode .cart-summary .summary-row.total { font-size:16px; }
+    body.restaurant-mode .restaurant-service-panel { padding:6px 12px; }
+}
+@media (max-width:600px) {
+    .restaurant-portion-row { grid-template-columns:repeat(2,minmax(0,1fr)); padding-bottom:12px; border-bottom:1px solid #ddd5df; }
+}
 body.restaurant-mode .cart-header h2::after { content:'طلب مفتوح'; display:inline-block; margin-inline-start:8px; padding:3px 7px; color:#5f5361; background:#f1edf2; border-radius:999px; font-size:11px; font-weight:600; vertical-align:middle; }
 @media (max-width:720px) {
     .restaurant-toolbar { flex-direction:column; }

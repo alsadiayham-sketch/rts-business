@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.11",
+  "version": "4.0.12",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
@@ -10,7 +10,8 @@
     "pack": "electron-builder --dir",
     "publish-update": "node scripts/publish-update.js",
     "release": "npm run build && npm run publish-update",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:restaurant-ui": "node test/electron/run.cjs"
   },
   "author": "Royal Technology Solutions",
   "license": "PROPRIETARY",

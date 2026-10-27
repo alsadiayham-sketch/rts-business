@@ -23,7 +23,7 @@
     }
 
     function menuSections(config, products) {
-        var seen = {}, names = {};
+        var seen = Object.create(null), names = Object.create(null);
         var sections = [];
         ((config && config.restaurantMenuSections) || []).forEach(function (section, index) {
             var name = String(section && section.name || '').trim();
@@ -50,18 +50,106 @@
     function foodChoices(product) {
         return (product && product.variants || []).map(function (variant, index) {
             return { variant: variant, index: index, label: String(variant && variant.size || '').trim() };
-        }).filter(function (choice) { return Number(choice.variant && choice.variant.stock || 0) > 0; });
+        }).filter(function (choice) {
+            var color = String(choice.variant && choice.variant.color || '').trim();
+            return !color || color === 'افتراضي';
+        });
     }
 
     function foodSelection(product) {
         var choices = foodChoices(product);
-        if (choices.length === 1) return { kind: 'direct', choice: choices[0] };
-        var labels = {}, configured = choices.length > 1;
+        var inStock = choices.filter(function (choice) { return Number(choice.variant && choice.variant.stock || 0) > 0; });
+        if (choices.length === 1) return inStock.length === 1 ? { kind: 'direct', choice: choices[0] } : { kind: 'configuration-required', choices: choices };
+        var labels = Object.create(null), configured = choices.length > 1;
         choices.forEach(function (choice) {
-            if (!choice.label || choice.label === 'افتراضي' || labels[choice.label]) configured = false;
-            labels[choice.label] = true;
+            var key = normalizedLabel(choice.label);
+            if (!choice.label || choice.label === 'افتراضي' || labels[key]) configured = false;
+            labels[key] = true;
         });
         return configured ? { kind: 'portions', choices: choices } : { kind: 'configuration-required', choices: choices };
+    }
+
+    function variantKey(variant) {
+        var color = String(variant && variant.color || '').trim();
+        var size = String(variant && variant.size || '').trim();
+        return color + '\u0000' + size;
+    }
+
+    function strictNumber(value) {
+        if (value == null) return null;
+        if (typeof value === 'string' && value.trim() === '') return null;
+        var parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function strictInteger(value) {
+        var parsed = strictNumber(value);
+        return parsed != null && Number.isInteger(parsed) ? parsed : null;
+    }
+
+    function normalizedLabel(value) {
+        return String(value || '').trim().normalize('NFKC').toLocaleLowerCase('ar');
+    }
+
+    function buildFoodVariants(existingVariants, rows, editableIndexes) {
+        var existing = Array.isArray(existingVariants) ? existingVariants : [];
+        var nextRows = Array.isArray(rows) ? rows : [];
+        var editable = (Array.isArray(editableIndexes) ? editableIndexes : []).filter(function (value, index, source) {
+            return Number.isInteger(value) && value >= 0 && value < existing.length && source.indexOf(value) === index;
+        });
+        var errors = [];
+        if (!nextRows.length) {
+            errors.push('يجب إدخال حصة واحدة على الأقل.');
+            return { ok: false, errors: errors, variants: existing.slice() };
+        }
+        var seenLabels = Object.create(null);
+        var created = [];
+        nextRows.forEach(function (row, rowIndex) {
+            var label = String((row && (row.label || row.size)) || '').trim();
+            var line = rowIndex + 1;
+            if (!label) errors.push('اسم الحصة مطلوب في السطر ' + line + '.');
+            var labelKey = normalizedLabel(label);
+            if (labelKey && seenLabels[labelKey]) errors.push('اسم الحصة «' + label + '» مكرر.');
+            seenLabels[labelKey] = true;
+
+            var price = strictNumber(row && row.price);
+            if (price == null || price <= 0) errors.push('سعر الحصة «' + (label || ('#' + line)) + '» يجب أن يكون أكبر من صفر.');
+
+            var stock = strictInteger(row && row.stock);
+            if (stock == null || stock < 0) errors.push('المخزون للحصة «' + (label || ('#' + line)) + '» يجب أن يكون رقمًا صحيحًا ≥ 0.');
+
+            var cost = strictNumber(row && row.cost);
+            if (cost == null || cost < 0) errors.push('تكلفة الحصة «' + (label || ('#' + line)) + '» يجب أن تكون رقمًا ≥ 0.');
+
+            var sourceIndex = Number.isInteger(row && row.sourceIndex) ? row.sourceIndex : null;
+            if (sourceIndex != null && editable.indexOf(sourceIndex) === -1) errors.push('لا يمكن تغيير حصة خارج قائمة الطعام.');
+            var base = sourceIndex != null && sourceIndex >= 0 && sourceIndex < existing.length ? existing[sourceIndex] : {};
+            created.push(Object.assign({}, base, {
+                color: Object.prototype.hasOwnProperty.call(base, 'color') ? base.color : 'افتراضي',
+                size: String(base.size || '').trim() === label ? base.size : (label || 'قياسية'),
+                price: price,
+                stock: stock,
+                cost: cost
+            }));
+        });
+        if (errors.length) return { ok: false, errors: errors, variants: existing.slice() };
+
+        var retained = existing.filter(function (_variant, index) {
+            return editable.indexOf(index) === -1;
+        }).map(function (variant) { return Object.assign({}, variant); });
+        var merged = retained.concat(created);
+        var seenKeys = Object.create(null);
+        merged.forEach(function (variant) {
+            var key = variantKey(variant);
+            if (typeof variant.color !== 'string' || !String(variant && variant.size || '').trim()) {
+                errors.push('كل الحصص يجب أن تحتوي على لون ومسمى صالحين.');
+                return;
+            }
+            if (seenKeys[key]) errors.push('يوجد تكرار في مفتاح المخزون للون/الحصة: ' + String(variant.size || ''));
+            seenKeys[key] = true;
+        });
+        if (errors.length) return { ok: false, errors: errors, variants: existing.slice() };
+        return { ok: true, errors: [], variants: merged };
     }
 
     function validateOffer(offer) {
@@ -179,7 +267,7 @@
         };
     }
 
-    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
+    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, buildFoodVariants: buildFoodVariants, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
         var fixture = buildRestaurantDemo();
         return { version: DEMO_VERSION, products: fixture.products.map(function (item) { return Object.assign({ id: item.id }, item.data); }), records: fixture.records.map(function (item) { return Object.assign({ id: item.id }, item.data); }) };
     } };
