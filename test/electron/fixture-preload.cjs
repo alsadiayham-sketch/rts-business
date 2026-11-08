@@ -44,9 +44,28 @@ const db = {
 const fixture = {
     writes,
     prints: [],
+    posEmployeeCalls: [],
+    failEmployeeGetOnce: false,
+    employeeUsers: [
+        { username: 'fixture-admin', name: 'مدير الاختبار', role: 'admin', active: true, canDelete: false, canDeactivate: false, canChangeRole: false },
+        { username: 'worker-1', name: 'موظف تجريبي', role: 'worker', active: true, canDelete: true, canDeactivate: true, canChangeRole: true }
+    ],
     seed(key, value) { documents.set(key, copy(value)); },
     read(key) { const value = documents.get(key); return value && copy(value); },
 };
+function employeeResponse() {
+    return {
+        users: fixture.employeeUsers.map(user => ({
+            username: user.username,
+            name: user.name,
+            role: user.role,
+            active: user.active !== false,
+            canDelete: user.canDelete !== false,
+            canDeactivate: user.canDeactivate !== false,
+            canChangeRole: user.canChangeRole !== false
+        }))
+    };
+}
 const fakeFirebase = {
     db: { collection: name => reference('projects/isolated-restaurant-fixture/' + name) },
     rawDb: db,
@@ -57,6 +76,50 @@ const fakeFirebase = {
     isD1: () => false,
     isMessagingConfigured: () => false,
     configurePosAuth: () => false,
+    isPosEmployeeManagementConfigured: () => true,
+    posEmployees: async (method, payload) => {
+        const verb = String(method || '').toUpperCase();
+        const body = payload || {};
+        fixture.posEmployeeCalls.push({ method: verb, payload: copy(body) });
+        if (verb === 'GET') {
+            if (fixture.failEmployeeGetOnce) {
+                fixture.failEmployeeGetOnce = false;
+                throw new Error('تعذر الوصول إلى خادم حسابات الموظفين.');
+            }
+            return employeeResponse();
+        }
+        const idx = fixture.employeeUsers.findIndex(user => user.username === body.username);
+        if (verb === 'POST') {
+            if (idx >= 0) {
+                fixture.employeeUsers[idx] = {
+                    ...fixture.employeeUsers[idx],
+                    name: body.name,
+                    role: body.role,
+                    active: fixture.employeeUsers[idx].active !== false
+                };
+            } else {
+                fixture.employeeUsers.push({
+                    username: body.username,
+                    name: body.name,
+                    role: body.role || 'worker',
+                    active: true,
+                    canDelete: true,
+                    canDeactivate: true,
+                    canChangeRole: true
+                });
+            }
+            return employeeResponse();
+        }
+        if (verb === 'PATCH') {
+            if (idx >= 0) fixture.employeeUsers[idx].active = !!body.active;
+            return employeeResponse();
+        }
+        if (verb === 'DELETE') {
+            if (idx >= 0 && fixture.employeeUsers[idx].canDelete !== false) fixture.employeeUsers.splice(idx, 1);
+            return employeeResponse();
+        }
+        throw new Error('Unsupported fixture employee method: ' + verb);
+    },
     serverTimestamp: () => new Date().toISOString(),
     publishOwnerTelemetry: async () => ({ ok: true }),
 };

@@ -301,6 +301,7 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate(`__fixture.writes.filter(w => /\\/orders\\/POS-/.test(w.key))[2].value.restaurantOrder.type`), 'takeaway');
         console.log('PASS: takeaway checkout persists pickup details.');
 
+        await waitFor('!!document.querySelector("[data-edit-menu-id=\\"hummus\\"]")');
         await evaluate(`
             closeModal('receiptModal');
             window.fixtureCartBeforeEdit = JSON.stringify(cart);
@@ -332,6 +333,7 @@ app.whenReady().then(async () => {
         await evaluate(`fixtureMenuSearch.setSelectionRange(0, 1);`);
         await win.webContents.insertText('ح');
         assert.equal(await evaluate('fixtureMenuSearch.value'), 'حمص', 'Selection replacement must retain the cursor.');
+        await waitFor('!!document.querySelector("[data-r-action=\\"menu-edit\\"][data-id=\\"hummus\\"]")');
         await evaluate(`
             fixtureMenuSearch.value = ''; fixtureMenuSearch.dispatchEvent(new Event('input', {bubbles:true}));
             document.querySelector('[data-r-action="menu-edit"][data-id="hummus"]').click();
@@ -476,6 +478,7 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), edited.image);
         await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click();`);
         assert.match(await evaluate('document.querySelector(".restaurant-inline-error").textContent'), /تعذر عرض/);
+        await waitFor('document.querySelectorAll(".restaurant-editor [data-r-action=\\"portion-remove\\"]").length >= 3');
         await evaluate(`
             document.querySelector('[data-r-action="image-remove"]').click();
             document.querySelectorAll('.restaurant-editor [data-r-action="portion-remove"]')[2].click();
@@ -485,12 +488,167 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').image`), '');
         assert.deepEqual(await evaluate(`__fixture.read('projects/isolated-restaurant-fixture/products/hummus').variants.map(v => v.price)`), [10, 18, 30]);
         assert.equal(await evaluate(`products.find(p => p.id === 'hummus').fixtureMetadata`), 'preserve-me');
+        await evaluate(`switchPage('restaurant');`);
+        await waitFor('!!document.querySelector("[data-r-tab=sections]")');
+        await evaluate(`
+            document.querySelector('[data-r-tab="sections"]').click();
+            document.querySelector('[data-r-action="section-edit"][data-id="mains"]').click();
+            document.querySelector('.restaurant-editor [name="name"]').value = 'وجبات رئيسية';
+            document.querySelector('[data-r-action="section-icon"][data-icon="🍔"]').click();
+            var sectionCanvas = document.createElement('canvas');
+            sectionCanvas.width = 600; sectionCanvas.height = 300;
+            sectionCanvas.getContext('2d').fillStyle = '#43115d';
+            sectionCanvas.getContext('2d').fillRect(0, 0, 600, 300);
+            var sectionBytes = Uint8Array.from(atob(sectionCanvas.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
+            var sectionFiles = new DataTransfer();
+            sectionFiles.items.add(new File([sectionBytes], 'section.png', {type:'image/png'}));
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = sectionFiles.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('document.querySelector(".restaurant-editor [data-image-status]").textContent.includes("جاهزة")');
+        assert.equal(await evaluate(`document.querySelector('.restaurant-editor [data-r-action="section-icon"][data-icon="🍔"]').classList.contains('active')`), true);
+        assert.equal(await evaluate(`document.querySelector('.restaurant-editor [data-image-preview]').hidden`), false);
+        await screenshot('restaurant-section-editor-media-desktop', 1440, 1000);
+        await screenshot('restaurant-section-editor-media-compact', 1024, 700);
+        await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click();`);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        assert.equal(await evaluate(`getMenuSections().find(s => s.id === 'mains').name`), 'وجبات رئيسية');
+        assert.equal(await evaluate(`getMenuSections().find(s => s.id === 'mains').icon`), '🍔');
+        assert.match(await evaluate(`getMenuSections().find(s => s.id === 'mains').image`), /^data:image\/webp;base64,/);
+        await evaluate(`
+            document.querySelector('[data-r-action="section-new"]').click();
+            document.querySelector('.restaurant-editor [name="name"]').value = 'حلويات';
+            document.querySelector('[data-r-action="section-icon"][data-icon="🍰"]').click();
+            var createSectionCanvas = document.createElement('canvas');
+            createSectionCanvas.width = 420; createSectionCanvas.height = 240;
+            createSectionCanvas.getContext('2d').fillStyle = '#7a2c89';
+            createSectionCanvas.getContext('2d').fillRect(0, 0, 420, 240);
+            var createSectionBytes = Uint8Array.from(atob(createSectionCanvas.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
+            var createSectionFiles = new DataTransfer();
+            createSectionFiles.items.add(new File([createSectionBytes], 'dessert.png', {type:'image/png'}));
+            document.querySelector('.restaurant-editor [name="imageFile"]').files = createSectionFiles.files;
+            document.querySelector('.restaurant-editor [name="imageFile"]').dispatchEvent(new Event('change', {bubbles:true}));
+        `);
+        await waitFor('document.querySelector(".restaurant-editor [data-image-status]").textContent.includes("جاهزة")');
+        await evaluate(`document.querySelector('.restaurant-editor button[type="submit"]').click();`);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        assert.equal(await evaluate(`getMenuSections().some(s => s.name === 'حلويات' && s.icon === '🍰')`), true);
+        assert.match(await evaluate(`(getMenuSections().find(s => s.name === 'حلويات') || {}).image || ''`), /^data:image\/webp;base64,/);
+        await evaluate(`switchPage('sales'); renderProducts();`);
+        assert.equal(await evaluate(`document.querySelector('.restaurant-menu-section-title .restaurant-section-photo') !== null`), true);
+        assert.equal(await evaluate(`document.querySelector('.restaurant-menu-section-title .restaurant-section-icon') === null`), true);
+        await screenshot('restaurant-section-header-desktop', 1440, 1000);
+        await screenshot('restaurant-section-header-compact', 1024, 700);
+        await evaluate(`
+            switchPage('restaurant');
+            document.querySelector('[data-r-tab="sections"]').click();
+            document.querySelector('[data-r-action="section-edit"][data-id="mains"]').click();
+            document.querySelector('[data-r-action="image-remove"]').click();
+            document.querySelector('.restaurant-editor button[type="submit"]').click();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        await evaluate(`switchPage('sales'); renderProducts();`);
+        assert.equal(await evaluate(`(getMenuSections().find(s => s.id === 'mains') || {}).image || ''`), '');
+        assert.equal(await evaluate(`(getMenuSections().find(s => s.id === 'mains') || {}).icon || ''`), '🍔');
+        assert.equal(await evaluate('currentUser.role'), 'admin');
+        await evaluate(`__fixture.failEmployeeGetOnce = true;`);
+        await evaluate(`switchPage('restaurant');`);
+        await waitFor('!!document.querySelector("[data-r-tab=\\"accounts\\"]")');
+        await evaluate(`
+            document.querySelector('[data-r-tab="accounts"]').click();
+        `);
+        await waitFor('document.querySelector("#restaurantWorkspace .restaurant-panel .restaurant-notice.error")');
+        assert.match(await evaluate(`document.querySelector("#restaurantWorkspace .restaurant-panel .restaurant-notice").textContent`), /تعذر/);
+        await evaluate(`document.querySelector('[data-r-action="accounts-reload"]').click();`);
+        await waitFor('document.querySelectorAll(".restaurant-account-row").length >= 2');
+        assert.equal(await evaluate(`document.querySelector('.restaurant-account-row strong').textContent`), 'fixture-admin');
+        await screenshot('restaurant-accounts-tab-desktop', 1440, 1000);
+        await screenshot('restaurant-accounts-tab-compact', 1024, 700);
+        await waitFor('!!document.querySelector("[data-r-action=\\"account-new\\"]")');
+        await evaluate(`
+            document.querySelector('[data-r-action="account-new"]').click();
+        `);
+        await waitFor('!!document.querySelector(".restaurant-editor [name=\\"username\\"]")');
+        await evaluate(`
+            document.querySelector('.restaurant-editor [name="username"]').value = 'worker-2';
+            document.querySelector('.restaurant-editor [name="name"]').value = 'موظف جديد';
+            document.querySelector('.restaurant-editor [name="role"]').value = 'worker';
+            document.querySelector('.restaurant-editor [name="password"]').value = '123456789012';
+            document.querySelector('.restaurant-editor .btn-primary').click();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        await waitFor('document.querySelectorAll(".restaurant-account-row").length >= 3');
+        await waitFor('!!document.querySelector("[data-r-action=\\"account-edit\\"][data-id=\\"worker-2\\"]")');
+        const accountCountBeforeEdit = await evaluate(`document.querySelectorAll(".restaurant-account-row").length`);
+        await evaluate(`
+            document.querySelector('[data-r-action="account-edit"][data-id="worker-2"]').click();
+        `);
+        await waitFor('!!document.querySelector(".restaurant-editor [name=\\"name\\"]")');
+        assert.equal(await evaluate(`document.querySelector('.restaurant-editor [name="username"]').readOnly`), true);
+        assert.match(await evaluate(`document.querySelector('.restaurant-editor .restaurant-field-note')?.textContent || ''`), /ثابت/);
+        await evaluate(`
+            document.querySelector('.restaurant-editor [name="username"]').value = 'worker-hacked';
+            document.querySelector('.restaurant-editor [name="name"]').value = 'موظف معدل';
+            document.querySelector('.restaurant-editor [name="role"]').value = 'admin';
+            document.querySelector('.restaurant-editor [name="password"]').value = '123456789999';
+            document.querySelector('.restaurant-editor .btn-primary').click();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor")');
+        assert.equal(await evaluate(`document.querySelectorAll(".restaurant-account-row").length`), accountCountBeforeEdit);
+        assert.equal(await evaluate(`!!__fixture.employeeUsers.find(u => u.username === 'worker-hacked')`), false);
+        assert.equal(await evaluate(`!!__fixture.employeeUsers.find(u => u.username === 'worker-2')`), true);
+        assert.equal(await evaluate(`__fixture.employeeUsers.find(u => u.username === 'worker-2').role`), 'admin');
+        assert.equal(await evaluate(`__fixture.employeeUsers.find(u => u.username === 'worker-2').name`), 'موظف معدل');
+        assert.equal(await evaluate(`__fixture.posEmployeeCalls.filter(c => c.method === 'POST').at(-1).payload.username`), 'worker-2');
+        assert.equal(await evaluate(`__fixture.posEmployeeCalls.filter(c => c.method === 'POST').at(-1).payload.password`), '123456789999');
+        await waitFor('!!document.querySelector("[data-r-action=\\"account-toggle\\"][data-id=\\"worker-2\\"]")');
+        await evaluate(`
+            window.__fixtureConfirm = window.confirm;
+            window.confirm = () => true;
+            document.querySelector('[data-r-action="account-toggle"][data-id="worker-2"]').click();
+        `);
+        await waitFor('__fixture.employeeUsers.find(u => u.username === "worker-2").active === false');
+        await waitFor('!!document.querySelector("[data-r-action=\\"account-delete\\"][data-id=\\"worker-2\\"]")');
+        await evaluate(`
+            document.querySelector('[data-r-action="account-delete"][data-id="worker-2"]').click();
+        `);
+        await waitFor('!__fixture.employeeUsers.find(u => u.username === "worker-2")');
+        await evaluate(`window.confirm = window.__fixtureConfirm; void 0;`);
+        assert.equal(await evaluate(`__fixture.posEmployeeCalls.some(c => c.method === 'POST')`), true);
+        assert.equal(await evaluate(`__fixture.posEmployeeCalls.some(c => c.method === 'PATCH')`), true);
+        assert.equal(await evaluate(`__fixture.posEmployeeCalls.some(c => c.method === 'DELETE')`), true);
         await evaluate(`
             currentUser.role = 'cashier'; syncRestaurantWorkspace();
             applyBusinessSurface();
         `);
-        assert.equal(await evaluate('document.querySelector("[data-r-action=menu-new]").disabled'), true);
+        assert.equal(await evaluate('!document.querySelector("[data-r-action=menu-new]") || document.querySelector("[data-r-action=menu-new]").disabled'), true);
         assert.equal(await evaluate('document.getElementById("restaurantManageMenuBtn").style.display'), 'none');
+        assert.equal(await evaluate('document.querySelectorAll("#restaurantWorkspace [data-r-tab]").length'), 1);
+        assert.equal(await evaluate('document.querySelector("#restaurantWorkspace [data-r-tab]").dataset.rTab'), 'tables');
+        await evaluate(`switchPage('reports');`);
+        assert.equal(await evaluate('currentPage'), 'sales');
+        await evaluate(`runShortcutAction('page-settings');`);
+        assert.equal(await evaluate('currentPage'), 'sales');
+        await evaluate(`document.getElementById('todaySales').textContent = 'محجوب'; updateReports();`);
+        assert.equal(await evaluate(`document.getElementById('todaySales').textContent`), 'محجوب');
+        await evaluate(`if (typeof _closeConfirm === 'function') _closeConfirm();`);
+        await evaluate(`
+            var host = document.getElementById('restaurantWorkspace');
+            var actionCount = __fixture.posEmployeeCalls.length;
+            var fakeAccountBtn = document.createElement('button');
+            fakeAccountBtn.dataset.rAction = 'account-new';
+            host.appendChild(fakeAccountBtn);
+            fakeAccountBtn.click();
+            fakeAccountBtn.remove();
+            var fakeSectionBtn = document.createElement('button');
+            fakeSectionBtn.dataset.rAction = 'section-new';
+            host.appendChild(fakeSectionBtn);
+            fakeSectionBtn.click();
+            fakeSectionBtn.remove();
+            window.__workerGuard = { actionCountBefore: actionCount, actionCountAfter: __fixture.posEmployeeCalls.length };
+        `);
+        assert.equal(await evaluate('__workerGuard.actionCountAfter'), await evaluate('__workerGuard.actionCountBefore'));
+        assert.equal(await evaluate('!!document.querySelector(".restaurant-editor")'), false);
         await evaluate(`renderProducts();`);
         assert.equal(await evaluate('document.querySelectorAll("[data-edit-menu-id]").length'), 0);
         console.log('PASS: existing item name/description/photo upload and removal, size add/edit/remove, save retry, metadata preservation and role restrictions.');
@@ -550,7 +708,9 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate('window.__fixture.error || null'), null);
         console.log('PASS: retail color/size ordering remains intact; no renderer exceptions.');
     } catch (error) {
-        if (win) console.error('Renderer exception:', await evaluate('window.__fixture && window.__fixture.error').catch(() => 'unavailable'));
+        if (win) {
+            console.error('Renderer exception:', await evaluate('window.__fixture && window.__fixture.error').catch(() => 'unavailable'));
+        }
         console.error(error.stack || error);
         process.exitCode = 1;
     } finally {

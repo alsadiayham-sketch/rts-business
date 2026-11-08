@@ -35,7 +35,8 @@ function appHarness() {
                 db, rawDb: {}, firebase, storage: {}, setProjectId() {}, getProjectId() { return 'test'; }, isD1() { return false; },
                 registerD1Tenant() {}, registerD1MessagingBackend() {}, isMessagingConfigured() { return false; },
                 messagingGetStatus() {}, messagingPreviewAudience() {}, messagingRequestCredits() {}, messagingSend() {}, messagingUpdatePricing() {},
-                serverTimestamp() {}, posAuthenticate() {}, configurePosAuth() { return false; }, publishOwnerTelemetry() {}
+                serverTimestamp() {}, posAuthenticate() {}, configurePosAuth() { return false; }, publishOwnerTelemetry() {},
+                posEmployees() { return Promise.resolve({ users: [] }); }, isPosEmployeeManagementConfigured() { return true; }
             };
             if (request === './owner-telemetry') return { emptyAuditCounts() { return {}; } };
             if (request === 'electron') return { ipcRenderer: { invoke() { return Promise.resolve(); } } };
@@ -113,8 +114,8 @@ test('authoritative shop mode overrides a stale legacy restaurant add-on', () =>
 test('restaurant menu sections preserve configured ids and order while adopting legacy product categories', () => {
     const sections = model.menuSections({
         restaurantMenuSections: [
-            { id: 'drinks', name: 'مشروبات', order: 2 },
-            { id: 'mains', name: 'أطباق رئيسية', order: 0 }
+            { id: 'drinks', name: 'مشروبات', order: 2, icon: '☕', image: 'https://cdn.example.test/drinks.webp' },
+            { id: 'mains', name: 'أطباق رئيسية', order: 0, icon: 'javascript:bad()', image: 'file:///private.png' }
         ]
     }, [
         { category: 'حلويات' },
@@ -123,6 +124,10 @@ test('restaurant menu sections preserve configured ids and order while adopting 
     assert.deepEqual(sections.map(section => section.name), ['أطباق رئيسية', 'مشروبات', 'حلويات']);
     assert.equal(sections[0].id, 'mains');
     assert.equal(sections[2].id, 'legacy-حلويات');
+    assert.equal(sections[0].icon, '');
+    assert.equal(sections[0].image, '');
+    assert.equal(sections[1].icon, '☕');
+    assert.equal(sections[1].image, 'https://cdn.example.test/drinks.webp');
 });
 
 test('Node VM config adapter saves ordered menu sections without persisting business mode', async () => {
@@ -140,11 +145,31 @@ test('Node VM config adapter saves ordered menu sections without persisting busi
     });
     const saved = writes.find(write => write.name === 'orders').record;
     assert.deepEqual(JSON.parse(JSON.stringify(saved.restaurantMenuSections)), [
-        { id: 'drinks', name: 'مشروبات', order: 0 },
-        { id: 'mains', name: 'رئيسية', order: 1 }
+        { id: 'drinks', name: 'مشروبات', order: 0, icon: '', image: '' },
+        { id: 'mains', name: 'رئيسية', order: 1, icon: '', image: '' }
     ]);
     assert.equal(Object.hasOwn(saved, 'businessType'), false);
     assert.deepEqual(JSON.parse(JSON.stringify(sandbox.getMenuSections())).map(section => section.name), ['مشروبات', 'رئيسية']);
+});
+
+test('restaurant worker cannot switch to restricted pages even through direct calls', () => {
+    const { sandbox } = appHarness();
+    vm.runInContext(`
+        currentUser = { username: 'worker', role: 'worker' };
+        licensedBusinessType = 'restaurant';
+        switchPage('reports');
+    `, sandbox);
+    assert.equal(vm.runInContext('currentPage', sandbox), 'sales');
+});
+
+test('restaurant workers are blocked from restricted shortcuts in restaurant mode', () => {
+    const { sandbox } = appHarness();
+    vm.runInContext(`
+        currentUser = { username: 'worker', role: 'worker' };
+        licensedBusinessType = 'restaurant';
+        runShortcutAction('page-settings');
+    `, sandbox);
+    assert.equal(vm.runInContext('currentPage', sandbox), 'sales');
 });
 
 test('a standard burger with no configured color selector resolves directly to its actual variant', () => {
@@ -206,6 +231,29 @@ test('Node VM sales adapter directly adds a no-color burger and retains retail c
     assert.match(sandbox.document.getElementById('variantColors').innerHTML, /data-color="أحمر"/);
     assert.match(sandbox.document.getElementById('variantColors').innerHTML, /data-color="أزرق"/);
     assert.equal(sandbox.document.getElementById('addToCartFromModal').disabled, true);
+});
+
+test('login and sidebar version labels are sourced from package version', () => {
+    const { sandbox, elements } = appHarness();
+    vm.runInContext('showLogin();', sandbox);
+    assert.equal(elements.get('loginAppVersion').textContent, 'الإصدار v4.0.10');
+    assert.equal(elements.get('appVersion').textContent, 'v4.0.10');
+});
+
+test('restaurant workers cannot access financial report aggregates through direct APIs', () => {
+    const { sandbox } = appHarness();
+    sandbox.document.getElementById('todaySales').textContent = 'locked';
+    vm.runInContext(`
+        currentUser = { username: 'worker', role: 'worker' };
+        licensedBusinessType = 'restaurant';
+        bills = [{
+            total: 125,
+            createdAt: { toDate: function () { return new Date(); } },
+            items: [{ price: 25, qty: 1, total: 25 }]
+        }];
+        updateReports();
+    `, sandbox);
+    assert.equal(sandbox.document.getElementById('todaySales').textContent, 'locked');
 });
 
 test('fixture is deterministic and tags every generated payload as demo data', () => {

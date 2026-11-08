@@ -17,6 +17,8 @@ var messagingUpdatePricing = fbConfig.messagingUpdatePricing;
 var serverTimestamp = fbConfig.serverTimestamp;
 var posAuthenticate = fbConfig.posAuthenticate;
 var configurePosAuth = fbConfig.configurePosAuth;
+var posEmployees = fbConfig.posEmployees;
+var isPosEmployeeManagementConfigured = fbConfig.isPosEmployeeManagementConfigured;
 var publishOwnerTelemetry = fbConfig.publishOwnerTelemetry;
 var ownerTelemetryHelper = require('./owner-telemetry');
 var electron = require('electron');
@@ -27,6 +29,13 @@ var restaurantServiceModel = require('./restaurant-service');
 
 // App version from package.json
 var APP_VERSION = require('../../package.json').version;
+function applyAppVersionLabels() {
+    var label = 'v' + APP_VERSION;
+    var appVersionEl = document.getElementById('appVersion');
+    if (appVersionEl) appVersionEl.textContent = label;
+    var loginVersionEl = document.getElementById('loginAppVersion');
+    if (loginVersionEl) loginVersionEl.textContent = 'الإصدار ' + label;
+}
 
 // ============ STATE ============
 var products = [];
@@ -206,6 +215,7 @@ function applyBusinessSurface() {
     if (restaurantPage) restaurantPage.style.display = restaurant && currentPage === 'restaurant' ? '' : (currentPage === 'restaurant' ? 'none' : restaurantPage.style.display);
     if (!restaurant && currentPage === 'restaurant') switchPage('sales');
     if (restaurant) updateRestaurantService();
+    applyRoleVisibility();
     renderProducts();
 }
 
@@ -257,6 +267,7 @@ function showLicenseExpired(date) {
 function showLogin() {
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
+    applyAppVersionLabels();
     // Auto-fill store name from last session
     var savedStore = '';
     try { savedStore = localStorage.getItem('ada_pos_store') || ''; } catch (e) {}
@@ -321,7 +332,7 @@ function attemptLogin() {
             return posAuthenticate(username, password, storeName).then(function (user) {
                 return { __d1user: user };
             }).catch(function (e) {
-                if (e.status === 401 || e.status === 403) return { __authFailed: true };
+                if (e.status === 401 || e.status === 403 || e.status === 429) return { __authFailed: true, __authMessage: require('./server-auth').loginErrorMessage(e) };
                 throw e;
             });
         }
@@ -339,7 +350,7 @@ function attemptLogin() {
         if (doc.__d1user || doc.__authFailed) {
             // Server-side auth result, independent of the data-storage backend.
             if (doc.__authFailed || !doc.__d1user) {
-                errorEl.textContent = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+                errorEl.textContent = doc.__authMessage || 'تعذر تسجيل الدخول. تحقق من رمز المتجر وبيانات الحساب.';
                 loginBtn.textContent = 'دخول';
                 loginBtn.disabled = false;
                 return;
@@ -763,11 +774,52 @@ function _promptConfirm() {
 function isAdmin() {
     return !!(currentUser && currentUser.role === 'admin');
 }
+function isRestaurantWorkerSession() {
+    return isRestaurantMode() && !isAdmin();
+}
+function requireFinancialReportAccess() {
+    return requireRoleAccess({ blockRestaurantWorker: true, message: 'تقارير الملخص المالي متاحة للمدير فقط في وضع المطعم.' });
+}
+var RESTAURANT_WORKER_ALLOWED_PAGES = { sales: true, restaurant: true, bills: true };
+var RESTAURANT_WORKER_RESTRICTED_PAGE_SELECTORS = [
+    '[data-page="inventory"]',
+    '[data-page="damage"]',
+    '[data-page="returns"]',
+    '[data-page="debts"]',
+    '[data-page="customers"]',
+    '[data-page="reports"]',
+    '[data-page="stats"]',
+    '[data-page="settings"]',
+    '[data-page="suppliers"]',
+    '[data-page="stocktake"]',
+    '[data-page="hookah"]',
+    '[data-page="messaging"]'
+];
+function canAccessPage(page) {
+    if (!isRestaurantWorkerSession()) return true;
+    return !!RESTAURANT_WORKER_ALLOWED_PAGES[page];
+}
+function requireRoleAccess(options) {
+    options = options || {};
+    if (!isRestaurantWorkerSession()) return true;
+    if (options.adminOnly || options.blockRestaurantWorker) {
+        showAlert(options.message || 'هذه الميزة متاحة للمدير فقط في وضع المطعم.', { icon: '🔒', title: 'غير مصرّح' });
+        return false;
+    }
+    return true;
+}
 function applyRoleVisibility() {
     var btn = document.getElementById('closeDayBtn');
     if (btn) btn.style.display = isAdmin() ? 'inline-flex' : 'none';
     var messagingNav = document.querySelector('.nav-btn[data-page="messaging"]');
     if (messagingNav) messagingNav.style.display = isAdmin() && isFeatureOn('messaging') ? 'flex' : 'none';
+    var worker = isRestaurantWorkerSession();
+    for (var i = 0; i < RESTAURANT_WORKER_RESTRICTED_PAGE_SELECTORS.length; i++) {
+        var nav = document.querySelector('.nav-btn' + RESTAURANT_WORKER_RESTRICTED_PAGE_SELECTORS[i]);
+        if (!nav) continue;
+        if (worker) nav.style.display = 'none';
+        else if (/inventory|damage|returns|debts|customers|reports|stats|settings/.test(RESTAURANT_WORKER_RESTRICTED_PAGE_SELECTORS[i])) nav.style.display = '';
+    }
 }
 
 // ============ WORK DAY / SHIFT (per terminal) ============
@@ -1208,8 +1260,13 @@ function renderRestaurantOrder() {
     sections.forEach(function (section) {
         var items = grouped[section.name] || [];
         if (!items.length && query) return;
+        var sectionImage = window.RestaurantModel && window.RestaurantModel.menuImageSource ? window.RestaurantModel.menuImageSource(section.image) : '';
+        var sectionIcon = window.RestaurantModel && window.RestaurantModel.menuSectionIcon ? window.RestaurantModel.menuSectionIcon(section.icon) : '';
+        var visual = sectionImage
+            ? '<img class="restaurant-section-photo" data-menu-image src="' + escapeHtml(sectionImage) + '" alt="" loading="lazy" referrerpolicy="no-referrer">'
+            : (sectionIcon ? '<span class="restaurant-section-icon" aria-hidden="true">' + escapeHtml(sectionIcon) + '</span>' : '');
         html += '<details class="restaurant-menu-section" data-section-id="' + escapeHtml(section.id) + '"' +
-            (query || restaurantExpandedSections[section.id] ? ' open' : '') + '><summary class="restaurant-menu-section-title"><strong>' +
+            (query || restaurantExpandedSections[section.id] ? ' open' : '') + '><summary class="restaurant-menu-section-title">' + visual + '<strong>' +
             escapeHtml(section.name) + '</strong><span>' + items.length + ' صنف</span></summary><div class="restaurant-item-grid">';
         items.forEach(function (product) {
             var selection = window.RestaurantModel.foodSelection(product);
@@ -2939,6 +2996,7 @@ function exportInventory() {
 
 // ============ ADD STOCK ============
 function openAddStockForm() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     document.getElementById('addStockForm').style.display = 'block';
     var select = document.getElementById('stockProduct');
     var html = '<option value="">اختر المنتج</option>';
@@ -3010,6 +3068,7 @@ function populateStockSizes() {
 }
 
 function saveAddStock() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var productId = document.getElementById('stockProduct').value;
     var color = document.getElementById('stockColor').value;
     var size = document.getElementById('stockSize').value;
@@ -3072,6 +3131,7 @@ function renderDamageHistory() {
 }
 
 function openDamageForm() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     document.getElementById('damageForm').style.display = 'block';
     populateDamageProducts();
 }
@@ -3115,6 +3175,7 @@ function populateDamageSizes() {
 }
 
 function saveDamage() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var productId = document.getElementById('damageProduct').value;
     var color = document.getElementById('damageColor').value;
     var size = document.getElementById('damageSize').value;
@@ -3344,6 +3405,7 @@ function buildBillModificationsHTML(bill) {
 
 // ============ REPORTS ============
 function updateReports() {
+    if (!requireFinancialReportAccess()) return;
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -3499,6 +3561,7 @@ function lookupBrand(item) {
 
 var lastStatsData = null;
 function runStats() {
+    if (!requireFinancialReportAccess()) return;
     var fromVal = document.getElementById('statsFrom').value;
     var toVal = document.getElementById('statsTo').value;
     if (!fromVal || !toVal) { showAlert('يرجى اختيار تاريخ البداية والنهاية', { icon: '⚠️', title: 'تنبيه' }); return; }
@@ -3560,6 +3623,7 @@ function renderStatsResults(data) {
 }
 
 function printStats() {
+    if (!requireFinancialReportAccess()) return;
     if (!lastStatsData) { showAlert('اعرض الإحصائيات أولاً قبل الطباعة', { icon: '⚠️', title: 'تنبيه' }); return; }
     var d = lastStatsData;
     var inner = '';
@@ -3589,6 +3653,7 @@ function logTimeMs(entry) {
 
 var lastMonthlyData = null;
 function runMonthlyCheck() {
+    if (!requireFinancialReportAccess()) return;
     var mVal = document.getElementById('monthlyMonth').value; // yyyy-mm
     if (!mVal) { showAlert('يرجى اختيار الشهر', { icon: '⚠️', title: 'تنبيه' }); return; }
     var parts = mVal.split('-');
@@ -3703,6 +3768,7 @@ function renderMonthlyResults(data) {
 }
 
 function printMonthly() {
+    if (!requireFinancialReportAccess()) return;
     if (!lastMonthlyData) { showAlert('أنشئ الجرد أولاً قبل الطباعة', { icon: '⚠️', title: 'تنبيه' }); return; }
     var d = lastMonthlyData;
     var totBought = 0, totSold = 0;
@@ -3745,6 +3811,10 @@ function setStatsQuickRange(range) {
 
 // ============ NAVIGATION ============
 function switchPage(page) {
+    if (!canAccessPage(page)) {
+        showAlert('صلاحية موظف المطعم تقتصر على البيع والطاولات والفواتير للعرض وإعادة الطباعة.', { icon: '🔒', title: 'غير مصرّح' });
+        page = 'sales';
+    }
     currentPage = page;
     var pages = document.querySelectorAll('.page');
     var btns = document.querySelectorAll('.nav-btn');
@@ -4738,6 +4808,17 @@ function setPaymentMethod(method) {
 }
 function runShortcutAction(action) {
     if (checkoutInFlight) return;
+    if (isRestaurantWorkerSession()) {
+        var allowed = {
+            'focus-search': true, 'focus-code': true, 'checkout': true, 'clear-cart': true, 'toggle-payment': true,
+            'page-sales': true, 'page-bills': true, 'page-restaurant': true, 'hold-sale': true, 'resume-sale': true,
+            'open-drawer': true, 'reprint-last': true
+        };
+        if (!allowed[action]) {
+            showAlert('هذا الاختصار غير متاح لموظف المطعم.', { icon: '🔒', title: 'غير مصرّح' });
+            return;
+        }
+    }
     switch (action) {
         case 'focus-search': switchPage('sales'); var s = document.getElementById('productSearch'); if (s) { s.focus(); s.select(); } break;
         case 'focus-code': switchPage('sales'); var c = document.getElementById('codeAddInput'); if (c) c.focus(); break;
@@ -4969,12 +5050,14 @@ function saveRestaurantRecord(record, idPrefix, onOk, onErr) {
 }
 function syncRestaurantWorkspace() {
     if (!window.RestaurantWorkspace || !isRestaurantMode()) return;
+    var sessionId = storeSessionId;
     window.RestaurantWorkspace.init({
         records: function () { return restaurantRecords.slice(); },
         products: function () { return products.slice(); },
         customers: function () { return customerList(); },
         cart: function () { return cart.slice(); },
         isAdmin: isAdmin,
+        canManage: function () { return !isRestaurantWorkerSession(); },
         saveRecord: saveRestaurantRecord,
         saveProduct: saveRestaurantMenuProduct,
         applyOffer: function (offer, discount) {
@@ -4992,7 +5075,18 @@ function syncRestaurantWorkspace() {
         menuSections: function () { return getMenuSections(); },
         saveMenuSections: saveMenuSections,
         renameMenuSection: renameMenuSection,
-        addFoodProduct: addRestaurantFoodToCart
+        addFoodProduct: addRestaurantFoodToCart,
+        isPosEmployeeManagementConfigured: function () {
+            return typeof isPosEmployeeManagementConfigured === 'function' && !!isPosEmployeeManagementConfigured();
+        },
+        posEmployees: function (method, payload) {
+            if (!isActiveStoreSession(sessionId)) return Promise.reject(new Error('تم تبديل المتجر، أعد تحميل بيانات الموظفين.'));
+            if (typeof posEmployees !== 'function') return Promise.reject(new Error('خدمة حسابات الموظفين غير متاحة.'));
+            return posEmployees(method, payload).then(function (result) {
+                if (!isActiveStoreSession(sessionId)) throw new Error('تم تبديل المتجر، تجاهّلنا الاستجابة السابقة.');
+                return result || {};
+            });
+        }
     });
 }
 
@@ -5240,19 +5334,41 @@ function getMenuSections() {
     var config = getStoreConfig();
     return model && model.menuSections ? model.menuSections(config, products) : [];
 }
+function normalizedMenuSections(sections) {
+    var model = window.RestaurantModel;
+    return (sections || []).map(function (section, index) {
+        return {
+            id: String(section && section.id || '').trim(),
+            name: String(section && section.name || '').trim(),
+            order: Number.isFinite(Number(section && section.order)) ? Number(section.order) : index,
+            icon: model && model.menuSectionIcon ? model.menuSectionIcon(section && section.icon) : '',
+            image: model && model.menuImageSource ? model.menuImageSource(section && section.image) : ''
+        };
+    }).filter(function (section) { return section.id && section.name; });
+}
 function saveMenuSections(sections, onOk, onErr) {
     if (!isAdmin()) { if (onErr) onErr(); return; }
+    var normalized = normalizedMenuSections(sections);
     var s = getStoreConfig();
-    saveStoreConfig({ features: s.features, taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, restaurantMenuSections: sections }, function () {
-        storeConfig = Object.assign({ recordType: 'store-config' }, s, { restaurantMenuSections: sections });
+    saveStoreConfig({ features: s.features, taxPercent: s.taxPercent, taxIncluded: s.taxIncluded, restaurantMenuSections: normalized }, function () {
+        storeConfig = Object.assign({ recordType: 'store-config' }, s, { restaurantMenuSections: normalized });
         if (onOk) onOk();
     });
 }
-function renameMenuSection(sectionId, nextName, onOk, onErr) {
+function renameMenuSection(sectionId, nextName, nextSectionOrOk, onOkOrErr, onErrMaybe) {
+    var nextSection = null;
+    var onOk = onOkOrErr;
+    var onErr = onErrMaybe;
+    if (typeof nextSectionOrOk === 'function') {
+        onOk = nextSectionOrOk;
+        onErr = onOkOrErr;
+    } else {
+        nextSection = nextSectionOrOk || {};
+    }
     if (!isAdmin()) { if (onErr) onErr(); return; }
     var sections = getMenuSections().map(function (section) { return Object.assign({}, section); });
     var section = sections.find(function (item) { return item.id === sectionId; });
-    if (!section || !nextName || section.name === nextName) { if (onOk) onOk(); return; }
+    if (!section || !nextName) { if (onOk) onOk(); return; }
     var previousName = section.name;
     var affected = products.filter(function (product) { return (product.category || product.type) === previousName; });
     Promise.all(affected.map(function (product) {
@@ -5260,6 +5376,11 @@ function renameMenuSection(sectionId, nextName, onOk, onErr) {
         return db.collection('products').doc(product.id).set(next);
     })).then(function () {
         section.name = nextName;
+        if (nextSection) {
+            section.icon = nextSection.icon;
+            section.image = nextSection.image;
+            if (Number.isFinite(Number(nextSection.order))) section.order = Number(nextSection.order);
+        }
         saveMenuSections(sections, onOk, onErr);
     }).catch(function (error) { if (onErr) onErr(error); });
 }
@@ -6444,6 +6565,7 @@ function switchSettingsTab(tab) {
     }
 }
 function switchReportsTab(tab) {
+    if (!requireFinancialReportAccess()) return;
     if (!tab) return;
     var root = document.getElementById('page-reports');
     if (!root) return;
@@ -7486,12 +7608,14 @@ function saveMessagingPricing() {
 
 // ============ PERSONAL WITHDRAWALS ============
 function openWithdrawModal() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     document.getElementById('withdrawAmount').value = '';
     document.getElementById('withdrawReason').value = '';
     document.getElementById('withdrawWho').value = currentUser ? (currentUser.displayName || currentUser.username || '') : '';
     openModal('withdrawModal');
 }
 function saveWithdrawal() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var amount = parseFloat(document.getElementById('withdrawAmount').value) || 0;
     if (amount <= 0) { showAlert('أدخل مبلغاً صحيحاً', { icon: '⚠️', title: 'تنبيه' }); return; }
     var who = document.getElementById('withdrawWho').value.trim() || (currentUser ? currentUser.username : '');
@@ -7527,12 +7651,14 @@ function renderWithdrawals(since) {
 
 // ============ CASH-IN / DEPOSITS (إيداع) ============
 function openDepositModal() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     document.getElementById('depositAmount').value = '';
     document.getElementById('depositReason').value = '';
     document.getElementById('depositWho').value = currentUser ? (currentUser.displayName || currentUser.username || '') : '';
     openModal('depositModal');
 }
 function saveDeposit() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var amount = parseFloat(document.getElementById('depositAmount').value) || 0;
     if (amount <= 0) { showAlert('أدخل مبلغاً صحيحاً', { icon: '⚠️', title: 'تنبيه' }); return; }
     var who = document.getElementById('depositWho').value.trim() || (currentUser ? currentUser.username : '');
@@ -7749,6 +7875,7 @@ function saveSettleDebt() {
 
 // ============ RETURNS / EXCHANGES ============
 function loadReturnBill() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var term = document.getElementById('returnBillSearch').value.trim();
     if (!term) return;
     var digits = term.replace(/\D/g, '').replace(/^0+/, '');
@@ -7873,6 +8000,7 @@ function recomputeReturnSummary() {
     updateReturnMethodOptions(n.net);
 }
 function saveReturn() {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var n = computeReturnNumbers();
     if (n.returned.length === 0 && returnReplaceCart.length === 0) {
         showAlert('اختر صنفاً مرتجعاً واحداً على الأقل', { icon: '⚠️', title: 'تنبيه' }); return;
@@ -7900,6 +8028,7 @@ function saveReturn() {
     performReturn(n, method, direction, null);
 }
 function performReturn(n, method, direction, debtCustomer) {
+    if (!requireRoleAccess({ blockRestaurantWorker: true })) return;
     var btn = document.getElementById('saveReturnBtn');
     btn.disabled = true; btn.textContent = 'جاري التنفيذ...';
 
@@ -8136,6 +8265,7 @@ function resumeHeld(i) {
     switchPage('sales');
 }
 function deleteHeld(i) {
+    if (!requireRoleAccess({ blockRestaurantWorker: true, message: 'حذف الطلبات المحفوظة متاح للمدير فقط.' })) return;
     if (checkoutInFlight || !heldSales[i]) return;
     var id = heldSales[i].id;
     showConfirm('حذف الطلب المحفوظ؟ لا يمكن التراجع عن ذلك.', function () {
@@ -8183,6 +8313,7 @@ window.printProductLabel = printProductLabel;
 
 // ============ START ============
 document.addEventListener('DOMContentLoaded', function () {
+    applyAppVersionLabels();
     checkLicense();
     setupUpdaterListeners();
     if (ipcRenderer && ipcRenderer.invoke) {

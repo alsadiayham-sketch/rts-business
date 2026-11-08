@@ -4,9 +4,11 @@ var PLATFORM_AUTH_ORIGIN = 'https://rts-royal.pages.dev';
 
 function nodeRequest(url, options) {
     return new Promise(function (resolve, reject) {
+        var headers = Object.assign({}, options.headers);
+        if (options.body != null) headers['Content-Length'] = Buffer.byteLength(options.body, 'utf8');
         var request = require('node:https').request(url, {
             method: options.method,
-            headers: options.headers,
+            headers: headers,
             timeout: 15000
         }, function (response) {
             if (response.statusCode >= 300 && response.statusCode < 400) {
@@ -71,6 +73,7 @@ async function authenticate(fetchRequest, base, credentials) {
         var message = typeof data.error === 'string' ? data.error : data.error && data.error.message;
         var error = new Error(message || ('HTTP ' + response.status));
         error.status = response.status;
+        error.code = data.error && typeof data.error.code === 'string' ? data.error.code : null;
         throw error;
     }
     var token = data.token || data.sessionToken;
@@ -84,4 +87,32 @@ async function authenticate(fetchRequest, base, credentials) {
     return { token: token, user: data.user };
 }
 
-module.exports = { resolveAuthBase: resolveAuthBase, authenticate: authenticate, nodeRequest: nodeRequest };
+function loginErrorMessage(error) {
+    if (error.code === 'LICENCE_EXPIRED') return 'انتهت صلاحية اشتراك هذا المتجر. جدّد الاشتراك من بوابة RTS Admin؛ ليست مشكلة في كلمة المرور.';
+    if (error.status === 401) return 'تعذر تسجيل الدخول. تحقق من رمز المتجر واسم المستخدم وكلمة المرور، وأن الحساب مفعّل لهذا المتجر.';
+    if (error.status === 403) return 'هذا الحساب غير مسموح له بالدخول. راجع حالة الحساب والاشتراك مع المدير.';
+    if (error.status === 429) return 'محاولات دخول كثيرة. انتظر قليلاً ثم أعد المحاولة.';
+    return error.message || 'تعذر الاتصال بخادم تسجيل الدخول. تحقق من الشبكة وأعد المحاولة.';
+}
+
+async function employees(fetchRequest, base, token, method, payload) {
+    if (base !== PLATFORM_AUTH_ORIGIN || !token) throw new Error('إدارة حسابات الموظفين تحتاج تسجيل الدخول إلى خادم RTS المعتمد.');
+    if (['GET', 'POST', 'PATCH', 'DELETE'].indexOf(method) < 0) throw new Error('عملية إدارة الموظفين غير صالحة.');
+    var response = await fetchRequest(base + '/api/pos-employees', {
+        method: method, redirect: 'error',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: method === 'GET' ? undefined : JSON.stringify(payload || {})
+    });
+    var data;
+    try { data = await response.json(); } catch (_) { throw new Error('استجابة إدارة الموظفين غير صالحة.'); }
+    if (!response.ok) {
+        var error = new Error(data.error && data.error.message || 'تعذرت إدارة حسابات الموظفين.');
+        error.status = response.status;
+        error.code = data.error && data.error.code;
+        if (error.code === 'POS_AUTH_REQUIRED') error.message = 'انتهت الجلسة أو تغيّرت صلاحيات الحساب. سجّل الدخول مجدداً.';
+        throw error;
+    }
+    return data;
+}
+
+module.exports = { resolveAuthBase: resolveAuthBase, authenticate: authenticate, nodeRequest: nodeRequest, loginErrorMessage: loginErrorMessage, employees: employees };

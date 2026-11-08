@@ -370,6 +370,18 @@ function posAuthenticate(username, password, storeId) {
 
 function clearPosToken() { posToken = null; posAuthGeneration++; }
 
+function isPosEmployeeManagementConfigured() {
+    return posAuthBase === 'https://rts-royal.pages.dev' && !!posToken;
+}
+
+function posEmployees(method, payload) {
+    var generation = posAuthGeneration;
+    return serverAuth.employees(serverAuth.nodeRequest, posAuthBase, posToken, method, payload).then(function (result) {
+        if (generation !== posAuthGeneration) throw new Error('تم تغيير جلسة المتجر. سجّل الدخول مجدداً.');
+        return result;
+    });
+}
+
 module.exports = {
     db: db,
     rawDb: rawDb,
@@ -391,5 +403,7 @@ module.exports = {
     serverTimestamp: serverTimestamp,
     posAuthenticate: posAuthenticate,
     configurePosAuth: configurePosAuth,
-    clearPosToken: clearPosToken
+    clearPosToken: clearPosToken,
+    isPosEmployeeManagementConfigured: isPosEmployeeManagementConfigured,
+    posEmployees: posEmployees
 };

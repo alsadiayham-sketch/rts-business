@@ -22,6 +22,13 @@
         return legacyConfig && legacyConfig.businessType === 'restaurant' || features.restaurant === true ? 'restaurant' : 'shop';
     }
 
+    var MENU_SECTION_ICONS = ['🍽️', '🥗', '🍲', '🍔', '🍕', '🌮', '🍜', '🍟', '🍰', '☕', '🥤', '🍹'];
+
+    function menuSectionIcon(value) {
+        var icon = String(value || '').trim();
+        return MENU_SECTION_ICONS.indexOf(icon) >= 0 ? icon : '';
+    }
+
     function menuSections(config, products) {
         var seen = Object.create(null), names = Object.create(null);
         var sections = [];
@@ -31,7 +38,13 @@
             if (!name || !id || seen[id]) return;
             seen[id] = true;
             names[name] = true;
-            sections.push({ id: id, name: name, order: Number.isFinite(Number(section.order)) ? Number(section.order) : index });
+            sections.push({
+                id: id,
+                name: name,
+                order: Number.isFinite(Number(section.order)) ? Number(section.order) : index,
+                icon: menuSectionIcon(section && section.icon),
+                image: menuImageSource(section && section.image)
+            });
         });
         sections.sort(function (a, b) { return a.order - b.order || a.name.localeCompare(b.name, 'ar'); });
         (products || []).forEach(function (product) {
@@ -41,7 +54,7 @@
             if (!seen[id] && !names[name]) {
                 seen[id] = true;
                 names[name] = true;
-                sections.push({ id: id, name: name, order: sections.length });
+                sections.push({ id: id, name: name, order: sections.length, icon: '', image: '' });
             }
         });
         return sections;
@@ -278,7 +291,7 @@
         };
     }
 
-    return { DEMO_VERSION: DEMO_VERSION, businessType: businessType, menuSections: menuSections, foodChoices: foodChoices, foodSelection: foodSelection, menuImageSource: menuImageSource, buildFoodVariants: buildFoodVariants, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
+    return { DEMO_VERSION: DEMO_VERSION, MENU_SECTION_ICONS: MENU_SECTION_ICONS.slice(), businessType: businessType, menuSections: menuSections, menuSectionIcon: menuSectionIcon, foodChoices: foodChoices, foodSelection: foodSelection, menuImageSource: menuImageSource, buildFoodVariants: buildFoodVariants, validateOffer: validateOffer, isOfferActive: isOfferActive, offerLabel: offerLabel, applyOffer: applyOffer, revalidateAppliedOffer: revalidateAppliedOffer, validateAttendanceTransition: validateAttendanceTransition, buildRestaurantDemo: buildRestaurantDemo, createRestaurantDemoFixture: function () {
         var fixture = buildRestaurantDemo();
         return { version: DEMO_VERSION, products: fixture.products.map(function (item) { return Object.assign({ id: item.id }, item.data); }), records: fixture.records.map(function (item) { return Object.assign({ id: item.id }, item.data); }) };
     } };
