@@ -242,8 +242,85 @@
             }).join('') + (users.length ? '' : '<div class="restaurant-empty">لا توجد حسابات بعد. أضف حساباً جديداً للموظف.</div>') + '</div>';
     }
     function renderTables() {
-        return '<div class="restaurant-toolbar"><div><h3>الطاولات والطلبات</h3><p>اضغط على طاولة لبدء طلب أو متابعة طلب معلّق.</p></div></div>' +
-            '<div class="restaurant-attendance-controls"><label>عدد الطاولات <input type="number" id="tableCount" min="1" max="60" step="1" value="' + Number(adapters.tableCount ? adapters.tableCount() : 12) + '"></label><button class="btn-secondary" data-r-action="tables-save">حفظ العدد</button></div><div class="tables-grid" id="tablesGrid"></div>';
+        var allTables = adapters.tables ? adapters.tables(true) : [];
+        var activeTables = allTables.filter(function (tableRecord) { return !tableRecord.archived; });
+        var archivedTables = allTables.filter(function (tableRecord) { return tableRecord.archived; });
+        var canEdit = admin();
+        function occupancy(tableId) {
+            return adapters.tableOccupancy ? adapters.tableOccupancy(tableId) : { occupied: false, held: 0, activeCart: false };
+        }
+        function tableCard(tableRecord) {
+            var info = occupancy(tableRecord.id);
+            var status = info.occupied ? 'مشغولة' : 'فارغة';
+            if (info.held > 0) status = 'طلب محفوظ';
+            if (info.activeCart) status = 'طلب مفتوح';
+            return '<article class="restaurant-table-row"><div><strong>' + esc(tableRecord.name || ('طاولة ' + tableRecord.id)) + '</strong><span>رقم داخلي #' + esc(tableRecord.id) + '</span></div>' +
+                '<span class="restaurant-status ' + (info.occupied ? 'warning' : 'success') + '">' + status + '</span>' +
+                '<div class="restaurant-section-actions"><button class="btn-secondary btn-small" data-r-action="table-open" data-id="' + esc(tableRecord.id) + '">فتح</button>' +
+                (canEdit ? '<button class="btn-quiet" data-r-action="table-edit" data-id="' + esc(tableRecord.id) + '">تعديل</button><button class="btn-quiet" data-r-action="table-archive" data-id="' + esc(tableRecord.id) + '"' + (info.occupied ? ' disabled' : '') + '>أرشفة</button>' : '') +
+                '</div></article>';
+        }
+        return '<div class="restaurant-toolbar"><div><h3>الطاولات والطلبات</h3><p>اضغط على طاولة لبدء طلب أو متابعة طلب معلّق. تعديل الإعدادات متاح للمدير فقط.</p></div>' +
+            (canEdit ? '<div class="restaurant-toolbar-actions"><button class="btn-primary" data-r-action="table-new">+ طاولة جديدة</button></div>' : '') + '</div>' +
+            (canEdit ? '<div class="restaurant-attendance-controls"><label>عدد الطاولات النشطة <input type="number" id="tableCount" min="1" max="60" step="1" value="' + Number(adapters.tableCount ? adapters.tableCount() : activeTables.length || 1) + '"></label><button class="btn-secondary" data-r-action="tables-save">تطبيق العدد</button></div>' : '') +
+            '<div class="restaurant-table-list">' + activeTables.map(tableCard).join('') + (activeTables.length ? '' : '<div class="restaurant-empty">لا توجد طاولات نشطة حالياً.</div>') + '</div>' +
+            (canEdit && archivedTables.length ? '<div class="restaurant-history"><h4>طاولات مؤرشفة</h4><div class="restaurant-table-list">' +
+                archivedTables.map(function (tableRecord) {
+                    return '<article class="restaurant-table-row archived"><div><strong>' + esc(tableRecord.name || ('طاولة ' + tableRecord.id)) + '</strong><span>رقم داخلي #' + esc(tableRecord.id) + '</span></div><span class="restaurant-status muted">مؤرشفة</span>' +
+                        '<div class="restaurant-section-actions"><button class="btn-secondary btn-small" data-r-action="table-restore" data-id="' + esc(tableRecord.id) + '">استعادة</button><button class="btn-quiet" data-r-action="table-delete" data-id="' + esc(tableRecord.id) + '">حذف نهائي</button></div></article>';
+                }).join('') + '</div></div>' : '') +
+            '<div class="tables-grid" id="tablesGrid"></div>';
+    }
+
+    function createTable() {
+        if (!requireAdmin()) return;
+        promptFields('طاولة جديدة', [{ name: 'name', label: 'اسم الطاولة', required: true, value: '' }], function (value, ui) {
+            adapters.createTable({ name: value.name }, function () {
+                ui.close();
+                setMessage('تمت إضافة الطاولة بنجاح.', 'success');
+                render();
+            }, function (error) {
+                ui.fail((error && error.message) || 'تعذر إضافة الطاولة.');
+            });
+        });
+    }
+
+    function editTable(id) {
+        if (!requireAdmin()) return;
+        var tableRecord = (adapters.tables ? adapters.tables(true) : []).find(function (item) { return String(item.id) === String(id); });
+        if (!tableRecord) return setMessage('الطاولة غير موجودة.', 'error');
+        promptFields('تعديل الطاولة', [{ name: 'name', label: 'اسم الطاولة', required: true, value: tableRecord.name || '' }], function (value, ui) {
+            adapters.updateTable(id, { name: value.name }, function () {
+                ui.close();
+                setMessage('تم تحديث الطاولة.', 'success');
+                render();
+            }, function (error) {
+                ui.fail((error && error.message) || 'تعذر تحديث بيانات الطاولة.');
+            });
+        });
+    }
+
+    function toggleTableArchive(id, archived) {
+        if (!requireAdmin()) return;
+        adapters.archiveTable(id, archived, function () {
+            setMessage(archived ? 'تمت أرشفة الطاولة.' : 'تمت استعادة الطاولة.', 'success');
+            render();
+        }, function (error) {
+            setMessage((error && error.message) || 'تعذر تحديث حالة الطاولة.', 'error');
+            render();
+        });
+    }
+
+    function deleteTable(id) {
+        if (!requireAdmin()) return;
+        if (!window.confirm('حذف الطاولة نهائياً؟ لا يمكن التراجع عن ذلك.')) return;
+        adapters.deleteTable(id, function () {
+            setMessage('تم حذف الطاولة نهائياً.', 'success');
+            render();
+        }, function (error) {
+            setMessage((error && error.message) || 'تعذر حذف الطاولة.', 'error');
+            render();
+        });
     }
 
     function render() {
@@ -1008,6 +1085,12 @@
         else if (action === 'account-toggle') toggleLoginAccount(id);
         else if (action === 'account-delete') deleteLoginAccount(id);
         else if (action === 'attendance-in') attendance(id, 'in'); else if (action === 'attendance-out') attendance(id, 'out');
+        else if (action === 'table-new') createTable();
+        else if (action === 'table-edit') editTable(id);
+        else if (action === 'table-open' && adapters.openTable) adapters.openTable(Number(id));
+        else if (action === 'table-archive') toggleTableArchive(id, true);
+        else if (action === 'table-restore') toggleTableArchive(id, false);
+        else if (action === 'table-delete') deleteTable(id);
         else if (action === 'tables-save') adapters.saveTables();
     }
     function input(event) {

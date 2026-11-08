@@ -7,6 +7,7 @@ const model = require('../src/renderer/restaurant-model.js');
 function appHarness() {
     const elements = new Map();
     const writes = [];
+    const storage = new Map();
     function element() {
         return {
             value: '', innerHTML: '', textContent: '', disabled: false, style: {}, attributes: {},
@@ -27,7 +28,11 @@ function appHarness() {
     const db = { collection(name) { return { doc(id) { return { set(record) { writes.push({ name, id, record }); return Promise.resolve(); } }; } }; } };
     const sandbox = {
         console, document, window: { RestaurantModel: model, addEventListener() {}, print() {}, crypto: { randomUUID() { return 'id'; } } },
-        localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+        localStorage: {
+            getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+            setItem(key, value) { storage.set(key, String(value)); },
+            removeItem(key) { storage.delete(key); }
+        },
         navigator: { onLine: true }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
         require(request) {
             if (request === './restaurant-service') return require('../src/renderer/restaurant-service');
@@ -49,7 +54,7 @@ function appHarness() {
     vm.createContext(sandbox);
     vm.runInContext(fs.readFileSync(require.resolve('../src/renderer/app.js'), 'utf8'), sandbox, { filename: 'app.js' });
     vm.runInContext('renderCart = function () { window.__renderedCart = cart.slice(); };', sandbox);
-    return { sandbox, elements, writes };
+    return { sandbox, elements, writes, storage };
 }
 
 test('offers reject expired, under-quantity, and excessive percentage values', () => {
@@ -275,4 +280,31 @@ test('seed manifest is write-ready without persisting an application mode', () =
     assert.equal(loyalty.customer.phone, '');
     assert.equal(loyalty.customer.name, customer.name);
     assert.equal(manifest.products.every(item => item.data.category === item.data.type), true);
+});
+
+test('table configuration supports add/edit/archive/delete with occupancy guards', async () => {
+    const { sandbox } = appHarness();
+    vm.runInContext(`
+        currentUser = { username: 'admin', role: 'admin' };
+        localStorage.setItem(tableCountKey(), '2');
+    `, sandbox);
+    await new Promise((resolve, reject) => sandbox.createRestaurantTable({ name: 'ركن العائلة' }, resolve, reject));
+    assert.equal(vm.runInContext('getRestaurantTables(false).length', sandbox), 3);
+    assert.equal(vm.runInContext('getRestaurantTables(false)[2].name', sandbox), 'ركن العائلة');
+    await new Promise((resolve, reject) => sandbox.updateRestaurantTable(3, { name: 'VIP' }, resolve, reject));
+    assert.equal(vm.runInContext('getRestaurantTables(false)[2].name', sandbox), 'VIP');
+    vm.runInContext(`heldSales = [{ id: 'held-1', table: 3, cart: [{ qty: 1, price: 10 }] }];`, sandbox);
+    await assert.rejects(() => new Promise((resolve, reject) => sandbox.archiveRestaurantTable(3, true, resolve, reject)), /مفتوح|محفوظ/);
+    vm.runInContext(`heldSales = [];`, sandbox);
+    await new Promise((resolve, reject) => sandbox.archiveRestaurantTable(3, true, resolve, reject));
+    assert.equal(vm.runInContext('findRestaurantTable(3, true).archived', sandbox), true);
+    await new Promise((resolve, reject) => sandbox.deleteRestaurantTable(3, resolve, reject));
+    assert.equal(vm.runInContext('findRestaurantTable(3, true)', sandbox), null);
+});
+
+test('restaurant workers cannot mutate table configuration', async () => {
+    const { sandbox } = appHarness();
+    vm.runInContext(`currentUser = { username: 'worker', role: 'worker' };`, sandbox);
+    await assert.rejects(() => new Promise((resolve, reject) => sandbox.createRestaurantTable({ name: 'غير مسموح' }, resolve, reject)), /للمدير فقط/);
+    assert.equal(vm.runInContext('getRestaurantTables(true).length', sandbox), 0);
 });

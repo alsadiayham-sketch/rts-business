@@ -76,6 +76,7 @@ app.whenReady().then(async () => {
             ];
             products.forEach(p => __fixture.seed('projects/isolated-restaurant-fixture/products/' + p.id, p));
             localStorage.setItem(tableCountKey(), '6');
+            window.confirm = function () { return true; };
             window.fixtureInput = function (id, value, event) {
                 var input = document.getElementById(id); input.value = value;
                 input.dispatchEvent(new Event(event || 'input', { bubbles: true }));
@@ -232,6 +233,20 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate('pendingCustomer.phone'), 'fixture-customer');
         assert.deepEqual(await evaluate('[pendingRedeem.points, pendingCreditUse, Number(document.getElementById("discountInput").value)]'), [2, 1, 3]);
         await evaluate(`
+            fixtureInput('restaurantTable', '4', 'change');
+            document.getElementById('holdSaleBtn').click(); fixtureDismiss();
+        `);
+        assert.equal(await evaluate('heldSales.length'), 1);
+        assert.equal(await evaluate('heldSales[0].table'), 4);
+        await evaluate(`
+            resetRestaurantTicket(); resumeHeld(0);
+            document.querySelector('[data-cart-action="decrease"]').click();
+            document.getElementById('holdSaleBtn').click(); fixtureDismiss();
+        `);
+        assert.equal(await evaluate('heldSales[0].cart[0].qty'), 1);
+        assert.equal(await evaluate('heldSales[0].table'), 4);
+        await evaluate(`
+            resetRestaurantTicket(); resumeHeld(0);
             openTable(3); fixtureDismiss();
             document.querySelector('[data-cart-action="increase"]').click();
             document.getElementById('holdSaleBtn').click(); fixtureDismiss();
@@ -275,7 +290,7 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate('heldSales.length'), 0);
         assert.equal(await evaluate('JSON.parse(localStorage.getItem(heldKey())).length'), 0);
         const dinein = await evaluate(`__fixture.writes.filter(w => /\\/orders\\/POS-/.test(w.key))[1].value`);
-        assert.equal(dinein.restaurantOrder.table, 2);
+        assert.equal(dinein.restaurantOrder.table, 4);
         assert.equal(dinein.items[0].qty, 2);
         assert.equal(dinein.total, 47);
         await evaluate(`
@@ -291,6 +306,63 @@ app.whenReady().then(async () => {
         console.log('PASS: dine-in save/resume, loyalty/customer/discount restoration, no ticket merging, storage/checkout failure recovery.');
 
         await evaluate(`
+            switchPage('restaurant');
+        `);
+        await evaluate(`
+            currentUser = { username: 'fixture-worker', role: 'worker' };
+            syncRestaurantWorkspace();
+            switchPage('restaurant');
+        `);
+        await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("الطاولات")');
+        assert.equal(await evaluate('document.querySelector("[data-r-action=\\"table-new\\"]") === null'), true);
+        await evaluate(`
+            currentUser = { username: 'fixture-admin', role: 'admin' };
+            syncRestaurantWorkspace();
+            switchPage('restaurant');
+        `);
+        await waitFor('!!document.querySelector("[data-r-action=\\"table-new\\"]")');
+        await evaluate(`
+            new Promise(function (resolve, reject) {
+                createRestaurantTable({ name: 'VIP' }, function (id) {
+                    window.fixtureTableId = String(id);
+                    syncRestaurantWorkspace();
+                    resolve(id);
+                }, reject);
+            });
+        `);
+        await waitFor('document.querySelector(".restaurant-table-list").textContent.includes("VIP")');
+        await evaluate(`
+            new Promise(function (resolve, reject) {
+                updateRestaurantTable(Number(window.fixtureTableId), { name: 'VIP 1' }, function () {
+                    syncRestaurantWorkspace();
+                    resolve();
+                }, reject);
+            });
+        `);
+        await waitFor('document.querySelector(".restaurant-table-list").textContent.includes("VIP 1")');
+        await evaluate(`
+            new Promise(function (resolve, reject) {
+                archiveRestaurantTable(Number(window.fixtureTableId), true, function () {
+                    syncRestaurantWorkspace();
+                    resolve();
+                }, reject);
+            });
+        `);
+        await waitFor('document.querySelector(".restaurant-history") && document.querySelector(".restaurant-history").textContent.includes("VIP 1")');
+        await evaluate(`
+            new Promise(function (resolve, reject) {
+                deleteRestaurantTable(Number(window.fixtureTableId), function () {
+                    syncRestaurantWorkspace();
+                    resolve();
+                }, reject);
+            });
+        `);
+        await waitFor('!document.querySelector(".restaurant-history") || !document.querySelector(".restaurant-history").textContent.includes("VIP 1")');
+        await screenshot('restaurant-tables-admin-desktop', 1440, 1000);
+        await screenshot('restaurant-tables-admin-compact', 1024, 700);
+        console.log('PASS: admin table add/edit/archive/delete lifecycle in workspace.');
+
+        await evaluate(`
             closeModal('receiptModal'); fixtureDismiss();
             resetRestaurantTicket();
             document.querySelector('[data-id="burger"].restaurant-food-item').click();
@@ -301,6 +373,10 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate(`__fixture.writes.filter(w => /\\/orders\\/POS-/.test(w.key))[2].value.restaurantOrder.type`), 'takeaway');
         console.log('PASS: takeaway checkout persists pickup details.');
 
+        await evaluate(`
+            switchPage('sales');
+            renderProducts();
+        `);
         await waitFor('!!document.querySelector("[data-edit-menu-id=\\"hummus\\"]")');
         await evaluate(`
             closeModal('receiptModal');

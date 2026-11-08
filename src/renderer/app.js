@@ -1302,12 +1302,15 @@ function updateRestaurantService() {
     if (!type) return;
     var table = document.getElementById('restaurantTable');
     var selected = table.value || (currentTableNo ? String(currentTableNo) : '');
+    var tables = getActiveRestaurantTables();
     var html = '<option value="">اختر الطاولة</option>';
-    for (var n = 1; n <= getTableCount(); n++) {
-        var occupied = heldSales.some(function (h) { return h.table === n && h.id !== activeRestaurantHeldId; });
-        html += '<option value="' + n + '"' + (occupied ? ' disabled' : '') + '>طاولة ' + n + (occupied ? ' — طلب محفوظ' : '') + '</option>';
-    }
+    tables.forEach(function (tableRecord) {
+        var tableId = Number(tableRecord.id);
+        var occupied = heldSales.some(function (h) { return Number(h.table) === tableId && h.id !== activeRestaurantHeldId && !h.completed; });
+        html += '<option value="' + tableId + '"' + (occupied ? ' disabled' : '') + '>' + escapeHtml(tableRecord.name || tableLabelById(tableId)) + (occupied ? ' — طلب محفوظ' : '') + '</option>';
+    });
     table.innerHTML = html;
+    if (selected && !tables.some(function (item) { return String(item.id) === String(selected); })) selected = '';
     table.value = selected;
     document.getElementById('restaurantTableFields').hidden = type.value !== 'dinein';
     document.getElementById('restaurantDeliveryFields').hidden = type.value !== 'delivery';
@@ -1335,8 +1338,8 @@ function restaurantOrderForSave() {
     if (!isRestaurantMode()) return { ok: true, order: null };
     var result = restaurantServiceModel.validateRestaurantService(restaurantDraft());
     if (result.ok && result.order.type === 'dinein') {
-        if (result.order.table > getTableCount()) result = { ok: false, error: 'الطاولة غير موجودة؛ راجع إعداد الطاولات.' };
-        else if (heldSales.some(function (h) { return h.table === result.order.table && h.id !== activeRestaurantHeldId; })) {
+        if (!findRestaurantTable(result.order.table, false)) result = { ok: false, error: 'الطاولة غير موجودة أو مؤرشفة؛ راجع إعداد الطاولات.' };
+        else if (heldSales.some(function (h) { return Number(h.table) === Number(result.order.table) && h.id !== activeRestaurantHeldId && !h.completed; })) {
             result = { ok: false, error: 'لهذه الطاولة طلب محفوظ. افتحه من إدارة المطعم بدلاً من إنشاء طلب آخر.' };
         }
     }
@@ -5070,6 +5073,13 @@ function syncRestaurantWorkspace() {
         openNewCustomer: openNewCustomer,
         openCustomer: function (key) { openCustomerProfile(encodeURIComponent(key)); },
         tableCount: getTableCount,
+        tables: getRestaurantTables,
+        tableOccupancy: describeTableOccupancy,
+        createTable: createRestaurantTable,
+        updateTable: updateRestaurantTable,
+        archiveTable: archiveRestaurantTable,
+        deleteTable: deleteRestaurantTable,
+        openTable: openTable,
         saveTables: saveTableCount,
         renderTables: renderTables,
         menuSections: function () { return getMenuSections(); },
@@ -6065,48 +6075,233 @@ function renderStocktakeHistory() {
 // ============ RESTAURANT TABLES (طاولات المطعم) ============
 var currentTableNo = null;
 function tableCountKey() { return 'ada_pos_tablecount_' + (getProjectId() || ''); }
-function getTableCount() { return parseInt(localStorage.getItem(tableCountKey()) || '0') || 0; }
+function tableDefinitionsKey() { return 'ada_pos_tables_' + (getProjectId() || ''); }
+function normalizeTableId(value) {
+    var id = Number(value);
+    return Number.isInteger(id) && id >= 1 ? id : null;
+}
+function defaultTableName(id) { return 'طاولة ' + Number(id); }
+function normalizeTableRecord(input) {
+    var id = normalizeTableId(input && input.id);
+    if (id == null) return null;
+    var name = String(input && input.name || '').trim();
+    return {
+        id: id,
+        name: name || defaultTableName(id),
+        archived: !!(input && input.archived),
+        archivedAtIso: input && input.archivedAtIso ? String(input.archivedAtIso) : '',
+        createdAtIso: input && input.createdAtIso ? String(input.createdAtIso) : ''
+    };
+}
+function readLegacyTableCount() {
+    var n = parseInt(localStorage.getItem(tableCountKey()) || '0', 10);
+    return Number.isInteger(n) && n > 0 ? Math.min(60, n) : 0;
+}
+function buildLegacyTableRecords() {
+    var count = readLegacyTableCount();
+    var now = new Date().toISOString();
+    var items = [];
+    for (var i = 1; i <= count; i++) items.push({ id: i, name: defaultTableName(i), archived: false, createdAtIso: now, archivedAtIso: '' });
+    return items;
+}
+function readStoredTables() {
+    var parsed = [];
+    try { parsed = JSON.parse(localStorage.getItem(tableDefinitionsKey()) || '[]'); }
+    catch (_error) { parsed = []; }
+    var source = Array.isArray(parsed) && parsed.length ? parsed : buildLegacyTableRecords();
+    var seen = Object.create(null);
+    var list = source.map(normalizeTableRecord).filter(function (tableRecord) {
+        if (!tableRecord || seen[tableRecord.id]) return false;
+        seen[tableRecord.id] = true;
+        return true;
+    });
+    if (!list.length) list = buildLegacyTableRecords();
+    list.sort(function (a, b) { return a.id - b.id; });
+    return list;
+}
+function writeStoredTables(records) {
+    localStorage.setItem(tableDefinitionsKey(), JSON.stringify(records));
+    var activeCount = records.filter(function (record) { return !record.archived; }).length;
+    localStorage.setItem(tableCountKey(), String(activeCount));
+}
+function getRestaurantTables(includeArchived) {
+    var all = readStoredTables();
+    return includeArchived ? all : all.filter(function (record) { return !record.archived; });
+}
+function getActiveRestaurantTables() { return getRestaurantTables(false); }
+function getTableCount() { return getActiveRestaurantTables().length; }
+function findRestaurantTable(tableId, includeArchived) {
+    var id = normalizeTableId(tableId);
+    if (id == null) return null;
+    var tableList = getRestaurantTables(includeArchived);
+    for (var i = 0; i < tableList.length; i++) if (Number(tableList[i].id) === id) return tableList[i];
+    return null;
+}
+function tableLabelById(tableId) {
+    var tableRecord = findRestaurantTable(tableId, true);
+    return tableRecord ? (tableRecord.name || defaultTableName(tableRecord.id)) : defaultTableName(tableId);
+}
+function isTableOccupied(tableId, heldId) {
+    var id = normalizeTableId(tableId);
+    if (id == null) return false;
+    if (currentTableNo === id && (cart.length > 0 || pendingPrizes.length > 0)) return true;
+    return heldSales.some(function (h) { return Number(h.table) === id && h.id !== heldId && !h.completed; });
+}
+function describeTableOccupancy(tableId) {
+    var id = normalizeTableId(tableId);
+    if (id == null) return { occupied: false, activeCart: false, held: 0 };
+    var heldCount = heldSales.filter(function (h) { return Number(h.table) === id && !h.completed; }).length;
+    var activeCart = currentTableNo === id && (cart.length > 0 || pendingPrizes.length > 0);
+    return { occupied: heldCount > 0 || activeCart, activeCart: activeCart, held: heldCount };
+}
+function updateHeldTableReferences() {
+    var staleAssignments = 0;
+    heldSales.forEach(function (held) {
+        if (!held || !held.restaurantOrder || held.restaurantOrder.type !== 'dinein') return;
+        var tableId = normalizeTableId(held.restaurantOrder.table != null ? held.restaurantOrder.table : held.table);
+        if (tableId == null || !findRestaurantTable(tableId, false)) {
+            held.restaurantOrder.table = null;
+            held.table = null;
+            held.needsTableAssignment = true;
+            staleAssignments++;
+            return;
+        }
+        held.restaurantOrder.table = tableId;
+        held.table = tableId;
+        held.needsTableAssignment = false;
+    });
+    return staleAssignments;
+}
+function persistRestaurantTables(nextRecords) {
+    try { writeStoredTables(nextRecords); }
+    catch (error) {
+        console.error('Saving table configuration failed', error);
+        showAlert('تعذر حفظ إعدادات الطاولات على هذا الجهاز.', { title: 'لم يتم الحفظ' });
+        return false;
+    }
+    if (currentTableNo && !findRestaurantTable(currentTableNo, false)) currentTableNo = null;
+    var stale = updateHeldTableReferences();
+    updateRestaurantService();
+    renderTables();
+    if (stale > 0) showAlert('تمت إزالة ربط ' + stale + ' طلب محفوظ بطاولة غير متاحة. افتح الطلب وحدد طاولة قبل الإتمام.', { title: 'مراجعة الطاولات' });
+    return true;
+}
+function createRestaurantTable(payload, onOk, onErr) {
+    if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    var value = payload && payload.name != null ? payload.name : payload;
+    var name = String(value || '').trim();
+    if (!name) return onErr && onErr(new Error('اسم الطاولة مطلوب.'));
+    var tables = getRestaurantTables(true);
+    if (tables.filter(function (item) { return !item.archived; }).length >= 60) return onErr && onErr(new Error('الحد الأقصى للطاولات النشطة هو 60.'));
+    var key = name.normalize('NFKC').toLocaleLowerCase('ar');
+    if (tables.some(function (item) { return !item.archived && String(item.name || '').trim().normalize('NFKC').toLocaleLowerCase('ar') === key; })) {
+        return onErr && onErr(new Error('اسم الطاولة مستخدم بالفعل.'));
+    }
+    var nextId = tables.reduce(function (max, item) { return Math.max(max, Number(item.id) || 0); }, 0) + 1;
+    var now = new Date().toISOString();
+    tables.push({ id: nextId, name: name, archived: false, createdAtIso: now, archivedAtIso: '' });
+    if (!persistRestaurantTables(tables)) return onErr && onErr(new Error('تعذر حفظ جدول الطاولات.'));
+    if (onOk) onOk(nextId);
+}
+function updateRestaurantTable(tableId, payload, onOk, onErr) {
+    if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    var id = normalizeTableId(tableId);
+    if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
+    var name = String(payload && payload.name || '').trim();
+    if (!name) return onErr && onErr(new Error('اسم الطاولة مطلوب.'));
+    var tables = getRestaurantTables(true);
+    var index = tables.findIndex(function (item) { return Number(item.id) === id; });
+    if (index < 0) return onErr && onErr(new Error('الطاولة غير موجودة.'));
+    var key = name.normalize('NFKC').toLocaleLowerCase('ar');
+    if (tables.some(function (item) {
+        return Number(item.id) !== id && !item.archived && String(item.name || '').trim().normalize('NFKC').toLocaleLowerCase('ar') === key;
+    })) return onErr && onErr(new Error('اسم الطاولة مستخدم بالفعل.'));
+    tables[index] = Object.assign({}, tables[index], { name: name });
+    if (!persistRestaurantTables(tables)) return onErr && onErr(new Error('تعذر حفظ جدول الطاولات.'));
+    if (onOk) onOk(id);
+}
+function archiveRestaurantTable(tableId, archived, onOk, onErr) {
+    if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    var id = normalizeTableId(tableId);
+    if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
+    var tables = getRestaurantTables(true);
+    var index = tables.findIndex(function (item) { return Number(item.id) === id; });
+    if (index < 0) return onErr && onErr(new Error('الطاولة غير موجودة.'));
+    var nextArchived = archived !== false;
+    if (nextArchived && isTableOccupied(id, null)) return onErr && onErr(new Error('لا يمكن أرشفة طاولة مرتبطة بطلب مفتوح أو محفوظ.'));
+    if (!nextArchived && tables.filter(function (item) { return !item.archived; }).length >= 60) return onErr && onErr(new Error('لا يمكن استعادة الطاولة؛ يوجد 60 طاولة نشطة بالفعل.'));
+    tables[index] = Object.assign({}, tables[index], { archived: nextArchived, archivedAtIso: nextArchived ? new Date().toISOString() : '' });
+    if (!persistRestaurantTables(tables)) return onErr && onErr(new Error('تعذر حفظ جدول الطاولات.'));
+    if (onOk) onOk(id);
+}
+function deleteRestaurantTable(tableId, onOk, onErr) {
+    if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    var id = normalizeTableId(tableId);
+    if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
+    var tables = getRestaurantTables(true);
+    var row = tables.find(function (item) { return Number(item.id) === id; });
+    if (!row) return onErr && onErr(new Error('الطاولة غير موجودة.'));
+    if (isTableOccupied(id, null)) return onErr && onErr(new Error('لا يمكن حذف طاولة مرتبطة بطلب مفتوح أو محفوظ.'));
+    if (!row.archived) return onErr && onErr(new Error('أرشف الطاولة أولاً قبل الحذف النهائي.'));
+    tables = tables.filter(function (item) { return Number(item.id) !== id; });
+    if (!persistRestaurantTables(tables)) return onErr && onErr(new Error('تعذر حفظ جدول الطاولات.'));
+    if (onOk) onOk(id);
+}
 function saveTableCount() {
     if (!isAdmin()) return;
     var n = Number((document.getElementById('tableCount') || {}).value);
     if (!Number.isInteger(n) || n < 1 || n > 60) { showAlert('أدخل عدداً صحيحاً من 1 إلى 60 طاولة.', { title: 'عدد الطاولات' }); return; }
-    if ((currentTableNo && currentTableNo > n) || heldSales.some(function (h) { return h.table > n; })) {
-        showAlert('لا يمكن إخفاء طاولة لها طلب مفتوح أو محفوظ.', { title: 'طاولة مشغولة' }); return;
+    var tables = getRestaurantTables(true);
+    var active = tables.filter(function (item) { return !item.archived; }).sort(function (a, b) { return a.id - b.id; });
+    if (active.length === n) { showAlert('عدد الطاولات الحالي مطابق للقيمة الجديدة.', { title: 'لا تغييرات' }); return; }
+    if (active.length > n) {
+        var toArchive = active.slice(n);
+        var blocked = toArchive.find(function (item) { return isTableOccupied(item.id, null); });
+        if (blocked) { showAlert('لا يمكن تقليل العدد لأن ' + tableLabelById(blocked.id) + ' مرتبطة بطلب مفتوح أو محفوظ.', { title: 'طاولة مشغولة' }); return; }
+        var archiveMap = Object.create(null);
+        toArchive.forEach(function (item) { archiveMap[item.id] = true; });
+        tables = tables.map(function (item) {
+            if (!archiveMap[item.id]) return item;
+            return Object.assign({}, item, { archived: true, archivedAtIso: new Date().toISOString() });
+        });
+    } else {
+        var maxId = tables.reduce(function (max, item) { return Math.max(max, Number(item.id) || 0); }, 0);
+        var now = new Date().toISOString();
+        for (var add = active.length; add < n; add++) {
+            maxId += 1;
+            tables.push({ id: maxId, name: defaultTableName(maxId), archived: false, createdAtIso: now, archivedAtIso: '' });
+        }
     }
-    try { localStorage.setItem(tableCountKey(), String(n)); }
-    catch (error) { console.error('Saving table count failed', error); showAlert('تعذر حفظ عدد الطاولات على هذا الجهاز.', { title: 'لم يتم الحفظ' }); return; }
-    updateRestaurantService();
-    renderTables();
-    showAlert('تم حفظ عدد الطاولات', { icon: '✅', title: 'تم' });
+    if (!persistRestaurantTables(tables)) return;
+    showAlert('تم تحديث إعدادات الطاولات', { icon: '✅', title: 'تم' });
 }
 function renderTables() {
     var grid = document.getElementById('tablesGrid');
     if (!grid) return;
-    var n = getTableCount();
-    var inp = document.getElementById('tableCount');
-    if (inp && !inp.value) inp.value = n || '';
-    if (!n) { grid.innerHTML = '<p style="padding:16px;">حدد عدد الطاولات لعرضها</p>'; return; }
+    var tables = getActiveRestaurantTables();
+    if (!tables.length) { grid.innerHTML = '<p style="padding:16px;">لا توجد طاولات نشطة. أضف طاولة من إعدادات المطعم.</p>'; return; }
     var html = '';
-    for (var t = 1; t <= n; t++) {
-        var occupied = heldSales.some(function (h) { return h.table === t && !h.completed; }) || (currentTableNo === t && cart.length > 0);
-        html += '<button class="table-card ' + (occupied ? 'occupied' : 'free') + '" onclick="openTable(' + t + ')">' +
-            '<span class="table-no">طاولة ' + t + '</span><span class="table-state">' + (occupied ? 'مشغولة' : 'فارغة') + '</span></button>';
-    }
+    tables.forEach(function (tableRecord) {
+        var occupancy = describeTableOccupancy(tableRecord.id);
+        html += '<button class="table-card ' + (occupancy.occupied ? 'occupied' : 'free') + '" onclick="openTable(' + Number(tableRecord.id) + ')">' +
+            '<span class="table-no">' + escapeHtml(tableRecord.name || defaultTableName(tableRecord.id)) + '</span><span class="table-state">' + (occupancy.occupied ? 'مشغولة' : 'فارغة') + '</span></button>';
+    });
     grid.innerHTML = html;
 }
 function openTable(t) {
-    if (checkoutInFlight || !Number.isInteger(t) || t < 1 || t > getTableCount()) return;
+    var tableId = normalizeTableId(t);
+    if (checkoutInFlight || tableId == null || !findRestaurantTable(tableId, false)) return;
     if (isRestaurantMode() && (cart.length || pendingPrizes.length)) {
-        if (currentTableNo === t) { switchPage('sales'); return; }
+        if (currentTableNo === tableId) { switchPage('sales'); return; }
         showAlert('احفظ الطلب الحالي أو أتم الدفع قبل فتح طاولة أخرى.', { title: 'طلب مفتوح' }); return;
     }
     var idx = -1;
-    for (var i = 0; i < heldSales.length; i++) { if (heldSales[i].table === t) { idx = i; break; } }
+    for (var i = 0; i < heldSales.length; i++) { if (Number(heldSales[i].table) === tableId && !heldSales[i].completed) { idx = i; break; } }
     if (idx >= 0) { resumeHeld(idx); return; }
-    if (isRestaurantMode()) setRestaurantService({ type: 'dinein', table: t });
-    else currentTableNo = t;
+    if (isRestaurantMode()) setRestaurantService({ type: 'dinein', table: tableId });
+    else currentTableNo = tableId;
     switchPage('sales');
-    showAlert('طاولة ' + t + ' — أضف الطلبات ثم اضغط تعليق لحفظها للطاولة', { icon: '🍽️', title: 'طاولة ' + t });
+    showAlert(tableLabelById(tableId) + ' — أضف الطلبات ثم اضغط تعليق لحفظها للطاولة', { icon: '🍽️', title: tableLabelById(tableId) });
 }
 
 // ============ BARCODE LABELS (طباعة ملصقات الباركود) ============
@@ -8143,6 +8338,8 @@ function loadHeldSales() {
         var parsed = JSON.parse(localStorage.getItem(heldKey()) || '[]');
         if (!Array.isArray(parsed) || parsed.some(function (h) { return !h || !Array.isArray(h.cart); })) throw new Error('Invalid held orders');
         heldSales = parsed.map(function (h, index) { if (!h.id) h.id = String(h.at || 0) + '-legacy-' + index; return h; });
+        var staleRefs = updateHeldTableReferences();
+        if (staleRefs > 0) saveHeldSales();
         heldSalesLoadError = false;
     } catch (e) {
         heldSalesLoadError = true;
@@ -8213,7 +8410,7 @@ function openHeldModal() {
         var n = 0, sum = 0;
         for (var j = 0; j < h.cart.length; j++) { n += h.cart[j].qty; sum += h.cart[j].price * h.cart[j].qty; }
         var serviceText = h.restaurantOrder ? restaurantServiceModel.serviceLabel(h.restaurantOrder.type) : '';
-        html += '<div class="held-row"><span>' + escapeHtml(serviceText) + (h.table ? ' — طاولة ' + Number(h.table) : '') +
+        html += '<div class="held-row"><span>' + escapeHtml(serviceText) + (h.table ? ' — ' + escapeHtml(tableLabelById(h.table)) : '') +
             '<br>' + new Date(h.at).toLocaleString('ar-EG') + ' — ' + n + ' قطعة — أصناف ₪' + sum.toFixed(2) + '</span>' +
             '<span><button class="btn-primary" onclick="resumeHeld(' + i + ')">استئناف</button> ' +
             '<button class="btn-secondary" onclick="deleteHeld(' + i + ')">حذف</button></span></div>';

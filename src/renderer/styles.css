@@ -2042,13 +2042,20 @@ body {
 .restaurant-tabs button:focus-visible, .restaurant-panel input:focus-visible, .restaurant-panel select:focus-visible { outline:2px solid #642279; outline-offset:2px; }
 .restaurant-panel { background:#fff; border:1px solid #ddd5df; border-radius:12px; padding:20px; }
 .restaurant-toolbar { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.restaurant-toolbar-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .restaurant-filters, .restaurant-attendance-controls { display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:14px; }
 .restaurant-filters input, .restaurant-filters select, .restaurant-attendance-controls input { min-height:38px; border:1px solid #cfc5d1; border-radius:8px; padding:7px 10px; font:inherit; background:#fff; color:#211523; }
 .restaurant-filters input { min-width:260px; }
 .restaurant-attendance-controls label { display:grid; gap:5px; color:#4b3b4e; font-weight:600; font-size:13px; }
 .restaurant-menu-list, .restaurant-offer-list, .restaurant-customer-list, .restaurant-employee-list { display:grid; gap:8px; }
+.restaurant-table-list { display:grid; gap:8px; }
 .restaurant-menu-row, .restaurant-offer-row, .restaurant-customer-row, .restaurant-employee-row { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; align-items:center; gap:14px; padding:12px 0; border-bottom:1px solid #eee8ef; }
 .restaurant-menu-row:last-child, .restaurant-offer-row:last-child, .restaurant-customer-row:last-child, .restaurant-employee-row:last-child { border-bottom:0; }
+.restaurant-table-row { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; align-items:center; gap:14px; padding:12px 0; border-bottom:1px solid #eee8ef; }
+.restaurant-table-row:last-child { border-bottom:0; }
+.restaurant-table-row.archived { opacity:.9; }
+.restaurant-table-row strong { display:block; color:#211523; }
+.restaurant-table-row span { display:block; color:#6f6371; font-size:13px; margin-top:3px; }
 .restaurant-menu-row strong, .restaurant-offer-row strong, .restaurant-customer-row strong, .restaurant-employee-row strong { display:block; color:#211523; }
 .restaurant-menu-row span, .restaurant-offer-row span, .restaurant-customer-row span, .restaurant-employee-row span { display:block; color:#6f6371; font-size:13px; margin-top:3px; }
 .restaurant-price { text-align:left; color:#48115b; font-weight:700; font-variant-numeric:tabular-nums; }
