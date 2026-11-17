@@ -1,0 +1,45 @@
+plugins { id 'com.android.application' }
+
+def buildString = { name, fallback ->
+    def value = System.getenv(name) ?: fallback
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+android {
+    namespace 'com.rts.business.android'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.rts.business.android'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+        buildConfigField 'String', 'FCM_APP_ID', buildString('FCM_APP_ID', '1:1023748025158:android:50b0e856f7702e21bb9347')
+        buildConfigField 'String', 'FCM_PROJECT_ID', buildString('FCM_PROJECT_ID', 'rts-business-mobile')
+        buildConfigField 'String', 'FCM_SENDER_ID', buildString('FCM_SENDER_ID', '1023748025158')
+        buildConfigField 'String', 'FCM_API_KEY', buildString('FCM_API_KEY', 'AIzaSyD21CfV76MauPjIH4ixu-_RiygbCqROn2k')
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if (System.getenv('ANDROID_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+    implementation platform('com.google.firebase:firebase-bom:33.11.0')
+    implementation 'com.google.firebase:firebase-messaging'
+}

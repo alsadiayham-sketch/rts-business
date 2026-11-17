@@ -1,0 +1,5 @@
+.gradle/
+**/build/
+signing.p12
+*.keystore
+local.properties
