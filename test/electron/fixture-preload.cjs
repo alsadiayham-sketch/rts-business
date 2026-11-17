@@ -45,6 +45,10 @@ const fixture = {
     writes,
     prints: [],
     posEmployeeCalls: [],
+    posSupplyCalls: [],
+    supplyItems: [],
+    supplyAudit: [],
+    supplyRequests: new Map(),
     failEmployeeGetOnce: false,
     employeeUsers: [
         { username: 'fixture-admin', name: 'مدير الاختبار', role: 'admin', active: true, canDelete: false, canDeactivate: false, canChangeRole: false },
@@ -119,6 +123,53 @@ const fakeFirebase = {
             return employeeResponse();
         }
         throw new Error('Unsupported fixture employee method: ' + verb);
+    },
+    isPosSuppliesConfigured: () => true,
+    posSupplies: async (method, payload) => {
+        const verb = String(method || '').toUpperCase();
+        const body = payload || {};
+        fixture.posSupplyCalls.push({ method: verb, payload: copy(body) });
+        if (verb === 'GET') {
+            return { items: copy(fixture.supplyItems), audit: copy(fixture.supplyAudit), auditCursor: null };
+        }
+        if (verb !== 'POST') throw new Error('Unsupported fixture supplies method: ' + verb);
+        if (fixture.supplyRequests.has(body.requestId)) {
+            return { ...copy(fixture.supplyRequests.get(body.requestId)), replayed: true };
+        }
+        let item;
+        if (body.action === 'create') {
+            item = {
+                id: 'fixture-supply-' + (fixture.supplyItems.length + 1),
+                name: body.name, category: body.category, unit: body.unit,
+                quantity: body.quantity, lowStockThreshold: body.lowStockThreshold,
+                lowStock: Number(body.quantity) <= Number(body.lowStockThreshold)
+            };
+            fixture.supplyItems.push(item);
+        } else {
+            item = fixture.supplyItems.find(candidate => candidate.id === body.itemId);
+            if (!item) throw new Error('المستلزم غير موجود.');
+            if (body.action === 'use') {
+                if (Number(body.quantity) > Number(item.quantity)) throw new Error('الكمية المستهلكة أكبر من المخزون المتاح.');
+                item.quantity = String(Number(item.quantity) - Number(body.quantity));
+            } else if (body.action === 'adjust') item.quantity = body.quantity;
+            else if (body.action === 'threshold') item.lowStockThreshold = body.lowStockThreshold;
+            item.lowStock = Number(item.quantity) <= Number(item.lowStockThreshold);
+        }
+        const entry = {
+            id: 'fixture-audit-' + (fixture.supplyAudit.length + 1),
+            action: body.action, itemId: item.id, itemName: item.name, unit: item.unit,
+            beforeQuantity: body.action === 'use' ? String(Number(item.quantity) + Number(body.quantity)) : '0',
+            quantity: body.quantity || item.quantity, afterQuantity: item.quantity,
+            beforeLowStockThreshold: '0', lowStockThreshold: item.lowStockThreshold,
+            lowStock: item.lowStock,
+            actor: window.currentUser?.username || 'fixture-user',
+            actorRole: window.currentUser?.role || 'worker',
+            timestamp: new Date().toISOString()
+        };
+        fixture.supplyAudit.unshift(entry);
+        const result = { ok: true, replayed: false, item: copy(item), audit: copy(entry) };
+        fixture.supplyRequests.set(body.requestId, copy(result));
+        return result;
     },
     serverTimestamp: () => new Date().toISOString(),
     publishOwnerTelemetry: async () => ({ ok: true }),

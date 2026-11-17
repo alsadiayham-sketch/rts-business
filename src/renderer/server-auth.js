@@ -115,4 +115,39 @@ async function employees(fetchRequest, base, token, method, payload) {
     return data;
 }
 
-module.exports = { resolveAuthBase: resolveAuthBase, authenticate: authenticate, nodeRequest: nodeRequest, loginErrorMessage: loginErrorMessage, employees: employees };
+async function supplies(fetchRequest, base, token, method, payload, query) {
+    if (base !== PLATFORM_AUTH_ORIGIN || !token) throw new Error('مخزون المستلزمات يحتاج تسجيل الدخول إلى خادم RTS المعتمد.');
+    if (method !== 'GET' && method !== 'POST') throw new Error('عملية مخزون المستلزمات غير صالحة.');
+    var response = await fetchRequest(PLATFORM_AUTH_ORIGIN + '/api/pos-supplies' + (query || ''), {
+        method: method,
+        redirect: 'error',
+        headers: {
+            Authorization: 'Bearer ' + token,
+            Origin: PLATFORM_AUTH_ORIGIN,
+            'Sec-Fetch-Site': 'none',
+            'Content-Type': 'application/json'
+        },
+        body: method === 'GET' ? undefined : JSON.stringify(payload || {})
+    });
+    var data;
+    try { data = await response.json(); } catch (_) { throw new Error('استجابة مخزون المستلزمات غير صالحة.'); }
+    if (!response.ok) {
+        var error = new Error(data.error && data.error.message || 'تعذر تحديث مخزون المستلزمات.');
+        error.status = response.status;
+        error.code = data.error && data.error.code;
+        if (error.code === 'POS_AUTH_REQUIRED') error.message = 'انتهت الجلسة أو تغيّرت صلاحيات الحساب. سجّل الدخول مجدداً.';
+        if (error.code === 'INSUFFICIENT_SUPPLY_STOCK') error.message = 'الكمية المستهلكة أكبر من المخزون المتاح.';
+        if (error.code === 'SUPPLY_CONFLICT') error.message = 'تغيّر المخزون من جهاز آخر. حدّث القائمة ثم أعد المحاولة.';
+        throw error;
+    }
+    return data;
+}
+
+module.exports = {
+    resolveAuthBase: resolveAuthBase,
+    authenticate: authenticate,
+    nodeRequest: nodeRequest,
+    loginErrorMessage: loginErrorMessage,
+    employees: employees,
+    supplies: supplies
+};

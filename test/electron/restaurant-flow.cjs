@@ -315,10 +315,34 @@ app.whenReady().then(async () => {
         `);
         await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("الطاولات")');
         assert.equal(await evaluate('document.querySelector("[data-r-action=\\"table-new\\"]") === null'), true);
+        assert.equal(await evaluate('!!document.querySelector("[data-r-tab=\\"supplies\\"]") && !!document.querySelector("[data-r-tab=\\"usage\\"]")'), true);
+        await evaluate(`document.querySelector('[data-r-tab="supplies"]').click();`);
+        await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("مخزون المستلزمات")');
+        await evaluate(`RestaurantSupplies.submit('create', {
+            requestId: 'fixture-create-ketchup', name: 'كاتشب تجريبي', category: 'صلصات',
+            unit: 'زجاجة', quantity: '5', lowStockThreshold: '2'
+        })`);
+        await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("كاتشب تجريبي")');
+        await evaluate(`document.querySelector('[data-r-tab="usage"]').click(); RestaurantSupplies.submit('use', {
+            requestId: 'fixture-use-ketchup', itemId: 'fixture-supply-1', quantity: '3'
+        })`);
+        await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("مخزون منخفض")');
+        assert.match(await evaluate('document.querySelector("#restaurantWorkspace").textContent'), /كاتشب تجريبي/);
+        assert.equal(await evaluate('__fixture.supplyItems[0].quantity'), '2');
+        assert.equal(await evaluate('__fixture.supplyAudit[0].actor'), 'fixture-worker');
+        await assert.rejects(
+            evaluate(`RestaurantSupplies.submit('use', { requestId: 'fixture-overspend', itemId: 'fixture-supply-1', quantity: '3' })`),
+            /أكبر من المخزون/
+        );
+        await waitFor('document.querySelector("#restaurantWorkspace").textContent.includes("أكبر من المخزون")');
+        await screenshot('restaurant-supplies-desktop', 1440, 1000);
+        await screenshot('restaurant-supplies-compact', 1024, 700);
+        console.log('PASS: worker supply creation, exact usage decrement, low-stock notification, audit identity and visible overspend failure.');
         await evaluate(`
             currentUser = { username: 'fixture-admin', role: 'admin' };
             syncRestaurantWorkspace();
             switchPage('restaurant');
+            document.querySelector('[data-r-tab="tables"]').click();
         `);
         await waitFor('!!document.querySelector("[data-r-action=\\"table-new\\"]")');
         await evaluate(`
@@ -699,8 +723,7 @@ app.whenReady().then(async () => {
         `);
         assert.equal(await evaluate('!document.querySelector("[data-r-action=menu-new]") || document.querySelector("[data-r-action=menu-new]").disabled'), true);
         assert.equal(await evaluate('document.getElementById("restaurantManageMenuBtn").style.display'), 'none');
-        assert.equal(await evaluate('document.querySelectorAll("#restaurantWorkspace [data-r-tab]").length'), 1);
-        assert.equal(await evaluate('document.querySelector("#restaurantWorkspace [data-r-tab]").dataset.rTab'), 'tables');
+        assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("#restaurantWorkspace [data-r-tab]")).map(tab => tab.dataset.rTab)'), ['supplies', 'usage', 'tables']);
         await evaluate(`switchPage('reports');`);
         assert.equal(await evaluate('currentPage'), 'sales');
         await evaluate(`runShortcutAction('page-settings');`);

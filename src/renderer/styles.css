@@ -2096,6 +2096,36 @@ body {
 .restaurant-section-row strong { display:block; color:#211523; }
 .restaurant-section-row span { display:block; margin-top:3px; color:#6f6371; font-size:13px; }
 .restaurant-section-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.restaurant-supply-loading { padding:32px 12px; text-align:center; color:#6f6371; }
+.restaurant-low-summary { color:#89500f; }
+.restaurant-supply-list { display:grid; gap:0; }
+.restaurant-supply-row { display:grid; grid-template-columns:minmax(190px,1fr) minmax(110px,auto) auto auto; align-items:center; gap:14px; padding:13px 0; border-bottom:1px solid #eee8ef; }
+.restaurant-supply-row:last-child { border-bottom:0; }
+.restaurant-supply-row.low { background:#fffaf2; margin-inline:-10px; padding-inline:10px; border-radius:8px; }
+.restaurant-supply-row strong { display:block; color:#211523; }
+.restaurant-supply-row span { display:block; margin-top:3px; color:#6f6371; font-size:13px; }
+.restaurant-supply-quantity { text-align:left; font-variant-numeric:tabular-nums; }
+.restaurant-supply-quantity strong { color:#48115b; font-size:17px; }
+.restaurant-supply-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+.restaurant-history > .restaurant-supply-audit { display:block; padding:0; border-bottom:0; }
+.restaurant-supply-audit > div { display:grid; grid-template-columns:minmax(180px,1fr) minmax(100px,auto) auto; gap:16px; align-items:center; padding:10px 0; border-bottom:1px solid #eee8ef; }
+.restaurant-supply-audit strong, .restaurant-supply-audit small { display:block; }
+.restaurant-supply-audit small { margin-top:3px; color:#6f6371; font-size:12px; }
+.restaurant-supply-audit time { color:#5f5361; font-size:13px; white-space:nowrap; }
+.restaurant-audit-more { margin-top:14px; }
+
+@media (max-width: 980px) {
+    .restaurant-supply-row { grid-template-columns:minmax(170px,1fr) auto auto; }
+    .restaurant-supply-actions { grid-column:1 / -1; justify-content:flex-start; }
+}
+
+@media (max-width: 700px) {
+    .restaurant-supply-row { grid-template-columns:1fr auto; }
+    .restaurant-supply-row > .restaurant-status { justify-self:start; }
+    .restaurant-supply-actions { grid-column:1 / -1; }
+    .restaurant-supply-audit > div { grid-template-columns:1fr auto; }
+    .restaurant-supply-audit time { grid-column:1 / -1; }
+}
 
 /* Restaurant order surface: a cashier workbench, not a reskinned retail catalog. */
 body.restaurant-mode .sales-layout { display:grid; grid-template-columns:minmax(0, 1fr) minmax(292px, 360px); gap:14px; }

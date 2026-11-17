@@ -1,6 +1,6 @@
 {
   "name": "rts-business",
-  "version": "4.0.16",
+  "version": "4.0.17",
   "description": "RTS Business by Royal Technology Solutions",
   "main": "src/main.js",
   "scripts": {
@@ -29,6 +29,11 @@
     "productName": "RTS Business",
     "executableName": "RTS Business",
     "icon": "src/assets/icon.png",
+    "files": [
+      "**/*",
+      "!android{,/**}",
+      "!.github{,/**}"
+    ],
     "publish": [
       {
         "provider": "github",

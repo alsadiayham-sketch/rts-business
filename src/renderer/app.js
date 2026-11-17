@@ -19,6 +19,8 @@ var posAuthenticate = fbConfig.posAuthenticate;
 var configurePosAuth = fbConfig.configurePosAuth;
 var posEmployees = fbConfig.posEmployees;
 var isPosEmployeeManagementConfigured = fbConfig.isPosEmployeeManagementConfigured;
+var posSupplies = fbConfig.posSupplies;
+var isPosSuppliesConfigured = fbConfig.isPosSuppliesConfigured;
 var publishOwnerTelemetry = fbConfig.publishOwnerTelemetry;
 var ownerTelemetryHelper = require('./owner-telemetry');
 var electron = require('electron');
@@ -5055,6 +5057,7 @@ function syncRestaurantWorkspace() {
     if (!window.RestaurantWorkspace || !isRestaurantMode()) return;
     var sessionId = storeSessionId;
     window.RestaurantWorkspace.init({
+        sessionKey: sessionId,
         records: function () { return restaurantRecords.slice(); },
         products: function () { return products.slice(); },
         customers: function () { return customerList(); },
@@ -5094,6 +5097,17 @@ function syncRestaurantWorkspace() {
             if (typeof posEmployees !== 'function') return Promise.reject(new Error('خدمة حسابات الموظفين غير متاحة.'));
             return posEmployees(method, payload).then(function (result) {
                 if (!isActiveStoreSession(sessionId)) throw new Error('تم تبديل المتجر، تجاهّلنا الاستجابة السابقة.');
+                return result || {};
+            });
+        },
+        isPosSuppliesConfigured: function () {
+            return typeof isPosSuppliesConfigured === 'function' && !!isPosSuppliesConfigured();
+        },
+        posSupplies: function (method, payload, query) {
+            if (!isActiveStoreSession(sessionId)) return Promise.reject(new Error('تم تبديل المتجر، أعد تحميل مخزون المستلزمات.'));
+            if (typeof posSupplies !== 'function') return Promise.reject(new Error('خدمة مخزون المستلزمات غير متاحة.'));
+            return posSupplies(method, payload, query).then(function (result) {
+                if (!isActiveStoreSession(sessionId)) throw new Error('تم تبديل المتجر، تجاهّلنا استجابة المخزون السابقة.');
                 return result || {};
             });
         }

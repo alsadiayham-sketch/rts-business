@@ -23,6 +23,7 @@ var ownerTelemetry = require('./owner-telemetry');
 var serverAuth = require('./server-auth');
 var posAuthBase = null;
 var posAuthGeneration = 0;
+var PLATFORM_AUTH_ORIGIN = 'https://rts-royal.pages.dev';
 
 // =====================================================================
 //  D1 TENANTS
@@ -382,6 +383,18 @@ function posEmployees(method, payload) {
     });
 }
 
+function isPosSuppliesConfigured() {
+    return posAuthBase === PLATFORM_AUTH_ORIGIN && !!posToken;
+}
+
+function posSupplies(method, payload, query) {
+    var generation = posAuthGeneration;
+    return serverAuth.supplies(serverAuth.nodeRequest, posAuthBase, posToken, method, payload, query).then(function (result) {
+        if (generation !== posAuthGeneration) throw new Error('تم تغيير جلسة المتجر. حدّث مخزون المستلزمات.');
+        return result;
+    });
+}
+
 module.exports = {
     db: db,
     rawDb: rawDb,
@@ -405,5 +418,7 @@ module.exports = {
     configurePosAuth: configurePosAuth,
     clearPosToken: clearPosToken,
     isPosEmployeeManagementConfigured: isPosEmployeeManagementConfigured,
-    posEmployees: posEmployees
+    posEmployees: posEmployees,
+    isPosSuppliesConfigured: isPosSuppliesConfigured,
+    posSupplies: posSupplies
 };

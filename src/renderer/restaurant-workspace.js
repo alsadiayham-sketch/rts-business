@@ -326,18 +326,22 @@
     function render() {
         var host = document.getElementById('restaurantWorkspace');
         if (!host) return;
+        var supplies = root.RestaurantSupplies;
+        if (supplies) supplies.init(adapters, render);
         var tabs = canManageWorkspace()
-            ? [['menu', 'إدارة القائمة'], ['sections', 'الأقسام'], ['offers', 'العروض'], ['customers', 'العملاء والولاء'], ['accounts', 'حسابات الدخول'], ['attendance', 'الملفات التجريبية'], ['tables', 'الطاولات']]
-            : [['tables', 'الطاولات']];
+            ? [['menu', 'إدارة القائمة'], ['sections', 'الأقسام'], ['offers', 'العروض'], ['supplies', 'المستلزمات'], ['usage', 'الاستهلاك'], ['customers', 'العملاء والولاء'], ['accounts', 'حسابات الدخول'], ['attendance', 'الملفات التجريبية'], ['tables', 'الطاولات']]
+            : [['supplies', 'المستلزمات'], ['usage', 'الاستهلاك'], ['tables', 'الطاولات']];
         if (!tabs.some(function (tab) { return tab[0] === state.tab; })) state.tab = tabs[0][0];
         if (state.tab === 'accounts' && admin() && state.accounts.configured == null && !state.accounts.loading) loadEmployeeAccounts();
+        if ((state.tab === 'supplies' || state.tab === 'usage') && supplies) supplies.activate();
         var content = state.tab === 'menu' ? renderMenu()
             : state.tab === 'sections' ? renderSections()
                 : state.tab === 'offers' ? renderOffers()
-                    : state.tab === 'customers' ? renderCustomers()
-                        : state.tab === 'accounts' ? renderAccounts()
-                            : state.tab === 'attendance' ? renderAttendance()
-                                : renderTables();
+                    : (state.tab === 'supplies' || state.tab === 'usage') && supplies ? supplies.render(state.tab)
+                        : state.tab === 'customers' ? renderCustomers()
+                            : state.tab === 'accounts' ? renderAccounts()
+                                : state.tab === 'attendance' ? renderAttendance()
+                                    : renderTables();
         host.innerHTML = '<header class="restaurant-workspace-header"><div><h2>إدارة المطعم</h2><p>القائمة والعروض والعملاء والطاولات في مساحة تشغيل واحدة.</p></div></header>' +
             '<div class="restaurant-tabs" role="tablist">' +
             tabs.map(function (tab) { return '<button role="tab" class="' + (state.tab === tab[0] ? 'active' : '') + '" data-r-tab="' + tab[0] + '">' + tab[1] + '</button>'; }).join('') +
@@ -1064,7 +1068,7 @@
     function click(event) {
         var tab = event.target.closest('[data-r-tab]');
         if (tab) {
-            if (!canManageWorkspace() && tab.dataset.rTab !== 'tables') return requireManagerAccess();
+            if (!canManageWorkspace() && ['tables', 'supplies', 'usage'].indexOf(tab.dataset.rTab) < 0) return requireManagerAccess();
             state.tab = tab.dataset.rTab;
             if (state.tab === 'accounts') loadEmployeeAccounts();
             render();
@@ -1072,6 +1076,10 @@
         }
         var button = event.target.closest('[data-r-action]'); if (!button || button.disabled) return;
         var id = button.dataset.id, action = button.dataset.rAction;
+        if ((action.indexOf('supply-') === 0 || action.indexOf('supplies-') === 0) && root.RestaurantSupplies) {
+            root.RestaurantSupplies.handleClick(action, id);
+            return;
+        }
         if (action === 'menu-new') editMenu(); else if (action === 'menu-edit') editMenu(id);
         else if (action === 'section-new') editSection(); else if (action === 'section-edit') editSection(id);
         else if (action === 'section-up') moveSection(id, -1); else if (action === 'section-down') moveSection(id, 1); else if (action === 'section-delete') deleteSection(id);
@@ -1118,7 +1126,7 @@
         render: render,
         editMenu: editMenu,
         showMenu: function () {
-            state.tab = canManageWorkspace() ? 'menu' : 'tables';
+            state.tab = canManageWorkspace() ? 'menu' : 'supplies';
             state.category = 'all';
             state.query = '';
             render();
