@@ -15,7 +15,7 @@ function validateRestaurantService(input) {
     }
     if (type === 'dinein') {
         order.table = Number(input.table);
-        if (!Number.isInteger(order.table) || order.table < 1 || order.table > 60) {
+        if (!Number.isInteger(order.table) || order.table < 1 || order.table > 2147483647) {
             return { ok: false, error: 'اختر طاولة للطلب داخل المطعم.' };
         }
     }

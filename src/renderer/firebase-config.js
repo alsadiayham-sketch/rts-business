@@ -395,6 +395,26 @@ function posSupplies(method, payload, query) {
     });
 }
 
+function posRestaurantRequest(handler, method, payload, query) {
+    var generation = posAuthGeneration;
+    return handler(serverAuth.nodeRequest, posAuthBase, posToken, method, payload, query).then(function (result) {
+        if (generation !== posAuthGeneration) throw new Error('تم تغيير جلسة المتجر. لم يتم تطبيق نتيجة الطلب السابق.');
+        return result;
+    });
+}
+
+function posRestaurantOrders(method, payload, query) {
+    return posRestaurantRequest(serverAuth.restaurantOrders, method, payload, query);
+}
+
+function posRestaurantConfig(method, payload, query) {
+    return posRestaurantRequest(serverAuth.restaurantConfig, method, payload, query);
+}
+
+function posRestaurantTables(method, payload, query) {
+    return posRestaurantRequest(serverAuth.restaurantTables, method, payload, query);
+}
+
 module.exports = {
     db: db,
     rawDb: rawDb,
@@ -420,5 +440,8 @@ module.exports = {
     isPosEmployeeManagementConfigured: isPosEmployeeManagementConfigured,
     posEmployees: posEmployees,
     isPosSuppliesConfigured: isPosSuppliesConfigured,
-    posSupplies: posSupplies
+    posSupplies: posSupplies,
+    posRestaurantOrders: posRestaurantOrders,
+    posRestaurantConfig: posRestaurantConfig,
+    posRestaurantTables: posRestaurantTables
 };

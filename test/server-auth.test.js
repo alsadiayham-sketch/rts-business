@@ -107,7 +107,61 @@ test('desktop login transport rejects redirect and oversized responses', async f
         };
         return request;
     });
+
     await assert.rejects(auth.nodeRequest('https://rts-royal.pages.dev/api/pos-employees', { method: 'DELETE', headers: {}, body: '{"username":"موظف"}' }));
     mode = 'oversize';
     await assert.rejects(auth.nodeRequest('https://rts-royal.pages.dev/api/pos-login', { method: 'POST', headers: {}, body: '{"username":"موظف"}' }));
+});
+
+test('shared restaurant transport stays on the trusted origin and preserves retry and conflict details', async function () {
+    var payload = { action: 'hold', requestId: 'fixture-request', revision: 3 };
+    var result = await auth.restaurantOrders(async function (url, options) {
+        assert.equal(url, licence.authApiBaseUrl + '/api/pos-mobile-orders');
+        assert.equal(options.headers.Authorization, 'Bearer fixture-token');
+        assert.equal(options.headers.Origin, licence.authApiBaseUrl);
+        assert.equal(options.redirect, 'error');
+        assert.equal(options.maxResponseBytes, 2 * 1024 * 1024);
+        assert.deepEqual(JSON.parse(options.body), payload);
+        return Response.json({ ok: true, revision: 4 });
+    }, licence.authApiBaseUrl, 'fixture-token', 'POST', payload);
+    assert.equal(result.revision, 4);
+    await auth.restaurantOrders(async function (url, options) {
+        assert.equal(url, licence.authApiBaseUrl + '/api/pos-mobile-orders?holdId=fixture%26other%3Dtenant');
+        assert.equal(options.body, undefined);
+        return Response.json({ holds: [] });
+    }, licence.authApiBaseUrl, 'fixture-token', 'GET', null, { holdId: 'fixture&other=tenant' });
+    await assert.rejects(auth.restaurantOrders(function () { throw new Error('Must not fetch'); }, 'https://other.example', 'fixture-token', 'GET'));
+    await assert.rejects(auth.restaurantOrders(function () { throw new Error('Must not fetch'); }, licence.authApiBaseUrl, '', 'GET'));
+    await assert.rejects(auth.restaurantOrders(async function () {
+        return Response.json({ error: { code: 'HOLD_CONFLICT', message: 'Order changed on another terminal' } }, { status: 409 });
+    }, licence.authApiBaseUrl, 'fixture-token', 'POST', payload), function (error) {
+        return error.status === 409 && error.code === 'HOLD_CONFLICT';
+    });
+});
+
+test('shared-order transport accepts bounded larger snapshots without relaxing the login limit', async function (t) {
+    var https = require('node:https');
+    var EventEmitter = require('node:events');
+    var calls = 0;
+    t.mock.method(https, 'request', function (_url, _options, onResponse) {
+        calls++;
+        var request = new EventEmitter();
+        request.end = function () {
+            var response = new EventEmitter();
+            response.statusCode = 200;
+            response.destroy = function (error) { response.emit('error', error); };
+            onResponse(response);
+            response.emit('data', Buffer.from(JSON.stringify({ value: 'x'.repeat(70000) })));
+            response.emit('end');
+        };
+        return request;
+    });
+    var response = await auth.nodeRequest(licence.authApiBaseUrl + '/api/pos-mobile-orders', {
+        method: 'GET', headers: {}, maxResponseBytes: 2 * 1024 * 1024
+    });
+    assert.equal((await response.json()).value.length, 70000);
+    await assert.rejects(auth.nodeRequest(licence.authApiBaseUrl + '/api/pos-login', { method: 'GET', headers: {} }));
+    var before = calls;
+    await assert.rejects(auth.nodeRequest(licence.authApiBaseUrl, { method: 'GET', headers: {}, maxResponseBytes: 3 * 1024 * 1024 }));
+    assert.equal(calls, before);
 });

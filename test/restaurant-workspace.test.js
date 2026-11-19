@@ -36,6 +36,8 @@ function appHarness() {
         navigator: { onLine: true }, setTimeout() { return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
         require(request) {
             if (request === './restaurant-service') return require('../src/renderer/restaurant-service');
+            if (request === './restaurant-shared') return require('../src/renderer/restaurant-shared');
+            if (request === 'node:crypto') return require('node:crypto');
             if (request === './firebase-config') return {
                 db, rawDb: {}, firebase, storage: {}, setProjectId() {}, getProjectId() { return 'test'; }, isD1() { return false; },
                 registerD1Tenant() {}, registerD1MessagingBackend() {}, isMessagingConfigured() { return false; },
@@ -307,4 +309,213 @@ test('restaurant workers cannot mutate table configuration', async () => {
     vm.runInContext(`currentUser = { username: 'worker', role: 'worker' };`, sandbox);
     await assert.rejects(() => new Promise((resolve, reject) => sandbox.createRestaurantTable({ name: 'غير مسموح' }, resolve, reject)), /للمدير فقط/);
     assert.equal(vm.runInContext('getRestaurantTables(true).length', sandbox), 0);
+});
+
+async function sharedHarness(options = {}) {
+    const harness = appHarness();
+    const { sandbox } = harness;
+    const calls = [], remoteHolds = new Map(), paid = new Map();
+    let loseCheckout = !!options.loseCheckout;
+    sandbox.currentUser = { username: 'admin-fixture', role: 'admin' };
+    sandbox.licensedBusinessType = 'restaurant';
+    sandbox.licenseValid = true;
+    sandbox.products = [{ id: 'burger', name: 'برغر اختبار', variants: [{ color: '', size: '100g', price: 20, cost: 9, stock: 5 }] }];
+    Object.assign(sandbox.sharedRestaurantAdapters, {
+        config: async () => ({ configured: true, revision: 3, config: { features: { tax: false }, taxPercent: 16, taxIncluded: false, restaurantMenuSections: [] } }),
+        tables: async () => ({ configured: true, revision: 2, tables: [{ id: 71, name: 'طاولة الاختبار', archived: false }] }),
+        orders: async (method, payload) => {
+            if (method === 'GET') return { holds: Array.from(remoteHolds.values()) };
+            calls.push(JSON.parse(JSON.stringify(payload)));
+            if (payload.action === 'hold') {
+                const existing = remoteHolds.get(payload.holdId);
+                if (existing && existing.revision !== payload.revision) {
+                    const error = new Error('Revision conflict'); error.status = 409; throw error;
+                }
+                const hold = {
+                    id: payload.holdId, revision: payload.revision + 1, status: 'open',
+                    items: payload.items, service: payload.service, note: payload.note, discount: payload.discount, offerId: payload.offerId,
+                    createdAtIso: '2026-01-01T10:00:00Z'
+                };
+                remoteHolds.set(hold.id, hold);
+                return { ok: true, hold };
+            }
+            if (payload.action === 'quote') return { ok: true, quoteHash: 'fixture-quote', quote: { total: 40 } };
+            if (payload.action === 'checkout') {
+                if (!paid.has(payload.requestId)) {
+                    paid.set(payload.requestId, {
+                        billNumber: 'POS-M-' + payload.holdId, total: 40, paymentMethod: payload.paymentMethod,
+                        items: [], restaurantOrder: remoteHolds.get(payload.holdId).service
+                    });
+                    remoteHolds.delete(payload.holdId);
+                }
+                if (loseCheckout) {
+                    loseCheckout = false;
+                    const error = new Error('Committed response lost'); error.status = 503; throw error;
+                }
+                return { ok: true, bill: paid.get(payload.requestId) };
+            }
+            throw new Error('Unexpected shared fixture action');
+        }
+    });
+    vm.runInContext("showReceipt = function (bill) { window.fixtureReceipt = bill; }; printReceipt = function () { window.fixturePrints = (window.fixturePrints || 0) + 1; }; setRestaurantService({ type: 'takeaway' });", sandbox);
+    sandbox.sharedRestaurantClient.configure(sandbox.sharedRestaurantAdapters, 'shared-fixture');
+    await sandbox.sharedRestaurantClient.refresh();
+    return { ...harness, calls, remoteHolds, paid };
+}
+
+test('shared desktop holds preserve local tickets and use canonical configuration and monotonic table IDs', async () => {
+    const { sandbox, storage, calls, elements } = await sharedHarness();
+    const local = JSON.stringify([{ id: 'local-ticket', cart: [{ productId: 'burger', qty: 1 }] }]);
+    storage.set('ada_pos_held_test', local);
+    sandbox.storeConfig = { features: { tax: true }, taxPercent: 99 };
+    assert.equal(sandbox.getStoreConfig().features.tax, false);
+    assert.equal(sandbox.getRestaurantTables(false)[0].id, 71);
+    sandbox.addVariantToCart(sandbox.products[0], '', '100g', 2);
+    sandbox.document.getElementById('discountInput').value = '5';
+    sandbox.document.getElementById('discountType').value = 'fixed';
+    sandbox.holdSale();
+    await new Promise(setImmediate);
+    assert.equal(calls.filter(call => call.action === 'hold').length, 1);
+    assert.equal(calls[0].discount.value, 5);
+    assert.equal(sandbox.heldSales.length, 1);
+    assert.equal(sandbox.cart.length, 0);
+    assert.equal(storage.get('ada_pos_held_test'), local);
+    assert.equal(sandbox.heldSales[0].shared, true);
+    sandbox.resumeHeld(sandbox.heldSales[0].id);
+    assert.equal(sandbox.cart[0].qty, 2);
+    assert.equal(sandbox.activeRestaurantHeldRevision, 1);
+    assert.equal(elements.get('discountInput').value, 5);
+});
+
+test('shared desktop checkout locks uncertain outcomes and retries one committed charge without a local write', async () => {
+    const { sandbox, elements, calls, paid, writes } = await sharedHarness({ loseCheckout: true });
+    sandbox.addVariantToCart(sandbox.products[0], '', '100g', 2);
+    sandbox.checkout();
+    await new Promise(setImmediate);
+    assert.match(elements.get('confirmMessage').textContent, /40.00/);
+    const confirmPayment = sandbox._confirmCb;
+    sandbox._closeConfirm(true);
+    confirmPayment();
+    await new Promise(setImmediate);
+    assert.equal(paid.size, 1);
+    assert.equal(sandbox.checkoutInFlight, true);
+    assert.equal(sandbox._confirmLocked, true);
+    sandbox._closeConfirm();
+    assert.equal(elements.get('confirmModal').style.display, 'flex');
+    const retry = sandbox._confirmCb;
+    sandbox._closeConfirm(true);
+    retry();
+    await new Promise(setImmediate);
+    const checkouts = calls.filter(call => call.action === 'checkout');
+    assert.equal(checkouts[0].requestId, checkouts[1].requestId);
+    assert.equal(paid.size, 1);
+    assert.equal(sandbox.window.fixturePrints, 1);
+    assert.equal(sandbox.window.fixtureReceipt.total, 40);
+    assert.equal(sandbox.checkoutInFlight, false);
+    assert.equal(sandbox.cart.length, 0);
+    assert.equal(writes.length, 0);
+});
+
+test('shared desktop preserves the selected offer through hold and resume and clears it only explicitly', async () => {
+    const { sandbox, calls } = await sharedHarness();
+    sandbox.restaurantRecords = [{ id: 'offer-one', recordType: 'restaurant-offer', name: 'عرض الاختبار', discountType: 'percent', discountValue: 20, minQty: 2, enabled: true }];
+    sandbox.addVariantToCart(sandbox.products[0], '', '100g', 2);
+    sandbox.activeRestaurantOffer = { id: 'offer-one' };
+    sandbox.holdSale();
+    await new Promise(setImmediate);
+    assert.equal(calls[0].offerId, 'offer-one');
+    assert.equal(calls[0].discount.value, 8);
+    sandbox.resumeHeld(sandbox.heldSales[0].id);
+    assert.equal(sandbox.activeRestaurantOffer.id, 'offer-one');
+    assert.equal(sandbox.sharedTicketIntent().offerId, 'offer-one');
+    sandbox.resetActiveRestaurantOffer();
+    assert.equal(sandbox.sharedTicketIntent().offerId, null);
+});
+
+test('a missing or invalid shared offer cannot silently become an undiscounted replacement hold', async () => {
+    const { sandbox, calls } = await sharedHarness();
+    sandbox.addVariantToCart(sandbox.products[0], '', '100g', 1);
+    sandbox.activeRestaurantOffer = { id: 'offer-not-loaded' };
+    sandbox.renderCart();
+    assert.equal(sandbox.activeRestaurantOffer.id, 'offer-not-loaded');
+    sandbox.holdSale();
+    await new Promise(setImmediate);
+    assert.equal(calls.length, 0);
+    assert.equal(sandbox.activeRestaurantOffer.id, 'offer-not-loaded');
+    assert.equal(sandbox.cart.length, 1);
+});
+
+test('shared desktop rejects unsupported benefits without silently dropping them', async () => {
+    const { sandbox, elements, calls } = await sharedHarness();
+    sandbox.addVariantToCart(sandbox.products[0], '', '100g', 1);
+    sandbox.pendingRedeem = { points: 10, value: 5 };
+    sandbox.holdSale();
+    await new Promise(setImmediate);
+    assert.equal(calls.length, 0);
+    assert.equal(sandbox.pendingRedeem.points, 10);
+    assert.equal(sandbox.cart.length, 1);
+    assert.match(elements.get('confirmMessage').textContent, /غير مدعوم/);
+});
+
+test('queued shared operations cannot write into a newly active session', async () => {
+    const { sandbox } = await sharedHarness();
+    let invoked = false;
+    sandbox.runSharedRestaurantWrite(async () => { invoked = true; return { ok: true }; }, () => {});
+    sandbox.storeSessionId++;
+    await new Promise(setImmediate);
+    assert.equal(invoked, false);
+});
+
+test('protected historical costs never fall back to the current product cost or display invented margins', async () => {
+    const { sandbox } = await sharedHarness();
+    const item = { productId: 'burger', color: '', size: '100g', historicalCostProtected: true, cost: 0 };
+    assert.equal(sandbox.itemUnitCost(item), 0);
+    assert.equal(Number.isNaN(sandbox.itemUnitCost({ ...item, cost: null })), true);
+    assert.equal(sandbox.profitLabel(NaN), 'غير متاح');
+});
+
+test('explicit legacy ticket import preserves its original and rejects already billed tickets', async () => {
+    const { sandbox, storage, calls, elements } = await sharedHarness();
+    const original = JSON.stringify([{ id: 'legacy-paid', cart: [{ productId: 'burger', color: '', size: '100g', qty: 1 }], restaurantOrder: { type: 'takeaway' } }]);
+    sandbox.legacyRestaurantHeldSales = JSON.parse(original);
+    storage.set('ada_pos_held_test', original);
+    sandbox.db.collection = () => ({ doc: () => ({ get: async () => ({ exists: true }) }) });
+    sandbox.importLegacyRestaurantHeld(0);
+    const confirm = sandbox._confirmCb;
+    sandbox._closeConfirm(true);
+    confirm();
+    await new Promise(setImmediate);
+    assert.equal(calls.length, 0);
+    assert.equal(storage.get('ada_pos_held_test'), original);
+    assert.match(elements.get('confirmMessage').textContent, /محفوظة بالفعل كفاتورة/);
+});
+
+test('repeating explicit legacy import after a restart cannot create a second shared ticket', async () => {
+    const first = await sharedHarness();
+    const original = JSON.stringify([{ id: 'legacy-unpaid', cart: [{ productId: 'burger', color: '', size: '100g', qty: 1 }], restaurantOrder: { type: 'takeaway' } }]);
+    first.sandbox.legacyRestaurantHeldSales = JSON.parse(original);
+    first.storage.set('ada_pos_held_test', original);
+    first.sandbox.db.collection = () => ({ doc: () => ({ get: async () => ({ exists: false }) }) });
+    first.sandbox.importLegacyRestaurantHeld(0);
+    let confirm = first.sandbox._confirmCb;
+    first.sandbox._closeConfirm(true);
+    confirm();
+    await new Promise(setImmediate);
+    assert.equal(first.remoteHolds.size, 1);
+    const second = await sharedHarness();
+    Object.assign(second.sandbox.sharedRestaurantAdapters, { orders: first.sandbox.sharedRestaurantAdapters.orders });
+    for (const [key, value] of first.storage) second.storage.set(key, value);
+    second.sandbox.legacyRestaurantHeldSales = JSON.parse(original);
+    second.sandbox.db.collection = () => ({ doc: () => ({ get: async () => ({ exists: false }) }) });
+    second.sandbox.importLegacyRestaurantHeld(0);
+    confirm = second.sandbox._confirmCb;
+    second.sandbox._closeConfirm(true);
+    confirm();
+    await new Promise(setImmediate);
+    const imports = first.calls.filter(call => call.action === 'hold');
+    assert.equal(imports.length, 2);
+    assert.equal(imports[0].holdId, imports[1].holdId);
+    assert.equal(first.remoteHolds.size, 1);
+    assert.equal(first.storage.get('ada_pos_held_test'), original);
+    assert.equal(second.storage.get('ada_pos_held_test'), original);
 });

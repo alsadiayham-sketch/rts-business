@@ -246,6 +246,7 @@
         var activeTables = allTables.filter(function (tableRecord) { return !tableRecord.archived; });
         var archivedTables = allTables.filter(function (tableRecord) { return tableRecord.archived; });
         var canEdit = admin();
+        var shared = adapters.sharedStatus ? adapters.sharedStatus() : null;
         function occupancy(tableId) {
             return adapters.tableOccupancy ? adapters.tableOccupancy(tableId) : { occupied: false, held: 0, activeCart: false };
         }
@@ -262,7 +263,13 @@
         }
         return '<div class="restaurant-toolbar"><div><h3>الطاولات والطلبات</h3><p>اضغط على طاولة لبدء طلب أو متابعة طلب معلّق. تعديل الإعدادات متاح للمدير فقط.</p></div>' +
             (canEdit ? '<div class="restaurant-toolbar-actions"><button class="btn-primary" data-r-action="table-new">+ طاولة جديدة</button></div>' : '') + '</div>' +
-            (canEdit ? '<div class="restaurant-attendance-controls"><label>عدد الطاولات النشطة <input type="number" id="tableCount" min="1" max="60" step="1" value="' + Number(adapters.tableCount ? adapters.tableCount() : activeTables.length || 1) + '"></label><button class="btn-secondary" data-r-action="tables-save">تطبيق العدد</button></div>' : '') +
+            (shared && shared.available ? '<div class="restaurant-history"><h4>أجهزة المطعم</h4><p>' +
+                esc(shared.error || (!shared.loaded ? 'جارٍ التحقق من إعدادات الربط…' : shared.enabled ? 'الطاولات والطلبات مشتركة بين أجهزة Windows وAndroid.' : 'الطلبات محلية حتى يراجع المدير إعدادات الربط ويعتمد الانتقال.')) +
+                '</p>' + (shared.legacyCount ? '<p>توجد ' + Number(shared.legacyCount) + ' تذكرة قديمة محفوظة على هذا الجهاز. لم يتم دمجها أو حذفها.</p>' : '') +
+                '<div class="restaurant-toolbar-actions"><button class="btn-secondary" data-r-action="shared-refresh">تحديث الحالة</button>' +
+                (canEdit && shared.legacyCount ? '<button class="btn-secondary" data-r-action="shared-legacy">مراجعة التذاكر القديمة</button>' : '') +
+                (canEdit && !shared.enabled ? '<button class="btn-secondary" data-r-action="shared-setup">مراجعة وربط الأجهزة</button>' : '') + '</div></div>' : '') +
+            (canEdit && !(shared && shared.enabled) ? '<div class="restaurant-attendance-controls"><label>عدد الطاولات النشطة <input type="number" id="tableCount" min="1" max="60" step="1" value="' + Number(adapters.tableCount ? adapters.tableCount() : activeTables.length || 1) + '"></label><button class="btn-secondary" data-r-action="tables-save">تطبيق العدد</button></div>' : '') +
             '<div class="restaurant-table-list">' + activeTables.map(tableCard).join('') + (activeTables.length ? '' : '<div class="restaurant-empty">لا توجد طاولات نشطة حالياً.</div>') + '</div>' +
             (canEdit && archivedTables.length ? '<div class="restaurant-history"><h4>طاولات مؤرشفة</h4><div class="restaurant-table-list">' +
                 archivedTables.map(function (tableRecord) {
@@ -282,6 +289,37 @@
             }, function (error) {
                 ui.fail((error && error.message) || 'تعذر إضافة الطاولة.');
             });
+        });
+    }
+
+    function setupSharedRestaurant() {
+        if (!requireAdmin()) return;
+        promptFields('مراجعة ربط أجهزة المطعم', [
+            { name: 'sourceId', label: 'معرّف إعدادات سابق (اختياري)', note: 'اتركه فارغاً لمراجعة أحدث إعدادات موثّقة. عند كثرة السجلات يجب تحديد المعرّف صراحةً.' },
+            { name: 'tables', label: 'الطاولات عند الربط لأول مرة', type: 'select', value: 'empty', options: [
+                { value: 'empty', label: 'ابدأ بلا طاولات — سأضيفها بالاسم' },
+                { value: 'local', label: 'استيراد تعريفات الطاولات من هذا الجهاز فقط' }
+            ] },
+            { name: 'retired', label: 'حالة أجهزة المطعم القديمة', type: 'select', value: 'no', options: [
+                { value: 'no', label: 'لم أؤكد تحديث أو إغلاق كل الأجهزة بعد' },
+                { value: 'yes', label: 'أكدت تحديث أو إغلاق كل النسخ القديمة' }
+            ] }
+        ], function (value, ui) {
+            if (value.retired !== 'yes') return ui.fail('حدّث أو أغلق كل النسخ القديمة أولاً. لن نفعّل الكتابة المشتركة افتراضياً.');
+            adapters.previewShared(value.sourceId).then(function (preview) {
+                var config = preview.config;
+                var message = 'مصدر الإعدادات: ' + (preview.alreadyConfigured ? 'الإعدادات المشتركة الحالية' : preview.sourceId || 'إعدادات هذا الجهاز') +
+                    '\nالضريبة: ' + (config.features.tax ? config.taxPercent + '% — ' + (config.taxIncluded ? 'مشمولة' : 'تضاف إلى السعر') : 'غير مفعّلة') +
+                    '\nالأقسام: ' + (config.restaurantMenuSections || []).length +
+                    '\nالطاولات: ' + (value.tables === 'local' ? 'استيراد تعريفات هذا الجهاز إذا لم تُهيّأ سابقاً' : 'بلا استيراد') +
+                    '\nتبقى التذاكر المحلية كما هي ولن تُدمج أو تُحذف. هل تعتمد هذه الإعدادات؟';
+                if (!window.confirm(message)) { ui.setPending(false); return; }
+                return adapters.activateShared(preview, value.tables === 'local').then(function () {
+                    ui.close();
+                    setMessage('تم ربط إعدادات المطعم وطاولاته. بقيت التذاكر القديمة محفوظة دون تغيير.', 'success');
+                    render();
+                });
+            }).catch(function (error) { ui.fail(error.message || 'تعذر ربط أجهزة المطعم.'); });
         });
     }
 
@@ -1100,6 +1138,11 @@
         else if (action === 'table-restore') toggleTableArchive(id, false);
         else if (action === 'table-delete') deleteTable(id);
         else if (action === 'tables-save') adapters.saveTables();
+        else if (action === 'shared-setup') setupSharedRestaurant();
+        else if (action === 'shared-legacy' && adapters.openLegacyHeld) adapters.openLegacyHeld();
+        else if (action === 'shared-refresh') adapters.refreshShared().then(function () {
+            setMessage('تم تحديث حالة الربط والطاولات.', 'success'); render();
+        }).catch(function (error) { setMessage(error.message, 'error'); });
     }
     function input(event) {
         if (event.target.dataset.rInput === 'menu-query' || event.target.dataset.rInput === 'menu-category') {
@@ -1124,6 +1167,7 @@
     root.RestaurantWorkspace = {
         init: init,
         render: render,
+        refreshSharedTables: function () { if (state.tab === 'tables') render(); },
         editMenu: editMenu,
         showMenu: function () {
             state.tab = canManageWorkspace() ? 'menu' : 'supplies';

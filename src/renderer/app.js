@@ -28,6 +28,20 @@ var ipcRenderer = electron.ipcRenderer;
 var fs = require('fs');
 var path = require('path');
 var restaurantServiceModel = require('./restaurant-service');
+var sharedRestaurantModel = require('./restaurant-shared');
+var sharedRestaurantClient = sharedRestaurantModel.createClient(applySharedRestaurantState);
+var sharedRestaurantAdapters = {
+    config: fbConfig.posRestaurantConfig,
+    tables: fbConfig.posRestaurantTables,
+    orders: fbConfig.posRestaurantOrders
+};
+var sharedRestaurantError = '';
+var legacyRestaurantHeldSales = [];
+var sharedRestaurantWasEnabled = false;
+var activeRestaurantHeldRevision = 0;
+var pendingSharedHoldId = null;
+var sharedReceiptCache = new Map();
+var sharedReceiptErrorShown = false;
 
 // App version from package.json
 var APP_VERSION = require('../../package.json').version;
@@ -134,6 +148,15 @@ function trackStoreSubscription(unsubscribe) {
 }
 
 function resetStoreState() {
+    if (_confirmLocked) { _confirmLocked = false; _closeConfirm(); }
+    sharedRestaurantClient.configure(null, null);
+    sharedRestaurantError = '';
+    legacyRestaurantHeldSales = [];
+    sharedRestaurantWasEnabled = false;
+    activeRestaurantHeldRevision = 0;
+    pendingSharedHoldId = null;
+    sharedReceiptCache.clear();
+    sharedReceiptErrorShown = false;
     products = [];
     bills = [];
     withdrawals = [];
@@ -198,6 +221,271 @@ function businessMode() {
     return model && model.businessType ? model.businessType(licensedBusinessType, storeConfig) : (licensedBusinessType || 'shop');
 }
 function isRestaurantMode() { return businessMode() === 'restaurant'; }
+function sharedRestaurantAvailable() {
+    return isRestaurantMode() && !isD1()
+        && Object.keys(sharedRestaurantAdapters).every(function (key) { return typeof sharedRestaurantAdapters[key] === 'function'; });
+}
+function sharedRestaurantEnabled() {
+    var state = sharedRestaurantClient.state();
+    return sharedRestaurantAvailable() && state.configured && state.tablesConfigured;
+}
+function sharedRestaurantStatus() {
+    var state = sharedRestaurantClient.state();
+    return {
+        available: sharedRestaurantAvailable(), loaded: state.loaded, configured: state.configured,
+        enabled: sharedRestaurantEnabled(), error: sharedRestaurantError,
+        legacyCount: legacyRestaurantHeldSales.length
+    };
+}
+function restaurantSharedWriteReady() {
+    if (!sharedRestaurantAvailable()) return true;
+    var state = sharedRestaurantClient.state();
+    if (!state.loaded || sharedRestaurantError || (state.configured && !state.tablesConfigured)) {
+        showAlert(sharedRestaurantError || 'انتظر تحميل حالة أجهزة المطعم، أو أكمل ربط الطاولات من إدارة المطعم قبل حفظ طلب جديد.', { title: 'الربط المشترك غير جاهز', icon: '⚠️' });
+        return false;
+    }
+    return true;
+}
+function sharedHoldCart(hold, strict) {
+    return hold.items.map(function (item) {
+        var product = productById(item.productId);
+        var variant = product && findVariant(product, item.color, item.size);
+        if (strict && (!variant || !Number.isFinite(Number(variant.price)))) {
+            throw new Error('أحد أصناف الطلب أو أحجامه لم يعد متاحاً. حدّث القائمة وراجع الطلب؛ لم يتم حذفه أو تغيير سعره تلقائياً.');
+        }
+        return {
+            key: item.productId + '_' + item.color + '_' + item.size,
+            productId: item.productId, name: product ? product.name : item.productId,
+            color: item.color, size: item.size, qty: item.qty, note: item.note || '',
+            price: variant ? Number(variant.price) : null,
+            cost: variant ? variant.cost : null, maxStock: variant ? variant.stock : 0
+        };
+    });
+}
+function applySharedRestaurantState(state) {
+    if (!state.loaded || !isRestaurantMode()) return;
+    sharedRestaurantError = '';
+    if (state.configured && state.tablesConfigured) {
+        if (!sharedRestaurantWasEnabled) legacyRestaurantHeldSales = JSON.parse(JSON.stringify(heldSales));
+        sharedRestaurantWasEnabled = true;
+        heldSales = state.holds.map(function (hold) {
+            return {
+                id: hold.id, shared: true, revision: hold.revision, rawHold: hold,
+                at: Date.parse(hold.createdAtIso), cart: sharedHoldCart(hold, false),
+                note: hold.note || '', table: hold.service.table, restaurantOrder: hold.service, discount: hold.discount,
+                offer: hold.offerId ? { id: hold.offerId } : null
+            };
+        });
+        updateHeldUI();
+    }
+    applyFeatureFlags();
+    updateRestaurantService();
+    renderTables();
+    if (window.RestaurantWorkspace && window.RestaurantWorkspace.refreshSharedTables) window.RestaurantWorkspace.refreshSharedTables();
+}
+function startSharedRestaurantSession(sessionId) {
+    if (!sharedRestaurantAvailable()) return;
+    sharedRestaurantClient.configure(sharedRestaurantAdapters, String(sessionId));
+    function refresh() {
+        refreshSharedRestaurantState().catch(function (error) { console.error('Loading shared restaurant state failed:', error); });
+    }
+    refresh();
+    var timer = setInterval(function () { if (!document.hidden && !checkoutInFlight) refresh(); }, 10000);
+    trackStoreSubscription(function () { clearInterval(timer); });
+}
+function refreshSharedRestaurantState() {
+    var sessionId = storeSessionId;
+    return sharedRestaurantClient.refresh().then(function (result) {
+        if (isActiveStoreSession(sessionId)) {
+            sharedRestaurantError = '';
+            if (window.RestaurantWorkspace && window.RestaurantWorkspace.refreshSharedTables) window.RestaurantWorkspace.refreshSharedTables();
+        }
+        return result;
+    }, function (error) {
+        if (isActiveStoreSession(sessionId)) {
+            sharedRestaurantError = error.message;
+            if (window.RestaurantWorkspace && window.RestaurantWorkspace.refreshSharedTables) window.RestaurantWorkspace.refreshSharedTables();
+        }
+        throw error;
+    });
+}
+function previewSharedRestaurant(sourceId) {
+    if (!isAdmin()) return Promise.reject(new Error('ربط أجهزة المطعم متاح للمدير فقط.'));
+    if (cart.length || pendingPrizes.length) return Promise.reject(new Error('احفظ الطلب الحالي أولاً. لن يتم دمجه مع طلبات جهاز آخر.'));
+    var state = sharedRestaurantClient.state();
+    if (!state.loaded) return Promise.reject(new Error('حمّل حالة أجهزة المطعم أولاً.'));
+    if (state.configured) return Promise.resolve({ config: state.config, sourceId: null, alreadyConfigured: true });
+    return sharedRestaurantClient.read('config', Object.assign({ preview: '1' }, sourceId ? { sourceId: sourceId } : {}))
+        .then(function (preview) {
+            if (!preview.config) return Object.assign({}, preview, { config: getStoreConfig(), initialize: true });
+            return preview;
+        });
+}
+async function activateSharedRestaurant(preview, importTables) {
+    if (!isAdmin() || cart.length || pendingPrizes.length) throw new Error('أغلق الطلب الحالي وسجّل الدخول كمدير لإكمال الربط.');
+    var state = sharedRestaurantClient.state();
+    var localTables = importTables ? readStoredTables() : [];
+    if (!state.configured) {
+        await sharedRestaurantClient.mutate('config', preview.initialize
+            ? { action: 'initialize', config: preview.config }
+            : { action: 'cutover', sourceId: preview.sourceId, sourceRevision: preview.sourceRevision });
+    }
+    if (!sharedRestaurantClient.state().tablesConfigured) {
+        await sharedRestaurantClient.mutate('tables', { action: 'initialize', revision: 0, tables: localTables });
+    }
+    return sharedRestaurantClient.refresh();
+}
+function sharedRestaurantTableMutation(action, payload, onOk, onErr) {
+    if (!restaurantSharedWriteReady()) {
+        if (onErr) onErr(new Error('حالة الربط المشترك غير جاهزة.'));
+        return true;
+    }
+    if (!sharedRestaurantEnabled()) return false;
+    var sessionId = storeSessionId;
+    sharedRestaurantClient.mutate('tables', Object.assign({ action: action, revision: sharedRestaurantClient.state().tablesRevision }, payload))
+        .then(function (result) {
+            if (isActiveStoreSession(sessionId) && onOk) onOk(result.nextTableId == null ? payload.id : result.nextTableId - 1);
+        })
+        .catch(function (error) { if (isActiveStoreSession(sessionId) && onErr) onErr(error); });
+    return true;
+}
+function sharedTicketIntent() {
+    if (pendingCustomer || pendingRedeem || pendingCreditUse || pendingPrizes.length || appliedRewardIds.length
+        || ['cash', 'card'].indexOf(selectedPayment) < 0 || cart.some(function (item) { return !item.productId || item.custom; })) {
+        throw new Error('هذا الطلب يستخدم ولاءً أو رصيداً أو بيعاً آجلاً غير مدعوم في مسار الأجهزة المشتركة بعد. لم يتم حذف أي بيانات أو تحويل طريقة الدفع.');
+    }
+    var offerCheck = revalidateActiveRestaurantOffer();
+    if (!offerCheck.ok) throw new Error((offerCheck.errors || ['العرض لم يعد متاحاً.'])[0]);
+    var service = restaurantOrderForSave();
+    if (!service.ok) throw new Error('راجع نوع الطلب والطاولة وبيانات التوصيل.');
+    return {
+        items: cart.map(function (item) {
+            return { productId: item.productId, color: String(item.color || ''), size: String(item.size || ''), qty: item.qty, note: item.note || '' };
+        }),
+        service: service.order, note: document.getElementById('billNote').value.trim(),
+        discount: { type: document.getElementById('discountType').value || 'fixed', value: Number(document.getElementById('discountInput').value || 0) },
+        offerId: activeRestaurantOffer ? String(activeRestaurantOffer.id) : null
+    };
+}
+function setSharedRestaurantBusy(busy) {
+    checkoutInFlight = busy;
+    document.getElementById('page-sales').inert = busy;
+    var button = document.getElementById('checkoutBtn');
+    button.textContent = busy ? 'جارٍ التحقق من الخادم...' : 'إتمام البيع';
+    button.disabled = busy || !cart.length;
+}
+function runSharedRestaurantWrite(operation, onSuccess) {
+    var sessionId = storeSessionId;
+    setSharedRestaurantBusy(true);
+    Promise.resolve().then(function () {
+        if (!isActiveStoreSession(sessionId)) throw new Error('تم تغيير جلسة المطعم قبل إرسال العملية.');
+        return operation();
+    }).then(function (result) {
+        if (!isActiveStoreSession(sessionId)) return;
+        setSharedRestaurantBusy(false);
+        try { onSuccess(result); }
+        catch (error) {
+            console.error('Shared operation saved but its interface failed:', error);
+            showAlert('أكد الخادم حفظ العملية، لكن تعذر تحديث العرض. راجع الطلبات والفواتير ولا تعِد تحصيل المبلغ.', { title: 'حُفظت العملية', icon: '⚠️' });
+        }
+    }, function (error) {
+        if (!isActiveStoreSession(sessionId)) return;
+        if (!error.status || error.status >= 500) {
+            showConfirm('لم نتمكن من تأكيد نتيجة العملية. لم نعتبرها فاشلة ولم نفك قفل الطلب. أعد التحقق بنفس الطلب لتجنب تكرار التحصيل.\n' + error.message,
+                function () { if (isActiveStoreSession(sessionId)) runSharedRestaurantWrite(operation, onSuccess); },
+                { title: 'نتيجة غير مؤكدة', yesText: 'إعادة التحقق', alert: true, lockDismiss: true, icon: '⚠️' });
+            return;
+        }
+        setSharedRestaurantBusy(false);
+        showAlert(error.message, { title: 'لم تُحفظ التغييرات — راجع حالة الطلب', icon: '⚠️' });
+    });
+}
+function saveSharedRestaurantHold(onSuccess) {
+    var intent;
+    try { intent = sharedTicketIntent(); }
+    catch (error) { showAlert(error.message, { title: 'راجع الطلب', icon: '⚠️' }); return; }
+    var id = activeRestaurantHeldId || pendingSharedHoldId || require('node:crypto').randomUUID();
+    pendingSharedHoldId = id;
+    var payload = Object.assign({ action: 'hold', holdId: id, revision: activeRestaurantHeldId ? activeRestaurantHeldRevision : 0 }, intent);
+    runSharedRestaurantWrite(function () { return sharedRestaurantClient.mutate('orders', payload); }, function (result) {
+        pendingSharedHoldId = null;
+        activeRestaurantHeldId = result.hold.id;
+        activeRestaurantHeldRevision = result.hold.revision;
+        onSuccess(result.hold, intent);
+    });
+}
+function checkoutSharedRestaurant() {
+    if (!licenseValid) { showAlert('الترخيص منتهي', { title: 'تعذر الدفع', icon: '⚠️' }); return; }
+    saveSharedRestaurantHold(function (hold, intent) {
+        runSharedRestaurantWrite(function () {
+            return sharedRestaurantClient.mutate('orders', { action: 'quote', holdId: hold.id, revision: hold.revision });
+        }, function (result) {
+            var quote = result.quote, payment = selectedPayment, sessionId = storeSessionId;
+            showConfirm('الإجمالي المعتمد من الخادم: ₪' + quote.total.toFixed(2) + '\n'
+                + (payment === 'cash' ? 'نقدي' : 'بطاقة') + '\nسيتم حفظ الفاتورة وخصم المخزون مرة واحدة.',
+                function () {
+                    if (!isActiveStoreSession(sessionId)) return;
+                    var currentIntent;
+                    try { currentIntent = sharedTicketIntent(); }
+                    catch (error) { showAlert(error.message, { title: 'راجع الطلب', icon: '⚠️' }); return; }
+                    if (JSON.stringify(currentIntent) !== JSON.stringify(intent) || selectedPayment !== payment) {
+                        showAlert('تغيّر الطلب أو الدفع بعد عرض السعر. راجع الإجمالي قبل التأكيد مجدداً.', { title: 'تغيّر الطلب', icon: '⚠️' });
+                        return;
+                    }
+                    var tender = document.getElementById('tenderInput').value;
+                    if (payment === 'cash' && tender && (!Number.isFinite(Number(tender)) || Number(tender) < quote.total)) {
+                        showAlert('المبلغ المدفوع أقل من إجمالي الخادم أو غير صحيح.', { title: 'راجع الدفع', icon: '⚠️' }); return;
+                    }
+                    var payload = { action: 'checkout', holdId: hold.id, revision: hold.revision, quoteHash: result.quoteHash, paymentMethod: payment };
+                    runSharedRestaurantWrite(function () { return sharedRestaurantClient.mutate('orders', payload); }, function (completed) {
+                        var receipt = completed.bill;
+                        if (payment === 'cash' && tender) {
+                            receipt.tendered = Number(tender);
+                            receipt.change = Math.round((Number(tender) - quote.total) * 100) / 100;
+                        }
+                        resetRestaurantTicket();
+                        showReceipt(receipt);
+                        printReceipt(receipt, payment === 'cash');
+                        renderTables();
+                    });
+                }, { title: 'تأكيد السعر والدفع', yesText: 'إتمام وطباعة', noText: 'مراجعة الطلب', icon: '🧾' });
+        });
+    });
+}
+function hydrateSharedRestaurantReceipts(sessionId) {
+    var target = bills, queue = target.filter(function (bill) { return bill.privateRef && !bill.privateReceiptLoaded; });
+    if (!queue.length || !sharedRestaurantAvailable()) return;
+    var index = 0, failed = false, includeCost = isAdmin();
+    async function worker() {
+        while (index < queue.length && isActiveStoreSession(sessionId) && target === bills) {
+            var bill = queue[index++];
+            try {
+                var response = sharedReceiptCache.get(bill.privateRef);
+                if (!response) {
+                    response = sharedRestaurantClient.read('orders', Object.assign({ receiptId: bill.restaurantOrder.heldId }, includeCost ? { includeCost: '1' } : {}));
+                    sharedReceiptCache.set(bill.privateRef, response);
+                }
+                var merged = sharedRestaurantModel.mergePrivateReceipt(bill, await response, includeCost);
+                if (!isActiveStoreSession(sessionId) || target !== bills) return;
+                Object.assign(bill, merged);
+            } catch (error) {
+                if (!isActiveStoreSession(sessionId) || target !== bills) return;
+                sharedReceiptCache.delete(bill.privateRef);
+                failed = true;
+                console.error('Loading protected receipt failed:', error);
+            }
+        }
+    }
+    Promise.all([worker(), worker(), worker(), worker()]).then(function () {
+        if (!isActiveStoreSession(sessionId) || target !== bills) return;
+        renderBills();
+        updateReports();
+        if (failed && !sharedReceiptErrorShown) {
+            sharedReceiptErrorShown = true;
+            showAlert('تعذر تحميل بيانات بعض الفواتير الخاصة. لن نستخدم تكلفة الأصناف الحالية بدلاً من التكلفة التاريخية؛ تظهر الأرباح الناقصة كغير متاحة.', { title: 'بيانات مالية غير مكتملة', icon: '⚠️' });
+        }
+    });
+}
 function applyBusinessSurface() {
     var restaurant = isRestaurantMode();
     document.body.classList.toggle('restaurant-mode', restaurant);
@@ -713,6 +1001,7 @@ function initApp(sessionId) {
     renderShortcutsEditor();
     initGeneralNotes();
     loadHeldSales();
+    startSharedRestaurantSession(sessionId);
     updatePaymentUI();
     // Load first batch of products fast, then subscribe to rest
     loadProductsBatch(sessionId);
@@ -726,9 +1015,11 @@ function initApp(sessionId) {
 
 // ============ THEMED CONFIRM / ALERT ============
 var _confirmCb = null;
+var _confirmLocked = false;
 function showConfirm(message, onYes, opts) {
     opts = opts || {};
     _confirmCb = onYes || null;
+    _confirmLocked = !!opts.lockDismiss;
     document.getElementById('confirmIcon').textContent = opts.icon || '⚠️';
     document.getElementById('confirmTitle').textContent = opts.title || 'تأكيد';
     document.getElementById('confirmMessage').textContent = message || '';
@@ -747,7 +1038,12 @@ function showAlert(message, opts) {
     if (opts.title === undefined) opts.title = 'تم';
     showConfirm(message, null, opts);
 }
-function _closeConfirm() { document.getElementById('confirmModal').style.display = 'none'; _confirmCb = null; }
+function _closeConfirm(force) {
+    if (_confirmLocked && force !== true) return;
+    document.getElementById('confirmModal').style.display = 'none';
+    _confirmCb = null;
+    _confirmLocked = false;
+}
 
 // In-app text prompt (Electron blocks window.prompt). cb(value) fires only on confirm.
 var _promptCb = null;
@@ -1132,6 +1428,9 @@ function subscribeBills(sessionId) {
         snapshot.forEach(function (doc) {
             var b = doc.data();
             b.id = doc.id;
+            if (b.privateRef && Array.isArray(b.items)) {
+                b.items = b.items.map(function (item) { return Object.assign({}, item, { historicalCostProtected: true, cost: null }); });
+            }
             var rt = b.recordType;
             if (rt === 'withdrawal') withdrawals.push(b);
             else if (rt === 'deposit') deposits.push(b);
@@ -1177,6 +1476,7 @@ function subscribeBills(sessionId) {
         registerBalance = registerRecords.length ? (registerRecords[0].balance || 0) : 0;
         renderBills();
         updateReports();
+        hydrateSharedRestaurantReceipts(sessionId);
         renderReturnsHistory();
         renderDebts();
         renderRegisterSettings();
@@ -2079,6 +2379,8 @@ function restaurantBenefitsValid() {
 function checkout() {
     if (checkoutInFlight) return;
     if (cart.length === 0 && pendingPrizes.length === 0) return;
+    if (!restaurantSharedWriteReady()) return;
+    if (sharedRestaurantEnabled()) { checkoutSharedRestaurant(); return; }
     if (!restaurantOrderForSave().ok) return;
     if (!restaurantBenefitsValid()) return;
     if (!licenseValid) { showAlert('الترخيص منتهي', { icon: '⛔', title: 'تنبيه' }); return; }
@@ -2132,6 +2434,8 @@ function checkout() {
 function doCheckout() {
     if (checkoutInFlight) return;
     if (cart.length === 0 && pendingPrizes.length === 0) return;
+    if (!restaurantSharedWriteReady()) return;
+    if (sharedRestaurantEnabled()) { checkoutSharedRestaurant(); return; }
     var restaurantOrder = restaurantOrderForSave();
     if (!restaurantOrder.ok) return;
     if (!restaurantBenefitsValid()) return;
@@ -3321,6 +3625,11 @@ function renderBills() {
 
 function viewBill(billNumber) {
     var bill = bills.find(function (b) { return (b.billNumber || b.orderNumber || b.id) === billNumber; });
+    if (bill && bill.privateRef && !bill.privateReceiptLoaded) {
+        hydrateSharedRestaurantReceipts(storeSessionId);
+        showAlert('جارٍ تحميل بيانات الفاتورة الخاصة. افتحها مجدداً بعد اكتمال المزامنة.', { title: 'بيانات الفاتورة', icon: 'ℹ️' });
+        return;
+    }
     if (bill) showReceipt(bill);
 }
 
@@ -3434,13 +3743,13 @@ function updateReports() {
     document.getElementById('monthSales').textContent = '\u20AA' + monthSales.toFixed(2);
     document.getElementById('monthCount').textContent = monthCount + ' فاتورة';
     var tpEl = document.getElementById('todayProfit');
-    if (tpEl) tpEl.textContent = '\u20AA' + todayProfit.toFixed(2);
+    if (tpEl) tpEl.textContent = profitLabel(todayProfit);
     var tpSub = document.getElementById('todayProfitSub');
-    if (tpSub) tpSub.textContent = todaySales > 0 ? 'هامش ' + Math.round(todayProfit / todaySales * 100) + '%' : 'هامش 0%';
+    if (tpSub) tpSub.textContent = !Number.isFinite(todayProfit) ? 'التكلفة التاريخية غير مكتملة' : todaySales > 0 ? 'هامش ' + Math.round(todayProfit / todaySales * 100) + '%' : 'هامش 0%';
     var mpEl = document.getElementById('monthProfit');
-    if (mpEl) mpEl.textContent = '\u20AA' + monthProfit.toFixed(2);
+    if (mpEl) mpEl.textContent = profitLabel(monthProfit);
     var mpSub = document.getElementById('monthProfitSub');
-    if (mpSub) mpSub.textContent = monthSales > 0 ? 'هامش ' + Math.round(monthProfit / monthSales * 100) + '%' : 'هامش 0%';
+    if (mpSub) mpSub.textContent = !Number.isFinite(monthProfit) ? 'التكلفة التاريخية غير مكتملة' : monthSales > 0 ? 'هامش ' + Math.round(monthProfit / monthSales * 100) + '%' : 'هامش 0%';
 
     var totalStock = 0;
     for (var i = 0; i < products.length; i++) { totalStock += getTotalStock(products[i]); }
@@ -3486,7 +3795,7 @@ function updateReports() {
     var topHtml = '';
     for (var i = 0; i < sorted.length; i++) {
         var name = sorted[i];
-        topHtml += '<tr><td>' + escapeHtml(name) + '</td><td>' + productSales[name].qty + '</td><td>\u20AA' + productSales[name].revenue.toFixed(2) + '</td><td>\u20AA' + productSales[name].profit.toFixed(2) + '</td></tr>';
+        topHtml += '<tr><td>' + escapeHtml(name) + '</td><td>' + productSales[name].qty + '</td><td>\u20AA' + productSales[name].revenue.toFixed(2) + '</td><td>' + profitLabel(productSales[name].profit) + '</td></tr>';
     }
     document.getElementById('topProductsBody').innerHTML = topHtml || '<tr><td colspan="4" style="text-align:center;">لا توجد بيانات</td></tr>';
 }
@@ -3547,6 +3856,7 @@ function productById(id) {
 // Cost of a sold line item: prefer the snapshot stored at sale time; fall back to
 // current product variant cost for older bills that predate cost tracking.
 function itemUnitCost(item) {
+    if (item.historicalCostProtected) return typeof item.cost === 'number' && Number.isFinite(item.cost) && item.cost >= 0 ? item.cost : NaN;
     if (item.cost != null && item.cost > 0) return item.cost;
     var p = item.productId ? productById(item.productId) : null;
     if (p && p.variants) {
@@ -3555,6 +3865,9 @@ function itemUnitCost(item) {
         }
     }
     return 0;
+}
+function profitLabel(value) {
+    return Number.isFinite(value) ? '\u20AA' + value.toFixed(2) : 'غير متاح';
 }
 function lookupBrand(item) {
     var p = item.productId ? productById(item.productId) : null;
@@ -4080,7 +4393,7 @@ function setupEventListeners() {
     var confirmYesBtn = document.getElementById('confirmYesBtn');
     if (confirmYesBtn) confirmYesBtn.addEventListener('click', function () {
         var cb = _confirmCb;
-        _closeConfirm();
+        _closeConfirm(true);
         if (cb) cb();
     });
     var confirmNoBtn = document.getElementById('confirmNoBtn');
@@ -5004,6 +5317,7 @@ function revalidateActiveRestaurantOffer() {
         ? restaurantModel.revalidateAppliedOffer(restaurantRecords, activeRestaurantOffer.id, cart, new Date().toISOString())
         : { ok: false, errors: ['تعذر التحقق من العرض المطبّق.'] };
     if (!result.ok) {
+        if (sharedRestaurantEnabled()) return result;
         resetActiveRestaurantOffer();
         var discountInput = document.getElementById('discountInput');
         var discountType = document.getElementById('discountType');
@@ -5019,7 +5333,7 @@ function revalidateActiveRestaurantOffer() {
 }
 function refreshActiveRestaurantOfferAfterCartChange() {
     var result = revalidateActiveRestaurantOffer();
-    if (!result.ok) showAlert((result.errors || ['لم يعد العرض صالحاً للسلة الحالية.'])[0], { icon: '⚠️', title: 'تمت إزالة العرض' });
+    if (!result.ok) showAlert((result.errors || ['لم يعد العرض صالحاً للسلة الحالية.'])[0], { icon: '⚠️', title: sharedRestaurantEnabled() ? 'راجع العرض أو أزله صراحةً' : 'تمت إزالة العرض' });
     return result;
 }
 
@@ -5085,6 +5399,11 @@ function syncRestaurantWorkspace() {
         openTable: openTable,
         saveTables: saveTableCount,
         renderTables: renderTables,
+        sharedStatus: sharedRestaurantStatus,
+        previewShared: previewSharedRestaurant,
+        activateShared: activateSharedRestaurant,
+        refreshShared: refreshSharedRestaurantState,
+        openLegacyHeld: openLegacyRestaurantHeld,
         menuSections: function () { return getMenuSections(); },
         saveMenuSections: saveMenuSections,
         renameMenuSection: renameMenuSection,
@@ -5241,13 +5560,20 @@ function openModal(id) {
     var focusable = m.querySelector('input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
     if (focusable) { try { focusable.focus(); } catch (e) {} }
 }
-function closeModal(id) { var m = document.getElementById(id); if (m) m.style.display = 'none'; }
+function closeModal(id) {
+    if (id === 'confirmModal' && _confirmLocked) return;
+    var m = document.getElementById(id);
+    if (m) m.style.display = 'none';
+}
 // Close the top-most currently open modal (used by the global Escape handler).
 function closeTopModal() {
     var open = document.querySelectorAll('.modal-overlay');
     for (var i = open.length - 1; i >= 0; i--) {
         var style = window.getComputedStyle(open[i]);
-        if (style.display !== 'none') { open[i].style.display = 'none'; return true; }
+        if (style.display !== 'none') {
+            if (open[i].id === 'confirmModal' && _confirmLocked) return true;
+            open[i].style.display = 'none'; return true;
+        }
     }
     return false;
 }
@@ -5333,7 +5659,8 @@ var DEFAULT_STORE_CONFIG = {
     taxIncluded: false         // true = prices already include tax
 };
 function getStoreConfig() {
-    var c = storeConfig || {};
+    var shared = sharedRestaurantClient.state();
+    var c = isRestaurantMode() && shared.configured ? shared.config : (storeConfig || {});
     var f = c.features || {};
     var df = DEFAULT_STORE_CONFIG.features;
     return {
@@ -5415,6 +5742,16 @@ function getTaxPercent() {
 function saveStoreConfig(cfg, onOk) {
     if (!isAdmin()) {
         showAlert('هذه الميزة متاحة للمدير فقط', { icon: '🔒', title: 'غير مصرّح' });
+        return;
+    }
+    if (!restaurantSharedWriteReady()) return;
+    if (sharedRestaurantEnabled()) {
+        var sessionId = storeSessionId;
+        sharedRestaurantClient.mutate('config', { action: 'update', revision: sharedRestaurantClient.state().configRevision, config: cfg })
+            .then(function () { if (isActiveStoreSession(sessionId) && onOk) onOk(); })
+            .catch(function (error) {
+                if (isActiveStoreSession(sessionId)) showAlert(error.message, { title: 'لم تُحفظ إعدادات المطعم', icon: '⚠️' });
+            });
         return;
     }
     var rec = {
@@ -6139,7 +6476,8 @@ function writeStoredTables(records) {
     localStorage.setItem(tableCountKey(), String(activeCount));
 }
 function getRestaurantTables(includeArchived) {
-    var all = readStoredTables();
+    var shared = sharedRestaurantClient.state();
+    var all = isRestaurantMode() && shared.configured ? shared.tables : readStoredTables();
     return includeArchived ? all : all.filter(function (record) { return !record.archived; });
 }
 function getActiveRestaurantTables() { return getRestaurantTables(false); }
@@ -6202,6 +6540,7 @@ function persistRestaurantTables(nextRecords) {
 }
 function createRestaurantTable(payload, onOk, onErr) {
     if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    if (sharedRestaurantTableMutation('create', { name: payload && payload.name != null ? payload.name : payload }, onOk, onErr)) return;
     var value = payload && payload.name != null ? payload.name : payload;
     var name = String(value || '').trim();
     if (!name) return onErr && onErr(new Error('اسم الطاولة مطلوب.'));
@@ -6219,6 +6558,7 @@ function createRestaurantTable(payload, onOk, onErr) {
 }
 function updateRestaurantTable(tableId, payload, onOk, onErr) {
     if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    if (sharedRestaurantTableMutation('update', { id: Number(tableId), name: payload && payload.name }, onOk, onErr)) return;
     var id = normalizeTableId(tableId);
     if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
     var name = String(payload && payload.name || '').trim();
@@ -6236,6 +6576,7 @@ function updateRestaurantTable(tableId, payload, onOk, onErr) {
 }
 function archiveRestaurantTable(tableId, archived, onOk, onErr) {
     if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    if (sharedRestaurantTableMutation('archive', { id: Number(tableId), archived: archived !== false }, onOk, onErr)) return;
     var id = normalizeTableId(tableId);
     if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
     var tables = getRestaurantTables(true);
@@ -6250,6 +6591,7 @@ function archiveRestaurantTable(tableId, archived, onOk, onErr) {
 }
 function deleteRestaurantTable(tableId, onOk, onErr) {
     if (!isAdmin()) return onErr && onErr(new Error('هذه العملية متاحة للمدير فقط'));
+    if (sharedRestaurantTableMutation('delete', { id: Number(tableId) }, onOk, onErr)) return;
     var id = normalizeTableId(tableId);
     if (id == null) return onErr && onErr(new Error('رقم الطاولة غير صالح.'));
     var tables = getRestaurantTables(true);
@@ -6263,6 +6605,11 @@ function deleteRestaurantTable(tableId, onOk, onErr) {
 }
 function saveTableCount() {
     if (!isAdmin()) return;
+    if (sharedRestaurantEnabled()) {
+        showAlert('أضف أو أرشف الطاولات بالاسم في وضع الأجهزة المشتركة. لا يتم استبدال تعريفات الطاولات جماعياً.', { title: 'الطاولات المشتركة' });
+        return;
+    }
+    if (!restaurantSharedWriteReady()) return;
     var n = Number((document.getElementById('tableCount') || {}).value);
     if (!Number.isInteger(n) || n < 1 || n > 60) { showAlert('أدخل عدداً صحيحاً من 1 إلى 60 طاولة.', { title: 'عدد الطاولات' }); return; }
     var tables = getRestaurantTables(true);
@@ -8363,6 +8710,10 @@ function loadHeldSales() {
     updateHeldUI();
 }
 function saveHeldSales() {
+    if (sharedRestaurantEnabled()) {
+        showAlert('لا يمكن كتابة الطلبات المشتركة في التخزين المحلي. لم يتم تغيير التذاكر القديمة.', { title: 'لم يتم الحفظ', icon: '⚠️' });
+        return false;
+    }
     if (heldSalesLoadError) { showAlert('تعذر قراءة الطلبات السابقة. لم يتم تغيير الطلب الحالي.', { title: 'لم يتم الحفظ' }); return false; }
     try { localStorage.setItem(heldKey(), JSON.stringify(heldSales)); }
     catch (e) {
@@ -8376,12 +8727,21 @@ function saveHeldSales() {
 function updateHeldUI() {
     var resumeBtn = document.getElementById('resumeSaleBtn');
     var countEl = document.getElementById('heldCount');
-    if (countEl) countEl.textContent = heldSales.length;
-    if (resumeBtn) resumeBtn.style.display = heldSales.length ? 'inline-flex' : 'none';
+    var legacyCount = sharedRestaurantEnabled() && isAdmin() ? legacyRestaurantHeldSales.length : 0;
+    if (countEl) countEl.textContent = heldSales.length + legacyCount;
+    if (resumeBtn) resumeBtn.style.display = heldSales.length + legacyCount ? 'inline-flex' : 'none';
 }
 function holdSale() {
     if (checkoutInFlight) return;
     if (cart.length === 0 && (!isRestaurantMode() || pendingPrizes.length === 0)) { showAlert('السلة فارغة', { icon: '⚠️', title: 'تنبيه' }); return; }
+    if (!restaurantSharedWriteReady()) return;
+    if (sharedRestaurantEnabled()) {
+        saveSharedRestaurantHold(function () {
+            resetRestaurantTicket();
+            showAlert('حُفظ الطلب على الخادم وأصبح متاحاً لأجهزة المطعم.', { title: 'طلب مشترك' });
+        });
+        return;
+    }
     var note = (document.getElementById('billNote') || {}).value || '';
     var snapshot = { id: activeRestaurantHeldId || String(Date.now()) + '-' + Math.floor(Math.random() * 1000000), at: Date.now(), cart: JSON.parse(JSON.stringify(cart)), note: note, table: currentTableNo };
     if (isRestaurantMode()) {
@@ -8425,16 +8785,100 @@ function openHeldModal() {
         for (var j = 0; j < h.cart.length; j++) { n += h.cart[j].qty; sum += h.cart[j].price * h.cart[j].qty; }
         var serviceText = h.restaurantOrder ? restaurantServiceModel.serviceLabel(h.restaurantOrder.type) : '';
         html += '<div class="held-row"><span>' + escapeHtml(serviceText) + (h.table ? ' — ' + escapeHtml(tableLabelById(h.table)) : '') +
-            '<br>' + new Date(h.at).toLocaleString('ar-EG') + ' — ' + n + ' قطعة — أصناف ₪' + sum.toFixed(2) + '</span>' +
-            '<span><button class="btn-primary" onclick="resumeHeld(' + i + ')">استئناف</button> ' +
-            '<button class="btn-secondary" onclick="deleteHeld(' + i + ')">حذف</button></span></div>';
+            '<br>' + new Date(h.at).toLocaleString('ar-EG') + ' — ' + n + ' قطعة — ' + (h.shared ? 'الأسعار تُراجع من الخادم عند الدفع' : 'أصناف ₪' + sum.toFixed(2)) + '</span>' +
+            '<span><button class="btn-primary" onclick="resumeHeld(' + (h.shared ? escapeHtml(JSON.stringify(h.id)) : i) + ')">استئناف</button> ' +
+            '<button class="btn-secondary" onclick="deleteHeld(' + (h.shared ? escapeHtml(JSON.stringify(h.id)) : i) + ')">حذف</button></span></div>';
+    }
+    if (sharedRestaurantEnabled() && legacyRestaurantHeldSales.length) {
+        html += '<div class="restaurant-history"><h4>تذاكر هذا الجهاز قبل الربط</h4><p>بقيت ' + legacyRestaurantHeldSales.length +
+            ' تذكرة محلية دون دمج أو حذف.</p>' + (isAdmin() ? '<button class="btn-secondary" onclick="openLegacyRestaurantHeld()">مراجعة التذاكر واختيار ما يُنقل</button>' : '<p>يستطيع المدير مراجعتها ونقل كل تذكرة على حدة.</p>') + '</div>';
     }
     body.innerHTML = html;
     openModal('heldModal');
 }
+function openLegacyRestaurantHeld() {
+    if (!isAdmin() || !sharedRestaurantEnabled() || checkoutInFlight) return;
+    var tables = getActiveRestaurantTables();
+    var html = '<p>هذه نسخ محلية قديمة، وليست طلبات مشتركة. لا تُحذف النسخة الأصلية عند النقل. تُراجع الأسعار والضريبة الحالية عند الدفع.</p>';
+    legacyRestaurantHeldSales.forEach(function (held, index) {
+        var service = held.restaurantOrder || { type: held.table ? 'dinein' : 'takeaway', table: held.table };
+        html += '<article class="restaurant-history"><h4>تذكرة ' + escapeHtml(String(held.id)) + ' — ' + escapeHtml(restaurantServiceModel.serviceLabel(service.type)) + '</h4><ul>' +
+            held.cart.map(function (item) { return '<li>' + escapeHtml(item.name || item.productId || '') + ' — ' + escapeHtml(item.size || '') + ' × ' + Number(item.qty) + '</li>'; }).join('') +
+            '</ul><p>' + escapeHtml(held.note || '') + '</p>';
+        if (service.type === 'dinein') {
+            html += '<label>طاولة الطلب بعد النقل <select id="legacySharedTable-' + index + '"><option value="">اختر الطاولة صراحةً</option>' +
+                tables.map(function (table) { return '<option value="' + table.id + '">' + escapeHtml(table.name) + '</option>'; }).join('') + '</select></label>';
+        }
+        html += '<button class="btn-secondary" onclick="importLegacyRestaurantHeld(' + index + ')"' + (held.completed ? ' disabled' : '') + '>نقل هذه التذكرة فقط</button></article>';
+    });
+    document.getElementById('heldBody').innerHTML = html;
+    openModal('heldModal');
+}
+function importLegacyRestaurantHeld(index) {
+    if (!isAdmin() || !sharedRestaurantEnabled() || checkoutInFlight) return;
+    if (cart.length || pendingPrizes.length) { showAlert('احفظ الطلب المفتوح أولاً. لن يتم دمج التذاكر.', { title: 'طلب مفتوح', icon: '⚠️' }); return; }
+    var held = legacyRestaurantHeldSales[index];
+    if (!held || held.completed) return;
+    if (held.customer || held.redeem || held.creditUse || (held.prizes || []).length || (held.rewardIds || []).length
+        || ['cash', 'card'].indexOf(held.payment || 'cash') < 0
+        || held.cart.some(function (item) { return !item.productId || item.custom; })) {
+        showAlert('التذكرة تحتوي ولاءً أو رصيداً أو بيعاً آجلاً غير مدعوم في النقل بعد. بقيت النسخة الأصلية دون تغيير.', { title: 'لم تُنقل التذكرة', icon: '⚠️' });
+        return;
+    }
+    var service = Object.assign({}, held.restaurantOrder || { type: held.table ? 'dinein' : 'takeaway', table: held.table });
+    if (service.type === 'dinein') service.table = Number((document.getElementById('legacySharedTable-' + index) || {}).value);
+    var checked = restaurantServiceModel.validateRestaurantService(service);
+    if (!checked.ok || (service.type === 'dinein' && !findRestaurantTable(service.table, false))) {
+        showAlert(checked.error || 'اختر طاولة نشطة للطلب المنقول.', { title: 'راجع بيانات التذكرة', icon: '⚠️' }); return;
+    }
+    var id;
+    try {
+        var deviceKey = 'ada_pos_restaurant_migration_device';
+        var deviceId = localStorage.getItem(deviceKey);
+        if (!deviceId) {
+            deviceId = require('node:crypto').randomUUID();
+            localStorage.setItem(deviceKey, deviceId);
+        }
+        id = 'legacy-' + require('node:crypto').createHash('sha256').update(getProjectId() + '\0' + deviceId + '\0' + held.id).digest('hex');
+    } catch (error) {
+        console.error('Preparing explicit ticket migration failed:', error);
+        showAlert('تعذر حفظ معرّف النقل الآمن على الجهاز. لم تُنقل التذكرة.', { title: 'لم يتم النقل', icon: '⚠️' });
+        return;
+    }
+    if (heldSales.some(function (item) { return item.id === id; })) {
+        showAlert('هذه التذكرة موجودة بالفعل بين الطلبات المشتركة؛ افتحها من هناك.', { title: 'لن نكرر النقل', icon: 'ℹ️' }); return;
+    }
+    var payload = {
+        action: 'hold', holdId: id, revision: 0, service: checked.order, note: held.note || '',
+        discount: { type: (held.discount || {}).type || 'fixed', value: Number((held.discount || {}).value || 0) },
+        offerId: held.offer ? String(held.offer.id) : null,
+        items: held.cart.map(function (item) {
+            return { productId: item.productId, color: String(item.color || ''), size: String(item.size || ''), qty: item.qty, note: item.note || '' };
+        })
+    };
+    var sessionId = storeSessionId;
+    showConfirm('نقل هذه التذكرة فقط إلى ' + (service.type === 'dinein' ? tableLabelById(service.table) : restaurantServiceModel.serviceLabel(service.type)) +
+        '؟ ستبقى النسخة المحلية كما هي، وتُراجع الأسعار الحالية قبل الدفع.', function () {
+        if (!isActiveStoreSession(sessionId)) return;
+        runSharedRestaurantWrite(function () {
+            return db.collection('orders').doc('POS-' + held.id).get({ source: 'server' }).then(function (snapshot) {
+                if (!isActiveStoreSession(sessionId)) throw new Error('تم تغيير جلسة المطعم. لم نرسل التذكرة إلى المتجر الجديد.');
+                if (snapshot.exists) {
+                    var error = new Error('التذكرة القديمة محفوظة بالفعل كفاتورة. لن ننقلها أو نحصّل قيمتها مرة أخرى.');
+                    error.status = 409;
+                    throw error;
+                }
+                return sharedRestaurantClient.mutate('orders', payload);
+            });
+        }, function () {
+            closeModal('heldModal');
+            showAlert('نُقلت التذكرة المحددة فقط. بقيت نسختها المحلية دون تغيير، ولن يُنشئ إعادة النقل طلباً ثانياً.', { title: 'تم النقل' });
+        });
+    }, { title: 'نقل صريح لتذكرة محلية', yesText: 'نقل هذه فقط', icon: '🧾' });
+}
 function resumeHeld(i) {
     if (checkoutInFlight) return;
-    var h = heldSales[i];
+    var h = typeof i === 'string' ? heldSales.find(function (item) { return item.id === i; }) : heldSales[i];
     if (!h) return;
     if (isRestaurantMode()) {
         if (h.completed) { showAlert('تمت فوترة هذا الطلب. احذف النسخة المعلقة ولا تعِد تحصيلها.', { title: 'طلب مكتمل' }); return; }
@@ -8443,7 +8887,12 @@ function resumeHeld(i) {
             showAlert('احفظ الطلب الحالي أو أتم الدفع أولاً. لن يتم دمج طلبين مختلفين.', { title: 'طلب مفتوح' }); return;
         }
         h = JSON.parse(JSON.stringify(h));
+        if (h.shared) {
+            try { h.cart = sharedHoldCart(h.rawHold, true); }
+            catch (error) { showAlert(error.message, { title: 'تعذر فتح الطلب', icon: '⚠️' }); return; }
+        }
         activeRestaurantHeldId = h.id;
+        activeRestaurantHeldRevision = h.shared ? h.revision : 0;
         cart = h.cart;
         pendingCustomer = h.customer || null;
         pendingRedeem = h.redeem || null;
@@ -8477,10 +8926,19 @@ function resumeHeld(i) {
 }
 function deleteHeld(i) {
     if (!requireRoleAccess({ blockRestaurantWorker: true, message: 'حذف الطلبات المحفوظة متاح للمدير فقط.' })) return;
-    if (checkoutInFlight || !heldSales[i]) return;
-    var id = heldSales[i].id;
+    var selected = typeof i === 'string' ? heldSales.find(function (item) { return item.id === i; }) : heldSales[i];
+    if (checkoutInFlight || !selected) return;
+    var id = selected.id;
     showConfirm('حذف الطلب المحفوظ؟ لا يمكن التراجع عن ذلك.', function () {
         if (checkoutInFlight) return;
+        if (selected.shared) {
+            var payload = { action: 'cancel', holdId: id, revision: selected.revision };
+            runSharedRestaurantWrite(function () { return sharedRestaurantClient.mutate('orders', payload); }, function () {
+                if (activeRestaurantHeldId === id) resetRestaurantTicket();
+                openHeldModal();
+            });
+            return;
+        }
         var previous = heldSales;
         heldSales = heldSales.filter(function (h) { return h.id !== id; });
         if (!saveHeldSales()) { heldSales = previous; return; }
@@ -8494,6 +8952,8 @@ function deleteHeld(i) {
 function resetRestaurantTicket() {
     if (checkoutInFlight) return;
     activeRestaurantHeldId = null;
+    activeRestaurantHeldRevision = 0;
+    pendingSharedHoldId = null;
     resetActiveRestaurantOffer();
     cart = [];
     pendingCustomer = null; pendingRedeem = null; pendingCreditUse = 0;
@@ -8518,6 +8978,8 @@ window.openSettleDebt = openSettleDebt;
 window.removeReplacement = removeReplacement;
 window.resumeHeld = resumeHeld;
 window.deleteHeld = deleteHeld;
+window.openLegacyRestaurantHeld = openLegacyRestaurantHeld;
+window.importLegacyRestaurantHeld = importLegacyRestaurantHeld;
 window.openTable = openTable;
 window.addHookahToCart = addHookahToCart;
 window.printProductLabel = printProductLabel;

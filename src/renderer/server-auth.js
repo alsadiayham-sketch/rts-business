@@ -4,6 +4,11 @@ var PLATFORM_AUTH_ORIGIN = 'https://rts-royal.pages.dev';
 
 function nodeRequest(url, options) {
     return new Promise(function (resolve, reject) {
+        var maxResponseBytes = options.maxResponseBytes == null ? 64 * 1024 : options.maxResponseBytes;
+        if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > 2 * 1024 * 1024) {
+            reject(new Error('حد استجابة الخادم غير صالح.'));
+            return;
+        }
         var headers = Object.assign({}, options.headers);
         if (options.body != null) headers['Content-Length'] = Buffer.byteLength(options.body, 'utf8');
         var request = require('node:https').request(url, {
@@ -20,7 +25,7 @@ function nodeRequest(url, options) {
             var size = 0;
             response.on('data', function (chunk) {
                 size += chunk.length;
-                if (size > 64 * 1024) {
+                if (size > maxResponseBytes) {
                     response.destroy(new Error('استجابة خادم المصادقة أكبر من الحد المسموح.'));
                     return;
                 }
@@ -143,11 +148,55 @@ async function supplies(fetchRequest, base, token, method, payload, query) {
     return data;
 }
 
+async function restaurantApi(fetchRequest, base, token, route, method, payload, query) {
+    if (base !== PLATFORM_AUTH_ORIGIN || !token) throw new Error('طلبات المطعم المشتركة تحتاج تسجيل الدخول إلى خادم RTS المعتمد.');
+    if (method !== 'GET' && method !== 'POST') throw new Error('عملية طلبات المطعم غير صالحة.');
+    var parameters = new URLSearchParams(query || {});
+    var suffix = parameters.toString();
+    var response = await fetchRequest(PLATFORM_AUTH_ORIGIN + route + (suffix ? '?' + suffix : ''), {
+        method: method,
+        redirect: 'error',
+        maxResponseBytes: 2 * 1024 * 1024,
+        headers: {
+            Authorization: 'Bearer ' + token,
+            Origin: PLATFORM_AUTH_ORIGIN,
+            'Sec-Fetch-Site': 'none',
+            'Content-Type': 'application/json'
+        },
+        body: method === 'GET' ? undefined : JSON.stringify(payload || {})
+    });
+    var data;
+    try { data = await response.json(); } catch (_) { throw new Error('استجابة طلبات المطعم غير صالحة.'); }
+    if (!response.ok) {
+        var error = new Error(data.error && data.error.message || 'تعذر تحديث طلبات المطعم المشتركة.');
+        error.status = response.status;
+        error.code = data.error && data.error.code;
+        if (error.code === 'POS_AUTH_REQUIRED') error.message = 'انتهت الجلسة أو تغيّرت صلاحيات الحساب. سجّل الدخول مجدداً.';
+        throw error;
+    }
+    return data;
+}
+
+function restaurantOrders(fetchRequest, base, token, method, payload, query) {
+    return restaurantApi(fetchRequest, base, token, '/api/pos-mobile-orders', method, payload, query);
+}
+
+function restaurantConfig(fetchRequest, base, token, method, payload, query) {
+    return restaurantApi(fetchRequest, base, token, '/api/pos-shared-config', method, payload, query);
+}
+
+function restaurantTables(fetchRequest, base, token, method, payload, query) {
+    return restaurantApi(fetchRequest, base, token, '/api/pos-restaurant-tables', method, payload, query);
+}
+
 module.exports = {
     resolveAuthBase: resolveAuthBase,
     authenticate: authenticate,
     nodeRequest: nodeRequest,
     loginErrorMessage: loginErrorMessage,
     employees: employees,
-    supplies: supplies
+    supplies: supplies,
+    restaurantOrders: restaurantOrders,
+    restaurantConfig: restaurantConfig,
+    restaurantTables: restaurantTables
 };

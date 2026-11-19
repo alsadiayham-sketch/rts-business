@@ -806,6 +806,105 @@ app.whenReady().then(async () => {
         assert.equal(await evaluate('cart[0].color'), 'red');
         assert.equal(await evaluate('window.__fixture.error || null'), null);
         console.log('PASS: retail color/size ordering remains intact; no renderer exceptions.');
+        await evaluate(`(async function () {
+            document.querySelectorAll('.modal-overlay').forEach(el => el.style.display = 'none');
+            resetStoreState(); cart = []; pendingCustomer = null; pendingRedeem = null; pendingCreditUse = 0;
+            pendingPrizes = []; appliedRewardIds = []; selectedPayment = 'cash';
+            currentUser = { username: 'fixture-admin', role: 'admin' };
+            licensedBusinessType = 'restaurant'; licenseValid = true;
+            document.getElementById('productSearch').value = '';
+            products = [{ id: 'shared-burger', name: 'برغر مشترك', category: 'وجبات', variants: [{ color: '', size: '100غ', price: 25, cost: 8, stock: 5 }] }];
+            window.sharedFixture = { config: null, tables: null, revision: 0, calls: [], holds: new Map(), responses: new Map(), charges: 0, losePayment: true };
+            var fixtureConfig = { features: { tax: true }, taxPercent: 10, taxIncluded: false, restaurantMenuSections: [{ id: 'shared-mains', name: 'وجبات', order: 0 }] };
+            sharedRestaurantAdapters.config = async function (method, body, query) {
+                if (method === 'GET' && query && query.preview === '1') return { sourceId: 'config-fixture', sourceRevision: 'fixture-revision', config: fixtureConfig, candidates: [] };
+                if (method === 'GET') return { configured: !!sharedFixture.config, revision: sharedFixture.config ? 1 : 0, config: sharedFixture.config };
+                sharedFixture.calls.push({ kind: 'config', body: JSON.parse(JSON.stringify(body)) });
+                sharedFixture.config = fixtureConfig;
+                return { ok: true, configured: true, revision: 1, config: fixtureConfig };
+            };
+            sharedRestaurantAdapters.tables = async function (method, body) {
+                if (method === 'GET') return { configured: !!sharedFixture.tables, revision: sharedFixture.revision, tables: sharedFixture.tables || [] };
+                sharedFixture.calls.push({ kind: 'tables', body: JSON.parse(JSON.stringify(body)) });
+                if (body.action === 'initialize') sharedFixture.tables = body.tables;
+                if (body.action === 'create') sharedFixture.tables.push({ id: 72, name: body.name, archived: false });
+                sharedFixture.revision++;
+                return { ok: true, revision: sharedFixture.revision, tables: sharedFixture.tables, nextTableId: 73 };
+            };
+            sharedRestaurantAdapters.orders = async function (method, body) {
+                if (method === 'GET') return { holds: Array.from(sharedFixture.holds.values()) };
+                sharedFixture.calls.push({ kind: 'orders', body: JSON.parse(JSON.stringify(body)) });
+                if (sharedFixture.responses.has(body.requestId)) return sharedFixture.responses.get(body.requestId);
+                var result;
+                if (body.action === 'hold') {
+                    var held = { id: body.holdId, revision: body.revision + 1, status: 'open', items: body.items, service: body.service, note: body.note, discount: body.discount, createdAtIso: '2026-01-01T10:00:00Z' };
+                    sharedFixture.holds.set(held.id, held); result = { ok: true, hold: held };
+                } else if (body.action === 'quote') result = { ok: true, quoteHash: 'fixture-priced-quote', quote: { total: 22, discount: 5, taxAmount: 2 } };
+                else if (body.action === 'checkout') {
+                    sharedFixture.charges++;
+                    var held = sharedFixture.holds.get(body.holdId);
+                    result = { ok: true, bill: { billNumber: 'POS-M-' + body.holdId, items: [{ productId: 'shared-burger', name: 'برغر مشترك', color: '', size: '100غ', price: 25, qty: 1, total: 25 }],
+                        subtotal: 25, discount: 5, discountType: 'fixed', discountValue: 5, taxRate: 10, taxAmount: 2, total: 22,
+                        paymentMethod: 'cash', restaurantOrder: held.service, createdAtIso: '2026-01-01T10:00:00Z' } };
+                    sharedFixture.holds.delete(body.holdId);
+                } else throw new Error('Unsupported shared fixture operation');
+                sharedFixture.responses.set(body.requestId, result);
+                if (body.action === 'checkout' && sharedFixture.losePayment) {
+                    sharedFixture.losePayment = false; var error = new Error('Committed response lost'); error.status = 503; throw error;
+                }
+                return result;
+            };
+            writeStoredTables([{ id: 71, name: 'طاولة محلية قديمة', archived: false, createdAtIso: '', archivedAtIso: '' }]);
+            heldSales = [{ id: 'original-local-ticket', at: Date.now(), cart: [{ productId: 'shared-burger', name: 'برغر مشترك', color: '', size: '100غ', price: 25, qty: 1 }], restaurantOrder: { type: 'takeaway' }, note: 'نسخة قديمة محفوظة' }];
+            saveHeldSales(); window.originalLocalHeld = localStorage.getItem(heldKey());
+            sharedRestaurantClient.configure(sharedRestaurantAdapters, 'electron-shared');
+            await sharedRestaurantClient.refresh();
+            applyBusinessSurface(); syncRestaurantWorkspace(); switchPage('restaurant');
+            if (!document.querySelector('[data-r-tab="tables"]')) throw new Error('Shared fixture tables tab is missing.');
+            document.querySelector('[data-r-tab="tables"]').click();
+            if (!document.querySelector('[data-r-action="shared-setup"]')) throw new Error('Shared setup control missing: ' + JSON.stringify(sharedRestaurantStatus()));
+            document.querySelector('[data-r-action="shared-setup"]').click();
+            document.querySelector('.restaurant-editor form').requestSubmit();
+        })()`);
+        assert.match(await evaluate('document.querySelector(".restaurant-editor .restaurant-inline-error").textContent'), /حدّث أو أغلق/);
+        assert.equal(await evaluate('sharedFixture.calls.length'), 0);
+        await evaluate(`
+            document.querySelector('.restaurant-editor [name="tables"]').value = 'local';
+            document.querySelector('.restaurant-editor [name="retired"]').value = 'yes';
+            document.querySelector('.restaurant-editor form').requestSubmit();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor") && sharedRestaurantEnabled()');
+        assert.equal(await evaluate('sharedFixture.calls.find(call => call.kind === "config").body.sourceId'), 'config-fixture');
+        assert.equal(await evaluate('getRestaurantTables()[0].id'), 71);
+        assert.equal(await evaluate('legacyRestaurantHeldSales.length'), 1);
+        assert.equal(await evaluate('localStorage.getItem(heldKey()) === originalLocalHeld'), true);
+        assert.equal(await evaluate('!!document.querySelector("[data-r-action=shared-legacy]")'), true);
+        await evaluate(`
+            if (!document.querySelector('[data-r-action="table-new"]')) throw new Error('Shared table creation control is missing.');
+            document.querySelector('[data-r-action="table-new"]').click();
+            document.querySelector('.restaurant-editor [name="name"]').value = 'حديقة مشتركة';
+            document.querySelector('.restaurant-editor form').requestSubmit();
+        `);
+        await waitFor('!document.querySelector(".restaurant-editor") && getRestaurantTables().length === 2');
+        await evaluate(`
+            openTable(71); fixtureDismiss();
+            if (!document.querySelector('[data-id="shared-burger"].restaurant-food-item')) throw new Error('Shared fixture product is missing from the restaurant menu.');
+            document.querySelector('[data-id="shared-burger"].restaurant-food-item').click();
+            fixtureInput('discountInput', '5'); document.getElementById('checkoutBtn').click();
+        `);
+        await waitFor('!checkoutInFlight && document.getElementById("confirmMessage").textContent.includes("22.00")');
+        await evaluate('fixtureDismiss();');
+        await waitFor('checkoutInFlight && _confirmLocked');
+        assert.equal(await evaluate('sharedFixture.charges'), 1);
+        await evaluate(`document.getElementById('confirmModal').dispatchEvent(new MouseEvent('click', { bubbles: true }));`);
+        assert.equal(await evaluate('document.getElementById("confirmModal").style.display'), 'flex');
+        await evaluate('fixtureDismiss();');
+        await waitFor('!checkoutInFlight && cart.length === 0 && currentReceiptBill && currentReceiptBill.total === 22');
+        assert.equal(await evaluate('sharedFixture.charges'), 1);
+        assert.equal(await evaluate('new Set(sharedFixture.calls.filter(call => call.body.action === "checkout").map(call => call.body.requestId)).size'), 1);
+        assert.equal(await evaluate('localStorage.getItem(heldKey()) === originalLocalHeld'), true);
+        assert.equal(await evaluate('window.__fixture.error || null'), null);
+        console.log('PASS: shared setup requires explicit retirement, imports only selected tables, preserves local tickets, and retries one discounted server checkout.');
     } catch (error) {
         if (win) {
             console.error('Renderer exception:', await evaluate('window.__fixture && window.__fixture.error').catch(() => 'unavailable'));

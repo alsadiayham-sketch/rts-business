@@ -3,8 +3,9 @@ const assert = require('node:assert/strict');
 const { validateRestaurantService: validate } = require('../src/renderer/restaurant-service');
 
 test('dine-in requires a real table and takeaway drops delivery-only data', () => {
-    for (const table of ['', 0, -1, 1.5, 61]) assert.equal(validate({ type: 'dinein', table }).ok, false);
+    for (const table of ['', 0, -1, 1.5, 2147483648]) assert.equal(validate({ type: 'dinein', table }).ok, false);
     assert.equal(validate({ type: 'dinein', table: '3' }).order.table, 3);
+    assert.equal(validate({ type: 'dinein', table: '61' }).order.table, 61);
     const takeaway = validate({ type: 'takeaway', address: 'old address', deliveryFee: 7 });
     assert.equal(takeaway.order.deliveryFee, 0);
     assert.equal(takeaway.order.address, '');
